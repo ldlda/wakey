@@ -1,0 +1,9 @@
+[package]
+name = "wakey"
+version = "0.0.0"
+edition = "2024"
+publish = ["gitea"]
+
+[dependencies]
+axum = "0.8.4"
+tokio = "1.47.1"
