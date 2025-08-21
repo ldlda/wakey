@@ -1,4 +1,4 @@
 [target.armv7-unknown-linux-gnueabihf]
 linker = "arm-none-eabi-gcc"
 
-# advices from gpt5
+# advices from gpt5rustup target add armv7-unknown-linux-musleabihf
