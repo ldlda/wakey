@@ -1,9 +1,13 @@
+pub const LDA_MACS: [[u8; 6]; 2] = [
+    [0x04, 0x7c, 0x16, 0x79, 0x6d, 0xee],
+    [0xbc, 0x09, 0x1b, 0xec, 0x65, 0xd0],
+];
+
+
 pub async fn wake(_machine_name: &str) -> io::Result<()> {
-    let mac1 = [0x04, 0x7c, 0x16, 0x79, 0x6d, 0xee];
-    let mac2 = [0xbc, 0x09, 0x1b, 0xec, 0x65, 0xd0];
     let suh = UdpSocket::bind("0.0.0.0:0").await?;
     suh.set_broadcast(true)?;
-    for mac in [mac1, mac2] {
+    for mac in LDA_MACS {
         let pac: Vec<u8> = iter::once([0xff; 6])
             .chain(iter::repeat_n(mac, 16))
             .flatten()
@@ -29,3 +33,13 @@ pub async fn ping_ip<T: ToSocketAddrs>(addr: T) -> bool {
 }
 
 
+// pub async fn get_ips(macs: &[&[u8;6]]) -> Vec<IpAddr> {
+//     /* 
+//         root@AP-AX3000CV2-0A55:~# ip neigh show 192.168.100.94
+//         192.168.100.94 dev eth1.6  FAILED
+//         192.168.100.94 dev br-lan lladdr 04:7c:16:79:6d:ee REACHABLE
+//         192.168.100.94 dev eth1.7  FAILED
+//         192.168.100.94 dev eth1.5  FAILED
+//      */
+
+// }

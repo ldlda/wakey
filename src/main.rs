@@ -1,25 +1,26 @@
-use std::iter;
-
-use tokio::{
-    io,
-    net::{TcpListener, UdpSocket},
-};
 use axum::{Router, response::Html, routing::get};
+use tokio::net::TcpListener;
 
 mod utils;
 use utils::*;
-async fn home() -> Html<&'static str> {
-    Html(
+async fn home() -> Html<String> {
+    Html(format!(
         r#"
       <html>
         <body>
+        <p>the machine is {}!</p>
           <form method="POST" action="/wake">
             <button type="submit">Wake LDA</button>
           </form>
         </body>
       </html>
     "#,
-    )
+        if ping_ip("192.168.100.94:22").await {
+            "on"
+        } else {
+            "off"
+        }
+    ))
 }
 
 async fn wake_handler() -> &'static str {
@@ -40,4 +41,3 @@ async fn main() -> color_eyre::Result<()> {
     axum::serve(port, app.into_make_service()).await?;
     Ok(())
 }
-
