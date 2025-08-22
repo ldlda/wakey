@@ -148,3 +148,52 @@ impl IpNeighLine {
         self.ip = ip;
     }
 }
+
+
+// ideas from copilot:
+
+
+impl NUDState {
+    // higher is "better"/more online
+    pub const fn rank(self) -> u8 {
+        match self {
+            NUDState::Permanent | NUDState::Reachable => 5,
+            NUDState::Stale => 4,
+            NUDState::Delay | NUDState::Probe | NUDState::Incomplete => 3,
+            NUDState::Noarp => 2,
+            NUDState::None => 1,
+            NUDState::Failed => 0,
+        }
+    }
+}
+impl PartialOrd for NUDState {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for NUDState {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.rank().cmp(&other.rank())
+    }
+}
+
+impl IpNeighLine {
+    // score for “local and online”: state, has-mac, v4, iface preference
+    pub fn score(&self) -> (u8, u8, u8, u8) {
+        let iface = self
+            .dev
+            .as_deref()
+            .map(|d| {
+                if d.starts_with("br") || d.starts_with("lan") || d.starts_with("eth") { 2 }
+                else if d.starts_with("wlan") || d.starts_with("wl") { 1 }
+                else { 0 }
+            })
+            .unwrap_or(0);
+        (
+            self.state.rank(),
+            self.mac.is_some() as u8,
+            matches!(self.ip, IpAddr::V4(_)) as u8,
+            iface,
+        )
+    }
+}

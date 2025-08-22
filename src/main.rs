@@ -30,61 +30,63 @@ async fn home() -> Html<String> {
     ))
 }
 
-async fn wake_handler() -> &'static str {
+async fn wake_handler() -> axum::response::Result< &'static str> {
     match wake(MACHINE_NAME).await {
-        Ok(x) if x > 0  => "Packet sent!",
-        _ => "Wake failed",
+        Ok(x) if x > 0 => Ok("Packet sent!"),
+        _ => Err("Wake failed".into()),
     }
 }
 
 async fn status() -> Html<String> {
-    let formatted_ips = match get_ips(MACHINE_NAME).await {
-        Ok(ips) => {
-            let string: String = ips
-                .iter()
-                .map(|ip| format!("<tr><td>{ip}</td></tr>"))
-                .collect();
-            format!(
-                r#"<p>the ips of {m} are:</p>
-<table>
-<tr><th>IP</th></tr>
-{string}
-</table>"#,
-                m = MACHINE_NAME
-            )
-        }
-        Err(e) => format!("<p>error getting ips: {e}</p>"),
-    };
+    //     let formatted_ips = match get_ips(MACHINE_NAME).await {
+    //         Ok(ips) => {
+    //             let string: String = ips
+    //                 .iter()
+    //                 .map(|ip| format!("<tr><td>{ip}</td></tr>"))
+    //                 .collect();
+    //             format!(
+    //                 r#"<p>the ips of {m} are:</p>
+    // <table>
+    // <tr><th>IP</th></tr>
+    // {string}
+    // </table>"#,
+    //                 m = MACHINE_NAME
+    //             )
+    //         }
+    //         Err(e) => format!("<p>error getting ips: {e}</p>"),
+    //     };
     let formatted_macs = match get_macs_2_1(MACHINE_NAME).await {
         Ok(table) => {
             let the: String = table
                 .iter()
-                .map(|(ip, mac)| {
+                .map(|(ip, mac, state)| {
                     let mac_str = // if let Some(mac) = mac {
                         mac.to_string()
                     // } else {
                     //     "None".into()
                     // }
                     ;
-                    format!("<tr><td>{ip}</td><td>{mac_str}</td></tr>")
+                    format!(
+                        "<tr><td>{ip}</td><td>{mac_str}</td><td>{state}</td></tr>",
+                        state = state.dumber_state()
+                    )
                 })
                 .collect();
             format!(
-                r#"<p>the macs here:</p>
+                r#"<p>info of {MACHINE_NAME}:</p>
 <table>
-<tr><th>IP</th><th>MAC</th></tr>
+<tr><th>IP</th><th>MAC</th><th>State</th></tr>
 {the}
 </table>"#
             )
         }
-        Err(e) => format!("<p>cant get macs either: {e}</p>"),
+        Err(e) => format!("<p>errors getting table for {MACHINE_NAME}: {e}</p>"),
     };
 
     Html(format!(
         r#"
 <html>
 <body>
-{formatted_ips}
 {formatted_macs}
 </body>
 </html>     

@@ -10,41 +10,28 @@ pub static LDA_MACS_2: LazyLock<[MacAddr; 2]> = LazyLock::new(|| LDA_MACS.map(Ma
 pub async fn wake(machine_name: &str) -> io::Result<u32> {
     let suh = UdpSocket::bind("0.0.0.0:0").await?;
     suh.set_broadcast(true)?;
-    let mut macs = get_macs_2_1(machine_name).await.unwrap_or_default();
-    macs.extend(LDA_MACS_2.map(|m| ([192, 168, 100, 255].into(), m)));
-    let len = macs.len() as u32;
-    // count - count fail
-    let mut count_fail = 0;
-    for (ip, mac) in macs.into_iter() {
-        // let Some(mac) = mac else {
-        //     continue;
-        // };
+    let mut macs = get_macs_2_mac(machine_name).await.unwrap_or_default();
+    macs.extend(*LDA_MACS_2);
+    let mut sent_ok = 0;
+    for mac in macs {
         let mb = mac.as_bytes();
-        let start = [0xff; 6];
-        let pac: Vec<u8> = iter::once(start.as_slice())
-            .chain(iter::repeat_n(mb, 16))
-            // what happens here?
-            .flatten()
-            .copied()
-            .collect();
-        suh.send_to(&pac, (ip, 9))
+
+        let mut pac = [0; 6 + 6 * 16]; // 6x FF + 16x mac6
+        pac[..6].fill(0xff);
+        for i in 1..=16 {
+            pac[i * 6..(i + 1) * 6].copy_from_slice(mb);
+        }
+
+        match suh
+            .send_to(&pac, (IpAddr::from([192, 168, 100, 255]), 9))
             .await
-            .inspect_err(|e| {
-                eprintln!("ping error: {e}");
-                count_fail += 1;
-            })
-            .ok()
-            .inspect(|f| {
-                if *f < (6 + 16 * 6) {
-                    // rare ass code path
-                    eprintln!("not complete transmission");
-                    count_fail += 1;
-                }
-            }); // type shit
-        // suh.send_to(&pac, "192.168.100.255:9").await?; // type good
-        // suh.send_to(&pac, "255.255.255.255:9").await?; // type ass; this doesnt work somehow.
+        {
+            Ok(n) if n == pac.len() => sent_ok += 1,
+            Ok(n) => eprintln!("partial send ({n}/{})", pac.len()),
+            Err(e) => eprintln!("send error: {e}"),
+        }
     }
-    Ok(len - count_fail)
+    Ok(sent_ok)
 }
 use std::{collections::HashSet, iter, net::IpAddr, str::FromStr, sync::LazyLock, time::Duration};
 
@@ -55,7 +42,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::arpparse::{self, IpNeighLine};
+use crate::arpparse::{self, IpNeighLine, NUDState};
 
 /// generic so you can do "123.45.67.89:22" or "lda.lan:22" as an input
 // this is so bad
@@ -84,7 +71,7 @@ pub async fn get_macs(machine_name: &str) -> io::Result<Vec<(IpAddr, MacAddr)>> 
         .map(|ip| {
             let ip = ip.to_canonical();
             async move {
-                let o = exec_command("ip", ["neigh", "show", "to", &ip.to_string()])
+                let o = exec_command("ip", ["neigh", "show", "to", &ip.to_string(), "dev", "br-lan"])
                     .await
                     .ok()?;
                 o.status.success().then(|| {
@@ -112,7 +99,7 @@ pub async fn get_macs_1(machine_name: &str) -> io::Result<Vec<arpparse::IpNeighL
     let futures = ips.iter().map(|ip| {
         let ip = ip.to_canonical();
         async move {
-            let o = exec_command("ip", ["neigh", "show", "to", &ip.to_string()]).await?;
+            let o = exec_command("ip", ["neigh", "show", "to", &ip.to_string(), "dev", "br-lan"]).await?;
             if !o.status.success() {
                 return Err(io::Error::other(format!(
                     "`ip neigh` failed for {ip} (status: {st}): {err}",
@@ -147,8 +134,33 @@ pub async fn get_macs_2(machine_name: &str) -> io::Result<HashSet<(IpAddr, MacAd
     Ok(get_macs(machine_name).await?.into_iter().collect())
 }
 
-pub async fn get_macs_2_1(machine_name: &str) -> io::Result<HashSet<(IpAddr, MacAddr)>> {
-    Ok(get_macs_1(machine_name).await?.into_iter().filter_map(|IpNeighLine { ip, dev: _, mac, state: _ }| mac.map(|mac| (ip, mac))).collect())
+pub async fn get_macs_2_1(machine_name: &str) -> io::Result<HashSet<(IpAddr, MacAddr, NUDState)>> {
+    Ok(get_macs_1(machine_name)
+        .await?
+        .into_iter()
+        .filter_map(
+            |IpNeighLine {
+                 ip,
+                 dev: _,
+                 mac,
+                 state,
+             }| mac.map(|mac| (ip, mac, state)),
+        )
+        .collect())
+}
+pub async fn get_macs_2_mac(machine_name: &str) -> io::Result<HashSet<MacAddr>> {
+    Ok(get_macs_1(machine_name)
+        .await?
+        .into_iter()
+        .filter_map(
+            |IpNeighLine {
+                 ip: _,
+                 dev: _,
+                 mac,
+                 state: _,
+             }| mac,
+        )
+        .collect())
 }
 
 pub fn to_arr(macstr: &str) -> Option<[u8; 6]> {

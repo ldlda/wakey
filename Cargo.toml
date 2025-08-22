@@ -12,3 +12,7 @@ macaddr = "1.0.1"
 strum = { version = "0.27.2", features = ["derive", "strum_macros"] }
 thiserror = "2.0.16"
 tokio = { version = "1.47.1", features = ["fs", "process", "rt-multi-thread"] }
+
+[profile.release]
+opt-level = "z"
+strip = true
