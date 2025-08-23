@@ -11,6 +11,8 @@
 use std::{net::IpAddr, str::FromStr};
 
 use macaddr::MacAddr;
+use serde::{Deserialize, Serialize, Serializer, de};
+use serde_with::skip_serializing_none;
 use strum::{Display, EnumString};
 
 use crate::arpparse::error::IPNeighParseError;
@@ -22,19 +24,35 @@ mod error;
 /// status  { permanent | noarp | stale | reachable | none | incomplete | delay | probe | failed } (ip neigh help)
 /// so you can see its damn good
 ///
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+#[skip_serializing_none]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, serde::Serialize)]
 pub struct IpNeighLine {
     pub ip: IpAddr,
     pub dev: Option<String>,
     /// link layer address
+    #[serde(serialize_with = "ser_opm")]
     pub mac: Option<MacAddr>,
     /// Neighbour Unreachability    Detection
     pub state: NUDState,
 }
 
-#[derive(Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash)]
+pub fn ser_opm<S: Serializer>(bro: &Option<MacAddr>, ser: S) -> Result<S::Ok, S::Error> {
+    Option::<String>::serialize(&bro.as_ref().map(ToString::to_string), ser)
+}
+
+pub fn des_opm<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<&str>::deserialize(des)?
+        .map(MacAddr::from_str)
+        .transpose()
+        .map_err(de::Error::custom)
+}
+
+#[derive(Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, serde::Serialize)]
 #[strum(serialize_all = "UPPERCASE")]
+#[serde(rename_all = "UPPERCASE")]
 pub enum NUDState {
     /// the neighbour entry is valid forever and can
     /// be only be removed administratively.
@@ -144,14 +162,18 @@ impl IpNeighLine {
     pub fn set_ip(&mut self, ip: IpAddr) {
         self.ip = ip;
     }
-    pub fn set_state(&mut self, ip: IpAddr) {
-        self.ip = ip;
+    pub fn set_state(&mut self, state: NUDState) {
+        self.state = state;
+    }
+    pub fn ip(self, ip: IpAddr) -> Self {
+        Self { ip, ..self }
+    }
+    pub fn state(self, state: NUDState) -> Self {
+        Self { state, ..self }
     }
 }
 
-
 // ideas from copilot:
-
 
 impl NUDState {
     // higher is "better"/more online
@@ -184,9 +206,13 @@ impl IpNeighLine {
             .dev
             .as_deref()
             .map(|d| {
-                if d.starts_with("br") || d.starts_with("lan") || d.starts_with("eth") { 2 }
-                else if d.starts_with("wlan") || d.starts_with("wl") { 1 }
-                else { 0 }
+                if d.starts_with("br") || d.starts_with("lan") || d.starts_with("eth") {
+                    2
+                } else if d.starts_with("wlan") || d.starts_with("wl") {
+                    1
+                } else {
+                    0
+                }
             })
             .unwrap_or(0);
         (

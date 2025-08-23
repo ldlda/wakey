@@ -33,7 +33,7 @@ pub async fn wake(machine_name: &str) -> io::Result<u32> {
     }
     Ok(sent_ok)
 }
-use std::{collections::HashSet, iter, net::IpAddr, str::FromStr, sync::LazyLock, time::Duration};
+use std::{collections::HashSet, net::IpAddr, sync::LazyLock, time::Duration};
 
 use macaddr::MacAddr;
 use tokio::{
@@ -62,44 +62,17 @@ pub async fn get_ips(machine_name: &str) -> io::Result<Vec<IpAddr>> {
         .map(|c| c.ip())
         .collect())
 }
-// not used lets go
-pub async fn get_macs(machine_name: &str) -> io::Result<Vec<(IpAddr, MacAddr)>> {
-    let ips = get_ips(machine_name).await?;
-    let futures = ips
-        .iter()
-        // .filter(|f| f.is_ipv4())
-        .map(|ip| {
-            let ip = ip.to_canonical();
-            async move {
-                let o = exec_command("ip", ["neigh", "show", "to", &ip.to_string(), "dev", "br-lan"])
-                    .await
-                    .ok()?;
-                o.status.success().then(|| {
-                    let stdout = String::from_utf8_lossy(&o.stdout);
-                    stdout
-                        .lines()
-                        .filter_map(|line| {
-                            let mut parts = line.split_whitespace();
-                            parts.find(|&x| x == "lladdr")?;
-                            parts
-                                .next()
-                                .and_then(|mac| MacAddr::from_str(mac).ok()) // 100% correct because its ip neigh brother they know how to code.
-                                .map(|mac| (ip, mac))
-                        })
-                        .collect::<Vec<_>>()
-                })
-            }
-        });
-    let results = futures::future::join_all(futures).await;
-    Ok(results.into_iter().flatten().flatten().collect())
-}
 
 pub async fn get_macs_1(machine_name: &str) -> io::Result<Vec<arpparse::IpNeighLine>> {
     let ips = get_ips(machine_name).await?;
     let futures = ips.iter().map(|ip| {
         let ip = ip.to_canonical();
         async move {
-            let o = exec_command("ip", ["neigh", "show", "to", &ip.to_string(), "dev", "br-lan"]).await?;
+            let o = exec_command(
+                "ip",
+                ["neigh", "show", "to", &ip.to_string(), "dev", "br-lan"],
+            )
+            .await?;
             if !o.status.success() {
                 return Err(io::Error::other(format!(
                     "`ip neigh` failed for {ip} (status: {st}): {err}",
@@ -130,10 +103,6 @@ async fn exec_command<S: AsRef<std::ffi::OsStr>>(
     u.output().await
 }
 
-pub async fn get_macs_2(machine_name: &str) -> io::Result<HashSet<(IpAddr, MacAddr)>> {
-    Ok(get_macs(machine_name).await?.into_iter().collect())
-}
-
 pub async fn get_macs_2_1(machine_name: &str) -> io::Result<HashSet<(IpAddr, MacAddr, NUDState)>> {
     Ok(get_macs_1(machine_name)
         .await?
@@ -161,23 +130,4 @@ pub async fn get_macs_2_mac(machine_name: &str) -> io::Result<HashSet<MacAddr>> 
              }| mac,
         )
         .collect())
-}
-
-pub fn to_arr(macstr: &str) -> Option<[u8; 6]> {
-    let mut this = [0u8; 6];
-    let c: Vec<_> = macstr.split(':').collect();
-    (c.len() == 6).then(|| {
-        for (n, h) in this.iter_mut().zip(c) {
-            *n = u8::from_str_radix(h, 16).ok()?;
-        }
-        Some(this)
-    })?
-}
-
-pub fn back_to_str(thing: &[u8; 6]) -> String {
-    thing
-        .iter()
-        .map(|n| format!("{n:02x}"))
-        .collect::<Vec<String>>()
-        .join(":")
 }
