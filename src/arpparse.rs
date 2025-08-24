@@ -12,11 +12,12 @@ use std::{net::IpAddr, str::FromStr};
 
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize, Serializer, de};
-use serde_with::skip_serializing_none;
+use serde_with::skip_serializing_none ;
 use strum::{Display, EnumString};
 
 use crate::arpparse::error::IPNeighParseError;
 mod error;
+mod r#impl; // custom (de)serialization impls
 /// ip neigh has some cool shit.
 /// IP
 /// dev DEV | None
@@ -32,26 +33,30 @@ pub struct IpNeighLine {
     /// link layer address
     #[serde(serialize_with = "ser_opm")]
     pub mac: Option<MacAddr>,
-    /// Neighbour Unreachability    Detection
+    /// Neighbour Unreachability Detection
     pub state: NUDState,
 }
 
+/// serialize an [`Option<MacAddr>`]
 pub fn ser_opm<S: Serializer>(bro: &Option<MacAddr>, ser: S) -> Result<S::Ok, S::Error> {
     Option::<String>::serialize(&bro.as_ref().map(ToString::to_string), ser)
 }
 
+/// deserialize an [`Option<MacAddr>`]
 pub fn des_opm<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     Option::<&str>::deserialize(des)?
-        .map(MacAddr::from_str)
+        .map(str::parse)
         .transpose()
         .map_err(de::Error::custom)
 }
 
+// NUDState custom Deserialize now lives in arpparse/impl.rs; use serde_with OneOrMany for Vec
+
 #[derive(Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, serde::Serialize)]
-#[strum(serialize_all = "UPPERCASE")]
+#[strum(serialize_all = "UPPERCASE", ascii_case_insensitive)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum NUDState {
     /// the neighbour entry is valid forever and can
@@ -92,6 +97,20 @@ pub enum NUDState {
 }
 
 impl NUDState {
+    /// Argument form expected by `ip neigh ... nud <state>` (lowercase)
+    pub const fn as_ip_neigh_arg(self) -> &'static str {
+        match self {
+            NUDState::Permanent => "permanent",
+            NUDState::Reachable => "reachable",
+            NUDState::Stale => "stale",
+            NUDState::Delay => "delay",
+            NUDState::Probe => "probe",
+            NUDState::Incomplete => "incomplete",
+            NUDState::Noarp => "noarp",
+            NUDState::None => "none",
+            NUDState::Failed => "failed",
+        }
+    }
     /// dumb UI label
     pub fn dumber_state(&self) -> &'static str {
         match self {

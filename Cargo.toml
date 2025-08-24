@@ -1,11 +1,12 @@
 [package]
 name = "wakey"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 publish = ["gitea"]
 
 [dependencies]
 axum = { version = "0.8.4", features = ["macros"] }
+axum-extra = { version = "0.10.1", features = ["query"] }
 color-eyre = "0.6.5"
 futures = "0.3.31"
 macaddr = { version = "1.0.1", features = ["serde", "serde_std"] }

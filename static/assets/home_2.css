@@ -111,3 +111,18 @@ pre {
 a {
   color: #93c5fd;
 }
+
+#html {
+  overflow-y: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+#html::-webkit-scrollbar {
+  display: none;
+}
+
+.filters {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}

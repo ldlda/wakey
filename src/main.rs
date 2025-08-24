@@ -7,12 +7,15 @@ use axum::{
 };
 use tokio::net::TcpListener;
 mod arpparse;
-mod route;
+mod r#static;
 mod utils;
+mod route;
+
 use crate::{
     route::DeviceQuery,
     utils::{ping::ping_ip, query::get_macs_2_1, wake::wake},
 };
+use r#static as st;
 
 const MACHINE_NAME: &str = "lda.lan";
 
@@ -110,9 +113,14 @@ async fn main() -> color_eyre::Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn main() {
-    use std::process::exit;
+fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
 
-    eprintln!("OS not supported! run this on your ahh router!");
-    exit(1)
+    // use crate::arpparse::NUDState;
+    // println!("{}", NUDState::Reachable.to_string().to_lowercase());
+    // println!("{:?}", std::net::TcpStream::connect("svuhuvshdv:331"));
+    // // Err(Os { code: 11001, kind: Uncategorized, message: "No such host is known." })
+    Err(color_eyre::eyre::eyre!(
+        "OS not supported! run this on your ahh router!"
+    ))
 }

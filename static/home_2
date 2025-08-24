@@ -26,7 +26,8 @@
       </div>
       <div class="row muted" style="gap: 16px">
         <span
-          >Uses query (?name=...) to view its status.<!-- and header (X-Target-Name) so either extractor
+          >Uses query <span title="available keys: name, ip, dev, nud">(?name=...)</span> on this page to view the
+          status.<!-- and header (X-Target-Name) so either extractor
           path works. --></span
         >
         <a id="permalink" href="#">permalink</a>

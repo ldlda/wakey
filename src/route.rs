@@ -2,17 +2,28 @@ use std::net::IpAddr;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query},
+    extract::Path,
     http::{StatusCode, header},
     response::{Html, IntoResponse, Redirect},
     routing::get,
 };
+use axum_extra::extract::Query;
 use macaddr::MacAddr;
+use serde_with::skip_serializing_none;
 
-use crate::{MACHINE_NAME, arpparse::{self, des_opm}, status_build, utils::query::get_macs_1};
+// use serde_with::skip_serializing_none;
+// use serde::{Deserialize, de};
+// use serde_with::{OneOrMany, serde_as};
+
+use crate::{
+    MACHINE_NAME,
+    arpparse::{self, NUDState, des_opm},
+    st, status_build,
+    utils::{de_many, query::get_macs},
+};
 
 pub async fn home_2() -> Html<&'static str> {
-    Html(include_str!("../static/home_2"))
+    Html(st::HOME_2)
 }
 async fn home_2_css() -> impl IntoResponse {
     (
@@ -20,7 +31,7 @@ async fn home_2_css() -> impl IntoResponse {
             (header::CONTENT_TYPE, "text/css; charset=utf-8"),
             (header::CACHE_CONTROL, "public, max-age=300"),
         ],
-        include_str!("../static/assets/home_2.css"),
+        st::HOME_2_CSS,
     )
 }
 async fn home_2_js() -> impl IntoResponse {
@@ -29,7 +40,7 @@ async fn home_2_js() -> impl IntoResponse {
             (header::CONTENT_TYPE, "application/javascript"),
             (header::CACHE_CONTROL, "public, max-age=300"),
         ],
-        include_str!("../static/assets/home_2.js"),
+        st::HOME_2_JS,
     )
 }
 
@@ -44,42 +55,102 @@ pub fn home_2_route() -> Router {
 #[derive(Debug, Default, Clone, Hash, serde::Deserialize)]
 pub struct DeviceQuery {
     pub name: Option<String>,
-    ip: Option<IpAddr>,
+    // Accept single or many; ignore blanks
+    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
+    ip: Vec<IpAddr>,
     #[serde(default, deserialize_with = "des_opm")]
     mac: Option<MacAddr>,
+    /// optional interface filter (e.g., br-lan)
+    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
+    pub dev: Vec<String>,
+    /// optional NUD state filter; accepts any case (e.g., reachable, REACHABLE)
+    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
+    pub nud: Vec<NUDState>,
 }
 #[derive(Debug, Default, Clone, Hash, serde::Deserialize)]
 pub struct NamePath {
     name: String,
 }
-
+#[skip_serializing_none]
 #[derive(Debug, Default, serde::Serialize)]
 pub struct Status {
-    name: String,
+    name: Option<String>,
     table: Vec<arpparse::IpNeighLine>,
+    filters: Filters,
 }
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct Filters {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    ip: Vec<IpAddr>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    dev: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    nud: Vec<NUDState>,
+}
+#[skip_serializing_none]
 #[derive(Debug, serde::Serialize)]
 pub struct StatusError {
-    name: String,
+    name: Option<String>,
     error: String,
 }
-// pub struct statuserror? table? and error? on status? what is the strat here
 
 pub async fn get_status_json(
     // p: Option<Path<NamePath>>,
-    Query(DeviceQuery { name, .. }): Query<DeviceQuery>,
+    Query(DeviceQuery {
+        name, ip, dev, nud, ..
+    }): Query<DeviceQuery>,
 ) -> impl IntoResponse {
-    let name = /* p
-        .map(|Path(n)| n.name)
-        .or */(name)
-        .unwrap_or_else(|| MACHINE_NAME.to_owned());
-    match get_macs_1(&name).await {
+    fn to_opts<T: Clone>(slice: &[T]) -> Vec<Option<T>> {
+        if slice.is_empty() {
+            vec![None]
+        } else {
+            slice.iter().cloned().map(Some).collect()
+        }
+    }
+    /*     let name = /* p
+    .map(|Path(n)| n.name)
+    .or */(name)
+    // .unwrap_or_else(|| MACHINE_NAME.to_owned())
+    ; */
+    // ip/dev/nud already parsed; assemble options
+    let ips_opt = if ip.is_empty() {
+        None
+    } else {
+        Some(ip.clone())
+    };
+    let dev_opts: Vec<Option<String>> = to_opts(&dev);
+    let nud_opts: Vec<Option<NUDState>> = to_opts(&nud);
+
+    let filters = Filters { ip, dev, nud };
+
+    // Run combinations of dev/nud and merge results
+    let mut tasks = Vec::new();
+    for d in &dev_opts {
+        for n in &nud_opts {
+            tasks.push(get_macs(
+                name.as_deref(),
+                ips_opt.as_deref(),
+                d.as_deref(),
+                *n,
+            ));
+        }
+    }
+
+    match futures::future::try_join_all(tasks)
+        .await
+        .map(|v| v.into_iter().flatten().collect::<Vec<_>>())
+    {
         Ok(table) => {
             // let canonical = format!("/api/status?name={name}");
             (
                 StatusCode::OK,
                 // [(header::LINK, format!("<{canonical}>; rel=\"canonical\""))],
-                Json(Status { name, table }),
+                Json(Status {
+                    name,
+                    table,
+                    filters,
+                }),
             )
                 .into_response()
         }

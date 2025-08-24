@@ -50,7 +50,18 @@ function rankState(s) {
   );
 }
 
-/** @param {{ name: String, table: Array<{ ip, dev, mac, state }>} | { name: String, error }} data from /api/status */
+function buildStatusUrl(name) {
+  const u = new URL("/api/status", location.origin);
+  if (name) u.searchParams.set("name", name);
+  // forward multi-value filters from current page URL
+  for (const k of ["ip", "dev", "nud"]) {
+    const vals = qs.getAll(k);
+    for (const v of vals) u.searchParams.append(k, v);
+  }
+  return u;
+}
+
+/** @param {{ name: String, table: Array<{ ip, dev, mac, state }>, filters: {ip, dev, nud}} | { name: String, error }} data from /api/status */
 function renderStatus(data) {
   const tbl = document.createElement("table");
   tbl.innerHTML = `<tr><th>IP</th><th>MAC</th><th>State</th><th>IF</th></tr>`;
@@ -62,6 +73,22 @@ function renderStatus(data) {
     tbl.appendChild(tr);
   }
   elHtml.innerHTML = "";
+  // Optional: show applied filters
+  if (data.filters) {
+    const parts = [];
+    if (Array.isArray(data.filters.ip) && data.filters.ip.length)
+      parts.push(`ip=[${data.filters.ip.join(", ")}]`);
+    if (Array.isArray(data.filters.dev) && data.filters.dev.length)
+      parts.push(`dev=[${data.filters.dev.join(", ")}]`);
+    if (Array.isArray(data.filters.nud) && data.filters.nud.length)
+      parts.push(`nud=[${data.filters.nud.join(", ")}]`);
+    if (parts.length) {
+      const info = document.createElement("div");
+      info.className = "filters";
+      info.textContent = `Filters: ${parts.join("; ")}`;
+      elHtml.appendChild(info);
+    }
+  }
   elHtml.appendChild(tbl);
 
   if ((data.table || []).length > 0) {
@@ -79,13 +106,21 @@ function renderStatus(data) {
 
 async function fetchStatus(name) {
   setPill("warn", "checking…");
-  elLog.textContent = "GET /api/status?name=" + name;
+  const u = buildStatusUrl(name);
+  elLog.textContent = "GET " + u.pathname + u.search;
   elHtml.innerHTML = "";
   try {
-    const r = await fetch(`/api/status?name=${encodeURIComponent(name)}`);
+    const r = await fetch(u);
     if (!r.ok) {
-      const err = await r.json().catch((_) => (elHtml.textContent = r.text));
-      elLog.textContent = `status error: ${err.error || r.status}`;
+      let msg = String(r.status);
+      try {
+        const err = await r.clone().json();
+        msg = err.error || JSON.stringify(err);
+      } catch {
+        msg = await r.text();
+      }
+      elLog.textContent = `status error: ${msg}`;
+    //   elHtml.textContent = msg;
       setPill("bad", "error");
       return;
     }
@@ -107,8 +142,8 @@ async function sendWake(name) {
     });
     const t = await r.text();
     elLog.textContent = t || "ok";
-    // Optional: recheck after small delay
-    setTimeout(() => fetchStatus(name), 600);
+    // Optional: recheck after medium delay
+    setTimeout(() => fetchStatus(name), 1500);
   } catch (e) {
     elLog.textContent = "wake error: " + e;
     setPill("bad", "error");
@@ -137,7 +172,7 @@ elName.addEventListener("keydown", (e) => {
 const initial = loadName();
 if (initial) {
   elName.value = initial;
-  // setLink(initial); // when the permalink doing YOUR job
+  setLink(initial); // when the permalink doing YOUR job
   // auto-check on load in this A/B page
   fetchStatus(initial);
 } else {
