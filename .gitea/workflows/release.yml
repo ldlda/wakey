@@ -14,12 +14,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Ensure toolchain and install cross
+      - name: Ensure toolchain and cross
         shell: pwsh
         run: |
           rustc -V
           cargo -V
-          cargo install cross --git https://github.com/cross-rs/cross
+          if (-not (Get-Command cross -ErrorAction SilentlyContinue)) { cargo install cross --git https://github.com/cross-rs/cross }
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -41,7 +41,7 @@ jobs:
           ./scripts/package_rootfs.ps1 -Version "${{ github.ref_name }}" -Target armv7-unknown-linux-musleabihf
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: wakey-rootfs
           path: dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz
@@ -52,19 +52,4 @@ jobs:
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
         run: |
-          if (-not $env:GITEA_TOKEN) { throw "Missing secrets.GITEA_TOKEN" }
-          $repoParts = $env:GITHUB_REPOSITORY -split '/'
-          $owner = $repoParts[0]
-          $name = $repoParts[1]
-          $api = $env:GITHUB_API_URL
-          $tag = $env:GITHUB_REF_NAME
-          $asset = Get-ChildItem dist\wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz | Select-Object -First 1
-          if (-not $asset) { throw "No rootfs artifact found in dist" }
-          $headers = @{ Authorization = "token $env:GITEA_TOKEN" }
-          $body = @{ tag_name=$tag; name=$tag; draft=$false; prerelease=$false } | ConvertTo-Json
-          $release = Invoke-RestMethod -Headers $headers -Uri "$api/repos/$owner/$name/releases" -Method Post -Body $body -ContentType 'application/json'
-          $rid = $release.id
-          if (-not $rid) { throw "Failed to create release: $($release | ConvertTo-Json -Depth 5)" }
-          $uploadUri = "$api/repos/$owner/$name/releases/$rid/assets?name=$($asset.Name)"
-          Invoke-WebRequest -Headers $headers -Uri $uploadUri -Method Post -InFile $asset.FullName -ContentType 'application/gzip' | Out-Null
-          Write-Host "Release published: tag $tag with asset $($asset.Name)"
+          ./scripts/ci_gitea_release.ps1 -Tag "$env:GITHUB_REF_NAME" -AssetPattern "dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz"
