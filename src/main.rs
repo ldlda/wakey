@@ -1,16 +1,27 @@
-use axum::{Router, response::Html, routing::get};
+use axum::{
+    Router,
+    extract::Query,
+    http::StatusCode,
+    response::{Html, IntoResponse},
+    routing::{get, post},
+};
 use tokio::net::TcpListener;
 mod arpparse;
 mod route;
 mod utils;
-use route::*;
-use utils::*;
+use crate::{
+    route::DeviceQuery,
+    utils::{ping::ping_ip, query::get_macs_2_1, wake::wake},
+};
+
 const MACHINE_NAME: &str = "lda.lan";
+
 async fn home() -> Html<String> {
     Html(format!(
         r#"
       <html>
         <body>
+        <p><a href="/home_2">Alternate UI</a></p>
         <p>the machine is {}! <a href="/status">Status</a></p>
           <form method="POST" action="/wake">
             <button type="submit">Wake LDA</button>
@@ -31,32 +42,13 @@ async fn home() -> Html<String> {
     ))
 }
 
-async fn wake_handler() -> axum::response::Result<&'static str> {
-    match wake(MACHINE_NAME).await {
-        Ok(x) if x > 0 => Ok("Packet sent!"),
-        _ => Err("Wake failed".into()),
+async fn wake_handler(
+    Query(DeviceQuery { name }): Query<DeviceQuery>,
+) -> axum::response::Result<impl IntoResponse> {
+    match wake(name.as_deref().unwrap_or(MACHINE_NAME)).await {
+        Ok(x) if x > 0 => Ok((StatusCode::ACCEPTED, format!("{x} packets sent!"))),
+        _ => Err((StatusCode::GATEWAY_TIMEOUT, "Wake failed").into()),
     }
-}
-
-async fn status() -> Html<String> {
-    //     let formatted_ips = match get_ips(MACHINE_NAME).await {
-    //         Ok(ips) => {
-    //             let string: String = ips
-    //                 .iter()
-    //                 .map(|ip| format!("<tr><td>{ip}</td></tr>"))
-    //                 .collect();
-    //             format!(
-    //                 r#"<p>the ips of {m} are:</p>
-    // <table>
-    // <tr><th>IP</th></tr>
-    // {string}
-    // </table>"#,
-    //                 m = MACHINE_NAME
-    //             )
-    //         }
-    //         Err(e) => format!("<p>error getting ips: {e}</p>"),
-    //     };
-    Html(status_build(MACHINE_NAME).await)
 }
 
 pub async fn status_build(machine_name: &str) -> String {
@@ -101,16 +93,15 @@ pub async fn status_build(machine_name: &str) -> String {
 #[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
+    use crate::route::{api_status, get_status_2, home_2_route};
+
     color_eyre::install()?;
     let app = Router::new()
         .route("/", get(home))
-        .route("/home_2", get(home_2))
-        .route("/wake", axum::routing::post(wake_handler))
-        // .route("/wake", axum::routing::post(wake_handler))
-        // .route("/status", get(status))
+        .merge(home_2_route())
+        .route("/wake", post(wake_handler))
         .route("/status", get(get_status_2))
-        .route("/api/status/{name}", get(get_status_json))
-        ;
+        .merge(api_status());
 
     let port = TcpListener::bind("0.0.0.0:12012").await?;
     axum::serve(port, app.into_make_service()).await?;

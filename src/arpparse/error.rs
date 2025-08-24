@@ -5,11 +5,11 @@ use thiserror::Error;
 
 #[derive(Debug, Display, Error)]
 pub enum IPNeighParseError {
-    IpWhere,
+    IpWhere, // i never seen a ip neigh where the first thing aint an ip
     IpParseError(AddrParseError),
-    DevWhere,
+    // DevWhere,
     MacParseError(macaddr::ParseError),
-    StateWhere,
+    StateWhere, // i never seen a ip neigh without the big FAILED at the end
     StateParseError(strum::ParseError),
 }
 

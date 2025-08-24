@@ -4,126 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>wakey • home_2</title>
-    <style>
-      :root {
-        color-scheme: light dark;
-        --bg: #0b0b0b;
-        --fg: #e6e6e6;
-        --muted: #888;
-        --ok: #17a34a;
-        --warn: #d97706;
-        --bad: #dc2626;
-        --btn: #2563eb;
-        --card: #111827;
-      }
-      html,
-      body {
-        margin: 0;
-        padding: 0;
-        font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-      }
-      body {
-        display: flex;
-        min-height: 100dvh;
-        align-items: center;
-        justify-content: center;
-        background: var(--bg);
-        color: var(--fg);
-      }
-      .wrap {
-        width: min(900px, 95vw);
-        display: grid;
-        gap: 12px;
-      }
-      header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      h1 {
-        font-size: 18px;
-        margin: 0;
-        font-weight: 600;
-      }
-      .muted {
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .row {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-      input[type="text"] {
-        flex: 1 1 240px;
-        padding: 10px 12px;
-        border-radius: 10px;
-        border: 1px solid #2a2a2a;
-        background: #0f0f0f;
-        color: var(--fg);
-        outline: none;
-      }
-      button {
-        padding: 10px 14px;
-        border-radius: 10px;
-        border: 1px solid #2a2a2a;
-        background: var(--btn);
-        color: white;
-        cursor: pointer;
-      }
-      button.secondary {
-        background: #1f2937;
-      }
-      button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .pill {
-        display: inline-block;
-        padding: 4px 8px;
-        border-radius: 999px;
-        font-size: 12px;
-        border: 1px solid #2a2a2a;
-      }
-      .ok {
-        background: #052e1a;
-        border-color: #064e3b;
-        color: #86efac;
-      }
-      .warn {
-        background: #2b1800;
-        border-color: #7c2d12;
-        color: #fbbf24;
-      }
-      .bad {
-        background: #330b0b;
-        border-color: #7f1d1d;
-        color: #fca5a5;
-      }
-      .card {
-        border: 1px solid #2a2a2a;
-        border-radius: 12px;
-        padding: 12px;
-        background: var(--card);
-      }
-      #out {
-        min-height: 100px;
-      }
-      pre {
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        margin: 0;
-      }
-      a {
-        color: #93c5fd;
-      }
-    </style>
+    <link rel="stylesheet" href="/home_2.css" />
+    <script type="module" src="/home_2.js" defer></script>
   </head>
   <body>
     <div class="wrap">
       <header>
-        <h1>home_2<!--  <span class="muted">A/B test page</span> --></h1>
+        <h1>home_2 <span class="muted">A/B test page</span></h1>
         <span id="status-pill" class="pill warn">unknown</span>
       </header>
 
@@ -139,7 +26,7 @@
       </div>
       <div class="row muted" style="gap: 16px">
         <span
-          >Uses query (?name=...) on the age old /status.<!-- and header (X-Target-Name) so either extractor
+          >Uses query (?name=...) to view its status.<!-- and header (X-Target-Name) so either extractor
           path works. --></span
         >
         <a id="permalink" href="#">permalink</a>
@@ -150,110 +37,5 @@
         <div id="html"></div>
       </section>
     </div>
-
-    <script>
-      const qs = new URLSearchParams(location.search);
-      const $ = (id) => document.getElementById(id);
-      const elName = $("name");
-      const elCheck = $("check");
-      const elWake = $("wake");
-      const elLog = $("log");
-      const elHtml = $("html");
-      const pill = $("status-pill");
-      const link = $("permalink");
-
-      function setPill(kind, text) {
-        pill.className = `pill ${kind}`;
-        pill.textContent = text;
-      }
-      function setLink(name) {
-        const url = new URL(location.href);
-        if (name) url.searchParams.set("name", name);
-        else url.searchParams.delete("name");
-        history.replaceState(null, "", url);
-        link.href = url.toString();
-      }
-      function getName() {
-        return (elName.value || "").trim();
-      }
-      function saveName(name) {
-        try {
-          localStorage.setItem("wakey:name", name);
-        } catch {}
-      }
-      function loadName() {
-        return qs.get("name") || localStorage.getItem("wakey:name") || "";
-      }
-
-      async function fetchStatus(name) {
-        setPill("warn", "checking…");
-        elLog.textContent = "GET /status?name=" + name;
-        elHtml.innerHTML = "";
-        try {
-          const r = await fetch(`/status?name=${encodeURIComponent(name)}`, {
-            // headers: { "X-Target-Name": name },
-          });
-          const t = await r.text();
-          elHtml.innerHTML = t;
-          // Heuristic: look for words in returned HTML // das. lets look for better
-          const low = t.toLowerCase();
-          if (low.includes("online")) setPill("ok", "online");
-          else if (low.includes("maybe")) setPill("warn", "maybe");
-          else if (low.includes("offline") || low.includes("failed"))
-            setPill("bad", "offline");
-          else setPill("warn", "unknown");
-        } catch (e) {
-          elLog.textContent = "status error: " + e;
-          setPill("bad", "error");
-        }
-      }
-
-      async function sendWake(name) {
-        setPill("warn", "waking…");
-        elLog.textContent = "POST /wake?name=" + name;
-        try {
-          const r = await fetch(`/wake?name=${encodeURIComponent(name)}`, {
-            method: "POST",
-            // headers: { "X-Target-Name": name },
-          });
-          const t = await r.text();
-          elLog.textContent = t || "ok";
-          // Optional: recheck after small delay
-          setTimeout(() => fetchStatus(name), 600);
-        } catch (e) {
-          elLog.textContent = "wake error: " + e;
-          setPill("bad", "error");
-        }
-      }
-
-      elCheck.addEventListener("click", () => {
-        const name = getName();
-        if (!name) return;
-        saveName(name);
-        setLink(name);
-        fetchStatus(name);
-      });
-      elWake.addEventListener("click", () => {
-        const name = getName();
-        if (!name) return;
-        saveName(name);
-        setLink(name);
-        sendWake(name);
-      });
-      elName.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") elCheck.click();
-      });
-
-      // init
-      const initial = loadName();
-      if (initial) {
-        elName.value = initial;
-        setLink(initial);
-        // auto-check on load in this A/B page
-        fetchStatus(initial);
-      } else {
-        setPill("warn", "unknown");
-      }
-    </script>
   </body>
 </html>
