@@ -32,18 +32,21 @@ function loadName() {
 }
 /** @param {String} s NUD state */
 function rankState(s) {
+  const key = String(s || "")
+    .trim()
+    .toUpperCase();
   return (
     {
-      Permanent: 5,
-      Reachable: 5,
-      Stale: 4,
-      Delay: 3,
-      Probe: 3,
-      Incomplete: 3,
-      Noarp: 2,
-      None: 1,
-      Failed: 0,
-    }[s.toUpperCase()] ?? 0
+      PERMANENT: 5,
+      REACHABLE: 5,
+      STALE: 4,
+      DELAY: 3,
+      PROBE: 3,
+      INCOMPLETE: 3,
+      NOARP: 2,
+      NONE: 1,
+      FAILED: 0,
+    }[key] ?? 0
   );
 }
 
@@ -81,7 +84,7 @@ async function fetchStatus(name) {
   try {
     const r = await fetch(`/api/status?name=${encodeURIComponent(name)}`);
     if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
+      const err = await r.json().catch((_) => (elHtml.textContent = r.text));
       elLog.textContent = `status error: ${err.error || r.status}`;
       setPill("bad", "error");
       return;

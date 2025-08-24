@@ -45,7 +45,7 @@ pub fn home_2_route() -> Router {
 pub struct DeviceQuery {
     pub name: Option<String>,
     ip: Option<IpAddr>,
-    #[serde(deserialize_with = "des_opm")]
+    #[serde(default, deserialize_with = "des_opm")]
     mac: Option<MacAddr>,
 }
 #[derive(Debug, Default, Clone, Hash, serde::Deserialize)]
