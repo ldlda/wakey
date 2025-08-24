@@ -1,9 +1,17 @@
 # Publish to registry and tag
 # Usage: ./scripts/publish.ps1 -Version 0.1.0 -Tag
+# Publish to registry and tag (manual; CI does not use this)
+# Usage:
+#   ./scripts/publish.ps1 -Version 0.1.0 -Publish          # publish to your configured Cargo registry (crates.io or Gitea)
+#   ./scripts/publish.ps1 -Version 0.1.0 -Tag              # create/push git tag v0.1.0
+#   ./scripts/publish.ps1 -Version 0.1.0 -Publish -Tag     # both
+#   ./scripts/publish.ps1 -Version 0.1.0 -Publish -Registry gitea   # publish to named registry
 param(
     [string]$Version,
     [switch]$Tag,
     [switch]$Publish
+    [switch]$ForceTag,
+    [string]$Registry
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,19 +26,15 @@ if ($Version) {
 cargo build --release
 
 # Publish crate (only if -Publish and registry auth is available)
+# Publish crate (only if -Publish). Relies on your Cargo config/credentials.
 if ($Publish) {
-    $token = $env:CARGO_REGISTRIES_CRATES_IO_TOKEN
-    if (-not $token) { $token = $env:CARGO_REGISTRY_TOKEN }
-    if (-not $token) {
-        Write-Warning "No registry token found (CARGO_REGISTRIES_CRATES_IO_TOKEN or CARGO_REGISTRY_TOKEN). Skipping cargo publish."
+    try {
+        $pubArgs = @('publish')
+        if ($Registry) { $pubArgs += @('--registry', $Registry) }
+        cargo @pubArgs
     }
-    else {
-        try {
-            cargo publish
-        }
-        catch {
-            Write-Warning ("cargo publish failed: {0}" -f $_)
-        }
+    catch {
+        Write-Warning ("cargo publish failed: {0}" -f $_)
     }
 }
 

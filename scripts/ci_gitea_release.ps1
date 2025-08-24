@@ -17,8 +17,8 @@ if (-not $Token) { throw 'Missing Gitea token. Set -Token or $env:GITEA_TOKEN' }
 if (-not $Owner -or -not $Repo) {
     if ($env:GITHUB_REPOSITORY) {
         $parts = $env:GITHUB_REPOSITORY -split '/'
-        $Owner = $Owner ?: $parts[0]
-        $Repo = $Repo  ?: $parts[1]
+        if (-not $Owner -and $parts.Length -ge 1) { $Owner = $parts[0] }
+        if (-not $Repo -and $parts.Length -ge 2) { $Repo = $parts[1] }
     }
     else {
         throw 'Missing Owner/Repo and GITHUB_REPOSITORY not set'
@@ -53,5 +53,5 @@ if (-not $rid) { throw "Failed to resolve release id: $($release | ConvertTo-Jso
 
 $uploadUri = "$api/repos/$Owner/$Repo/releases/$rid/assets?name=$($asset.Name)"
 Write-Host "Uploading asset $($asset.Name)"
-Invoke-WebRequest -Headers $headers -Uri $uploadUri -Method Post -InFile $asset.FullName -ContentType 'application/gzip' | Out-Null
+Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $uploadUri -Method Post -InFile $asset.FullName -ContentType 'application/octet-stream' | Out-Null
 Write-Host "Release published: tag $Tag with asset $($asset.Name)"

@@ -1,106 +1,71 @@
 # Scripts
 
-This folder contains helper scripts for building, packaging, releasing, and deploying `wakey`.
+This folder has small helpers for build, CI, and router install. Keep it simple; use only what you need.
 
-## Overview
+## Quick start (recommended)
 
-- `act_runner.ps1` — Starts your local Gitea runner as a background daemon on Windows.
-- `cross_build.ps1` — Cross-compiles the project using `cross` for one or more Linux targets.
-- `package.ps1` — Builds a developer-friendly tarball/zip containing binaries and init scripts.
-- `package_rootfs.ps1` — Builds a router-ready rootfs tarball that can be installed via `wget | tar`.
-- `release.ps1` — One-shot helper to cross build and package.
-- `publish.ps1` — Optional: bump version in Cargo.toml, build, `cargo publish`, and tag the repo.
-- `init/openwrt/*` — OpenWrt init scripts (procd) to run `wakey` and other helpers.
-- `systemd/wakey.service` — A basic systemd unit for Linux hosts.
-
-## act_runner.ps1
-
-Starts the Gitea `act_runner` if it isn't already running.
-
-- Default paths assume `~/Documents/gitea/act_runner.exe` and config at `~/Documents/gitea/.runner`.
-- Usage:
+1. Start your Gitea runner on this Windows PC
 
 ```powershell
 ./scripts/act_runner.ps1
-# or specify custom paths
-./scripts/act_runner.ps1 -RunnerPath "C:/Users/Admin/Documents/gitea/act_runner.exe" -Config "C:/Users/Admin/Documents/gitea/.runner"
 ```
 
-## cross_build.ps1
+If first-time, it prints the exact register command. Run it once, check labels include `windows:host,self-hosted`, then rerun the script.
 
-Cross-compile with `cross` for the targets you need.
-
-- Requires `cross` installed (`cargo install cross`).
-- Usage:
+1. Tag and push to trigger CI
 
 ```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+1. Install on the router
+
+Use the release asset URL from your Gitea Release page:
+
+```sh
+wget -O- https://<gitea>/<owner>/<repo>/releases/download/v0.1.0/wakey-rootfs-v0.1.0-armv7-unknown-linux-musleabihf.tgz | tar -xz -C /
+chmod +x /etc/init.d/wakey && /etc/init.d/wakey enable && /etc/init.d/wakey restart
+```
+
+Alternatively, use the updater on the router to fetch the latest automatically:
+
+```sh
+WAKEY_HOST=git.ldlda.com WAKEY_OWNER=lda WAKEY_REPO=wakey sh /etc/ldlda_help/update_wakey.sh
+```
+
+## Scripts overview
+
+- `act_runner.ps1` — Start/seed the local Gitea runner. Use `-Attach` to see logs, `-ForceConfigure` to register non-interactively.
+- `cross_build.ps1` — Simple wrapper for `cross build` per target (default: armv7-unknown-linux-musleabihf).
+- `package_rootfs.ps1` — Produces `dist/wakey-rootfs-<version>-<target>.tgz` with `/root/.bin/wakey` and `/etc/init.d/*`.
+- `package.ps1` — Dev bundle with binaries + init scripts (not a rootfs layout).
+- `publish.ps1` — Optional version bump + build + tag (and `cargo publish` only if you pass `-Publish`).
+
+## CI (Gitea)
+
+- Defined in `.gitea/workflows/release.yml`.
+- Runs on your `self-hosted, windows` runner.
+- Steps: cross build → package rootfs → upload artifact (v3) → publish a release and attach tgz.
+- Requires `secrets.GITEA_TOKEN` in the repo to publish the release.
+
+## Local build/install (manual path)
+
+```powershell
+# Build (requires cross installed)
 ./scripts/cross_build.ps1 -Release -Targets armv7-unknown-linux-musleabihf
+
+# Package rootfs
+./scripts/package_rootfs.ps1 -Version v0.1.0 -Target armv7-unknown-linux-musleabihf
+
+# Copy to router (PowerShell)
+scp -O .\dist\wakey-rootfs-v0.1.0-armv7-unknown-linux-musleabihf.tgz root@<router-ip>:/tmp/wakey.tgz
 ```
-
-## package.ps1
-
-Create a developer bundle with binaries and init scripts. Doesn’t layout files for `/` directly.
-
-```powershell
-./scripts/package.ps1 -Version 0.1.0 -Targets armv7-unknown-linux-musleabihf
-```
-
-Artifacts in `dist/wakey-<version>.(tgz|zip)`.
-
-## package_rootfs.ps1
-
-Create a router-ready rootfs tarball that installs with a one-liner.
-
-```powershell
-./scripts/package_rootfs.ps1 -Version 0.1.0 -Target armv7-unknown-linux-musleabihf
-```
-
-This writes `dist/wakey-rootfs-<version>-<target>.tgz` containing:
-
-- `root/.bin/wakey`
-- `etc/init.d/wakey` (and any other scripts under `scripts/init/openwrt`)
-
-Install on OpenWrt:
 
 ```sh
-wget -O- <URL>/wakey-rootfs-<version>-<target>.tgz | tar -xz -C /
-chmod +x /etc/init.d/wakey
-/etc/init.d/wakey enable
-/etc/init.d/wakey start
+# On the router
+tar -xz -f /tmp/wakey.tgz -C /
+chmod +x /etc/init.d/wakey && /etc/init.d/wakey enable && /etc/init.d/wakey restart
 ```
 
-## release.ps1
-
-One-shot:
-
-```powershell
-./scripts/release.ps1 -Version 0.1.0 -Targets armv7-unknown-linux-musleabihf
-```
-
-## publish.ps1
-
-Optional helper to bump the version, build release, publish the crate, and tag the repo.
-
-```powershell
-./scripts/publish.ps1 -Version 0.1.0 -Tag
-```
-
-- If you’re not publishing to crates.io, the `cargo publish` step will warn and continue.
-- Uses a simple regex replace to update the `version = "…"` line in `Cargo.toml`.
-
-## CI workflow (Gitea)
-
-A workflow in `.gitea/workflows/release.yml` is provided:
-
-- Triggers on tag pushes (v\*) and manual dispatch.
-- Builds with `cross` on your self-hosted Windows runner.
-- Packages a rootfs tarball.
-- Publishes a Gitea release via API, attaching the tarball (requires `secrets.GITEA_TOKEN`).
-
-Once published, you can install on the router with:
-
-```sh
-wget -O- <release-asset-URL> | tar -xz -C /
-```
-
-Adjust paths and targets as needed for your environment.
+That’s it. Keep the flow: start runner → tag push → install.

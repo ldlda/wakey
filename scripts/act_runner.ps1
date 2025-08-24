@@ -3,7 +3,7 @@
 param(
     [string]$RunnerPath = "$HOME/Documents/gitea/act_runner.exe",
     # Config is a FILE path (e.g., runner.yaml). Parent folder will be created if missing.
-    [string]$Config = "$HOME/Documents/gitea/config.yaml",
+    [string]$Config = (Join-Path (Split-Path -Parent $PSScriptRoot) 'ar_data/config.yaml'),
     [string]$ServerUrl,
     [string]$Token,
     [string]$Labels = "windows:host,self-hosted",
@@ -28,7 +28,6 @@ if ($running) {
 # Ensure config exists
 $configFile = $Config
 $configDir = Split-Path -Parent $configFile
-Set-Location $configDir
 if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Force -Path $configDir | Out-Null }
 
 if (-not (Test-Path $configFile)) {
