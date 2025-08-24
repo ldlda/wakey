@@ -1,0 +1,15 @@
+[Unit]
+Description=Wakey WOL+ARP service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/wakey
+Restart=on-failure
+RestartSec=2
+User=wakey
+Group=wakey
+
+[Install]
+WantedBy=multi-user.target
