@@ -2,13 +2,13 @@ use std::{io, net::IpAddr};
 
 use tokio::net::UdpSocket;
 
-use crate::utils::{query::get_macs_2_mac, LDA_MACS_2};
+use crate::utils::query::get_macs_2_mac;
 
 pub async fn wake(machine_name: &str) -> io::Result<u32> {
     let suh = UdpSocket::bind("0.0.0.0:0").await?;
     suh.set_broadcast(true)?;
-    let mut macs = get_macs_2_mac(machine_name).await.unwrap_or_default();
-    macs.extend(*LDA_MACS_2);
+    let /* mut */ macs = get_macs_2_mac(machine_name).await.unwrap_or_default();
+    // macs.extend(*LDA_MACS_2);
     let mut sent_ok = 0;
     for mac in macs {
         let mb = mac.as_bytes();

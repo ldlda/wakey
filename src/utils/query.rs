@@ -5,7 +5,11 @@ use macaddr::MacAddr;
 
 use crate::{
     arpparse::{self, IpNeighLine, NUDState},
-    utils::{cmd::exec_command, error::{self, Error, Result}, get_ips},
+    utils::{
+        cmd::exec_command,
+        error::{self, Error, Result},
+        get_ips,
+    },
 };
 
 pub async fn get_macs_2_1(machine_name: &str) -> Result<HashSet<(IpAddr, MacAddr, NUDState)>> {
@@ -76,13 +80,8 @@ pub async fn get_macs(
     state: Option<NUDState>,
 ) -> Result<Vec<IpNeighLine>> {
     // Collect IPs early (before any await) to avoid holding generics across await points
-    let ip_list: Option<Vec<IpAddr>> = ips.map(|slice| {
-        slice
-            .iter()
-            .copied()
-            .map(|ip| ip.to_canonical())
-            .collect()
-    });
+    let ip_list: Option<Vec<IpAddr>> =
+        ips.map(|slice| slice.iter().copied().map(|ip| ip.to_canonical()).collect());
 
     // Resolve by machine name if no IPs provided but we have a name
     let ip_list = match (ip_list, machine_name) {
@@ -128,15 +127,57 @@ pub async fn get_macs(
         } else {
             parsed.collect()
         };
-    Ok::<Vec<IpNeighLine>, error::Error>(rows)
+        Ok::<Vec<IpNeighLine>, error::Error>(rows)
     };
 
     // If we have specific IPs, query each; otherwise query the whole table once
     if !ip_list.is_empty() {
         let futures = ip_list.into_iter().map(|ip| run_one(Some(ip)));
-    let res = futures::future::try_join_all(futures).await?;
+        let res = futures::future::try_join_all(futures).await?;
         Ok(res.into_iter().flatten().collect())
     } else {
         run_one(None).await
+    }
+}
+
+pub mod dev {
+    use std::{collections::HashSet, sync::LazyLock};
+
+    pub fn get_dev() -> HashSet<String> {
+        // Prefer /sys/class/net, fallback to /proc/net/dev; filter out loopback
+        let mut devs: HashSet<String> = HashSet::new();
+        if let Ok(rd) = std::fs::read_dir("/sys/class/net") {
+            for e in rd.flatten() {
+                if let Ok(name) = e.file_name().into_string()
+                    && name != "lo"
+                    && !name.is_empty()
+                {
+                    devs.insert(name);
+                }
+            }
+        } else if let Ok(txt) = std::fs::read_to_string("/proc/net/dev") {
+            for line in txt.lines().skip(2) {
+                // skip headers
+                if let Some((name, _rest)) = line.split_once(':') {
+                    let n = name.trim().to_string();
+                    if n != "lo" && !n.is_empty() {
+                        devs.insert(n);
+                    }
+                }
+            }
+        }
+        devs
+    }
+
+    pub static DEVS: LazyLock<HashSet<String>> = LazyLock::new(get_dev);
+
+    pub fn devs_sorted() -> Vec<String> {
+        let mut v: Vec<String> = DEVS.iter().cloned().collect();
+        v.sort();
+        v
+    }
+
+    pub fn has_dev(name: &str) -> bool {
+        DEVS.contains(name)
     }
 }

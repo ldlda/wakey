@@ -54,14 +54,14 @@ function buildStatusUrl(name) {
   const u = new URL("/api/status", location.origin);
   if (name) u.searchParams.set("name", name);
   // forward multi-value filters from current page URL
-  for (const k of ["ip", "dev", "nud"]) {
+  for (const k of ["ip", "dev", "nud", "mac"]) {
     const vals = qs.getAll(k);
     for (const v of vals) u.searchParams.append(k, v);
   }
   return u;
 }
 
-/** @param {{ name: String, table: Array<{ ip, dev, mac, state }>, filters: {ip, dev, nud}} | { name: String, error }} data from /api/status */
+/** @param {{ name?: String, table: Array<{ ip, dev, mac, state }>, filters: {ip, dev, nud, mac}} | { name?: String, error }} data from /api/status */
 function renderStatus(data) {
   const tbl = document.createElement("table");
   tbl.innerHTML = `<tr><th>IP</th><th>MAC</th><th>State</th><th>IF</th></tr>`;
@@ -82,6 +82,8 @@ function renderStatus(data) {
       parts.push(`dev=[${data.filters.dev.join(", ")}]`);
     if (Array.isArray(data.filters.nud) && data.filters.nud.length)
       parts.push(`nud=[${data.filters.nud.join(", ")}]`);
+    if (Array.isArray(data.filters.mac) && data.filters.mac.length)
+      parts.push(`mac=[${data.filters.mac.join(", ")}]`);
     if (parts.length) {
       const info = document.createElement("div");
       info.className = "filters";
@@ -120,7 +122,7 @@ async function fetchStatus(name) {
         msg = await r.text();
       }
       elLog.textContent = `status error: ${msg}`;
-    //   elHtml.textContent = msg;
+      //   elHtml.textContent = msg;
       setPill("bad", "error");
       return;
     }

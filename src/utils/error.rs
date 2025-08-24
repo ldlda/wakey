@@ -20,13 +20,19 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::DnsResolve { name, source } => write!(f, "DNS resolve failed for {name}: {source}"),
-            Error::CommandFailed { cmd, args, status, stderr } => {
-                let code = status.map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
-                write!(
-                    f,
-                    "{cmd} {args:?} failed (status: {code}): {stderr}",
-                )
+            Error::DnsResolve { name, source } => {
+                write!(f, "DNS resolve failed for {name}: {source}")
+            }
+            Error::CommandFailed {
+                cmd,
+                args,
+                status,
+                stderr,
+            } => {
+                let code = status
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".into());
+                write!(f, "{cmd} {args:?} failed (status: {code}): {stderr}",)
             }
             Error::Io(e) => write!(f, "IO error: {e}"),
         }
@@ -44,5 +50,7 @@ impl std::error::Error for Error {
 }
 
 impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self { Error::Io(e) }
+    fn from(e: io::Error) -> Self {
+        Error::Io(e)
+    }
 }

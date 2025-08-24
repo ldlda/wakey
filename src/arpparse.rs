@@ -12,19 +12,21 @@ use std::{net::IpAddr, str::FromStr};
 
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize, Serializer, de};
-use serde_with::skip_serializing_none ;
+use serde_with::skip_serializing_none;
 use strum::{Display, EnumString};
 
 use crate::arpparse::error::IPNeighParseError;
 mod error;
 mod r#impl; // custom (de)serialization impls
+
 /// ip neigh has some cool shit.
-/// IP
-/// dev DEV | None
-/// lladdr MAC | None
-/// status  { permanent | noarp | stale | reachable | none | incomplete | delay | probe | failed } (ip neigh help)
-/// so you can see its damn good
 ///
+/// IP  
+/// dev DEV | None  
+/// lladdr MAC | None  
+/// status  { permanent | noarp | stale | reachable | none | incomplete | delay | probe | failed } (ip neigh help)
+///
+/// so you can see its damn good
 #[skip_serializing_none]
 #[derive(Debug, PartialEq, Eq, Clone, Hash, serde::Serialize)]
 pub struct IpNeighLine {
@@ -43,7 +45,7 @@ pub fn ser_opm<S: Serializer>(bro: &Option<MacAddr>, ser: S) -> Result<S::Ok, S:
 }
 
 /// deserialize an [`Option<MacAddr>`]
-pub fn des_opm<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
+pub fn _des_opm<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

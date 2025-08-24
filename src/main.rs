@@ -7,15 +7,15 @@ use axum::{
 };
 use tokio::net::TcpListener;
 mod arpparse;
+mod route;
 mod r#static;
 mod utils;
-mod route;
-
 use crate::{
     route::DeviceQuery,
     utils::{ping::ping_ip, query::get_macs_2_1, wake::wake},
 };
 use r#static as st;
+use std::io;
 
 const MACHINE_NAME: &str = "lda.lan";
 
@@ -49,7 +49,11 @@ async fn wake_handler(
     Query(DeviceQuery { name, .. }): Query<DeviceQuery>,
 ) -> axum::response::Result<impl IntoResponse> {
     match wake(name.as_deref().unwrap_or(MACHINE_NAME)).await {
-        Ok(x) if x > 0 => Ok((StatusCode::ACCEPTED, format!("{x} packets sent!"))),
+        Ok(0) => Err((StatusCode::NOT_FOUND, "No packets sent!").into()),
+        Ok(x) => Ok((
+            StatusCode::ACCEPTED,
+            format!("{x} packet{s} sent!", s = if x > 1 { "s" } else { "" }),
+        )),
         _ => Err((StatusCode::GATEWAY_TIMEOUT, "Wake failed").into()),
     }
 }
@@ -95,17 +99,17 @@ pub async fn status_build(machine_name: &str) -> String {
 }
 #[cfg(target_os = "linux")]
 #[tokio::main]
-async fn main() -> color_eyre::Result<()> {
-    use crate::route::{api_status, get_status_2, home_2, home_2_route};
+async fn entry() -> io::Result<()> {
+    use crate::route::{api_status, devs_router, get_status_2, home_2, home_2_route};
 
-    color_eyre::install()?;
     let app = Router::new()
         .route("/home", get(home))
         .route("/", get(home_2))
         .merge(home_2_route())
         .route("/wake", post(wake_handler))
         .route("/status", get(get_status_2))
-        .merge(api_status());
+        .merge(api_status())
+        .route("/api/devs", get(devs_router));
 
     let port = TcpListener::bind("0.0.0.0:12012").await?;
     axum::serve(port, app.into_make_service()).await?;
@@ -123,4 +127,10 @@ fn main() -> color_eyre::Result<()> {
     Err(color_eyre::eyre::eyre!(
         "OS not supported! run this on your ahh router!"
     ))
+}
+
+#[cfg(target_os = "linux")]
+fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
+    Ok(entry()?)
 }
