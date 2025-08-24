@@ -1,14 +1,14 @@
 use std::{collections::HashSet, net::IpAddr};
 
 use macaddr::MacAddr;
-use tokio::io;
+// use tokio::io;
 
 use crate::{
     arpparse::{self, IpNeighLine, NUDState},
-    utils::{cmd::exec_command, get_ips},
+    utils::{cmd::exec_command, error::{self, Error, Result}, get_ips},
 };
 
-pub async fn get_macs_2_1(machine_name: &str) -> io::Result<HashSet<(IpAddr, MacAddr, NUDState)>> {
+pub async fn get_macs_2_1(machine_name: &str) -> Result<HashSet<(IpAddr, MacAddr, NUDState)>> {
     Ok(get_macs_1(machine_name)
         .await?
         .into_iter()
@@ -22,7 +22,7 @@ pub async fn get_macs_2_1(machine_name: &str) -> io::Result<HashSet<(IpAddr, Mac
         )
         .collect())
 }
-pub async fn get_macs_2_mac(machine_name: &str) -> io::Result<HashSet<MacAddr>> {
+pub async fn get_macs_2_mac(machine_name: &str) -> Result<HashSet<MacAddr>> {
     Ok(get_macs_1(machine_name)
         .await?
         .into_iter()
@@ -37,20 +37,22 @@ pub async fn get_macs_2_mac(machine_name: &str) -> io::Result<HashSet<MacAddr>> 
         .collect())
 }
 
-pub async fn get_macs_1(machine_name: &str) -> io::Result<Vec<arpparse::IpNeighLine>> {
+pub async fn get_macs_1(machine_name: &str) -> Result<Vec<arpparse::IpNeighLine>> {
     let dev = "br-lan";
     let ips = get_ips(machine_name).await?;
     let futures = ips.iter().map(|ip| {
         let ip = ip.to_canonical();
         async move {
-            let o =
-                exec_command("ip", ["neigh", "show", "to", &ip.to_string(), "dev", dev]).await?;
+            let cmd = "ip";
+            let args = ["neigh", "show", "to", &ip.to_string(), "dev", dev];
+            let o = exec_command(cmd, args).await?;
             if !o.status.success() {
-                return Err(io::Error::other(format!(
-                    "`ip neigh` failed for {ip} (status: {st}): {err}",
-                    st = o.status,
-                    err = String::from_utf8_lossy(&o.stderr),
-                )));
+                return Err(Error::CommandFailed {
+                    cmd,
+                    args: args.iter().map(ToString::to_string).collect(),
+                    status: o.status.code(),
+                    stderr: String::from_utf8_lossy(&o.stderr).into(),
+                });
             };
             Ok(String::from_utf8_lossy(&o.stdout)
                 .lines()
@@ -72,7 +74,7 @@ pub async fn get_macs(
     ips: Option<&[IpAddr]>,
     dev: Option<&str>,
     state: Option<NUDState>,
-) -> io::Result<Vec<IpNeighLine>> {
+) -> Result<Vec<IpNeighLine>> {
     // Collect IPs early (before any await) to avoid holding generics across await points
     let ip_list: Option<Vec<IpAddr>> = ips.map(|slice| {
         slice
@@ -110,12 +112,12 @@ pub async fn get_macs(
 
         let o = exec_command("ip", args.iter().map(String::as_str).collect::<Vec<_>>()).await?; // hope to rustc that it knows how to unfuck ts
         if !o.status.success() {
-            return Err(io::Error::other(format!(
-                "`ip neigh` failed{ctx} (status: {st}): {err}",
-                ctx = to_ip.map(|ip| format!(" for {ip}")).unwrap_or_default(),
-                st = o.status,
-                err = String::from_utf8_lossy(&o.stderr),
-            )));
+            return Err(Error::CommandFailed {
+                cmd: "ip",
+                args,
+                status: o.status.code(),
+                stderr: String::from_utf8_lossy(&o.stderr).into(),
+            });
         }
 
         let lines = String::from_utf8_lossy(&o.stdout);
@@ -126,13 +128,13 @@ pub async fn get_macs(
         } else {
             parsed.collect()
         };
-        Ok::<Vec<IpNeighLine>, io::Error>(rows)
+    Ok::<Vec<IpNeighLine>, error::Error>(rows)
     };
 
     // If we have specific IPs, query each; otherwise query the whole table once
     if !ip_list.is_empty() {
         let futures = ip_list.into_iter().map(|ip| run_one(Some(ip)));
-        let res = futures::future::try_join_all(futures).await?;
+    let res = futures::future::try_join_all(futures).await?;
         Ok(res.into_iter().flatten().collect())
     } else {
         run_one(None).await

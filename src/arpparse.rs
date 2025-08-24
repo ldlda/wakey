@@ -123,7 +123,7 @@ impl NUDState {
         }
     }
     /// dumb boolean: Some(true)=on, Some(false)=off, None=shrug
-    pub fn dumber_state_this_way(&self) -> Option<bool> {
+    pub fn _dumber_state_this_way(&self) -> Option<bool> {
         match self {
             NUDState::Permanent | NUDState::Reachable => Some(true),
             NUDState::Failed => Some(false),
@@ -199,7 +199,7 @@ impl IpNeighLine {
             ..self_
         }
     }
-    pub fn with_mac(mac: MacAddr) -> impl FnMut(Self) -> Self {
+    pub fn _with_mac(mac: MacAddr) -> impl FnMut(Self) -> Self {
         move |self_| Self {
             mac: Some(mac),
             ..self_
@@ -235,7 +235,7 @@ impl Ord for NUDState {
 
 impl IpNeighLine {
     // score for “local and online”: state, has-mac, v4, iface preference
-    pub fn score(&self) -> (u8, u8, u8, u8) {
+    pub fn _score(&self) -> (u8, u8, u8, u8) {
         let iface = self
             .dev
             .as_deref()

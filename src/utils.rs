@@ -11,23 +11,22 @@ pub mod wake;
 use std::{net::IpAddr, sync::LazyLock};
 
 use macaddr::MacAddr;
-use tokio::io;
+pub mod error;
 
 /// generic so you can do "123.45.67.89:22" or "lda.lan:22" as an input
 // this is so bad
 pub mod ping;
 
 /// this is because i like [`IpAddr`] more than [`SocketAddr`](std::net::SocketAddr)
-pub async fn get_ips(machine_name: &str) -> io::Result<Vec<IpAddr>> {
-    Ok(tokio::net::lookup_host((machine_name, 0))
-        .await?
-        .map(|c| c.ip())
-        .collect())
+pub async fn get_ips(machine_name: &str) -> error::Result<Vec<IpAddr>> {
+    let it = tokio::net::lookup_host((machine_name, 0))
+        .await
+        .map_err(|e| error::Error::DnsResolve { name: machine_name.to_string(), source: e })?;
+    Ok(it.map(|c| c.ip()).collect())
 }
 
 pub mod cmd;
 pub mod query;
-mod error;
 
 // no custom ip deserializer needed when using axum_extra::extract::Query
 // but we add a generic one to ignore blanks and accept OneOrMany

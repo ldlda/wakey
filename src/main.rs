@@ -115,11 +115,11 @@ async fn main() -> color_eyre::Result<()> {
 #[cfg(not(target_os = "linux"))]
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
-
+    use std::net::ToSocketAddrs;
     // use crate::arpparse::NUDState;
     // println!("{}", NUDState::Reachable.to_string().to_lowercase());
-    // println!("{:?}", std::net::TcpStream::connect("svuhuvshdv:331"));
-    // // Err(Os { code: 11001, kind: Uncategorized, message: "No such host is known." })
+    println!("{:?}", "svuhuvshdv:331".to_socket_addrs());
+    // Err(Os { code: 11001, kind: Uncategorized, message: "No such host is known." })
     Err(color_eyre::eyre::eyre!(
         "OS not supported! run this on your ahh router!"
     ))
