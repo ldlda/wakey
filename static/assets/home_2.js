@@ -30,7 +30,7 @@ function saveName(name) {
 function loadName() {
   return qs.get("name") || localStorage.getItem("wakey:name") || "";
 }
-
+/** @param {String} s NUD state */
 function rankState(s) {
   return (
     {
@@ -43,12 +43,12 @@ function rankState(s) {
       Noarp: 2,
       None: 1,
       Failed: 0,
-    }[s] ?? 0
+    }[s.toUpperCase()] ?? 0
   );
 }
 
+/** @param {{ name: String, table: Array<{ ip, dev, mac, state }>} | { name: String, error }} data from /api/status */
 function renderStatus(data) {
-  // data: { name: string, table: Array<{ ip, dev, mac, state }>} | { name, error }
   const tbl = document.createElement("table");
   tbl.innerHTML = `<tr><th>IP</th><th>MAC</th><th>State</th><th>IF</th></tr>`;
   for (const row of data.table || []) {

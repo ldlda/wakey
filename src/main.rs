@@ -43,7 +43,7 @@ async fn home() -> Html<String> {
 }
 
 async fn wake_handler(
-    Query(DeviceQuery { name }): Query<DeviceQuery>,
+    Query(DeviceQuery { name, .. }): Query<DeviceQuery>,
 ) -> axum::response::Result<impl IntoResponse> {
     match wake(name.as_deref().unwrap_or(MACHINE_NAME)).await {
         Ok(x) if x > 0 => Ok((StatusCode::ACCEPTED, format!("{x} packets sent!"))),
@@ -93,11 +93,12 @@ pub async fn status_build(machine_name: &str) -> String {
 #[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
-    use crate::route::{api_status, get_status_2, home_2_route};
+    use crate::route::{api_status, get_status_2, home_2, home_2_route};
 
     color_eyre::install()?;
     let app = Router::new()
-        .route("/", get(home))
+        .route("/home", get(home))
+        .route("/", get(home_2))
         .merge(home_2_route())
         .route("/wake", post(wake_handler))
         .route("/status", get(get_status_2))

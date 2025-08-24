@@ -159,6 +159,7 @@ impl FromStr for IpNeighLine {
 }
 /// pls dont touch ts
 impl IpNeighLine {
+    /* // these are some not needed fns
     pub fn set_ip(&mut self, ip: IpAddr) {
         self.ip = ip;
     }
@@ -170,6 +171,20 @@ impl IpNeighLine {
     }
     pub fn state(self, state: NUDState) -> Self {
         Self { state, ..self }
+    }
+    */
+    pub fn with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
+        let dev = dev.into();
+        move |self_| Self {
+            dev: Some(dev.clone()),
+            ..self_
+        }
+    }
+    pub fn with_mac(mac: MacAddr) -> impl FnMut(Self) -> Self {
+        move |self_| Self {
+            mac: Some(mac),
+            ..self_
+        }
     }
 }
 

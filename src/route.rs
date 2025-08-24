@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use axum::{
     Json, Router,
     extract::{Path, Query},
@@ -5,10 +7,11 @@ use axum::{
     response::{Html, IntoResponse, Redirect},
     routing::get,
 };
+use macaddr::MacAddr;
 
-use crate::{MACHINE_NAME, arpparse, status_build, utils::query::get_macs_1};
+use crate::{MACHINE_NAME, arpparse::{self, des_opm}, status_build, utils::query::get_macs_1};
 
-async fn home_2() -> Html<&'static str> {
+pub async fn home_2() -> Html<&'static str> {
     Html(include_str!("../static/home_2"))
 }
 async fn home_2_css() -> impl IntoResponse {
@@ -41,9 +44,9 @@ pub fn home_2_route() -> Router {
 #[derive(Debug, Default, Clone, Hash, serde::Deserialize)]
 pub struct DeviceQuery {
     pub name: Option<String>,
-    // ip: Option<IpAddr>,
-    // #[serde(deserialize_with = "des_opm")]
-    // mac: Option<MacAddr>,
+    ip: Option<IpAddr>,
+    #[serde(deserialize_with = "des_opm")]
+    mac: Option<MacAddr>,
 }
 #[derive(Debug, Default, Clone, Hash, serde::Deserialize)]
 pub struct NamePath {
@@ -64,7 +67,7 @@ pub struct StatusError {
 
 pub async fn get_status_json(
     // p: Option<Path<NamePath>>,
-    Query(DeviceQuery { name }): Query<DeviceQuery>,
+    Query(DeviceQuery { name, .. }): Query<DeviceQuery>,
 ) -> impl IntoResponse {
     let name = /* p
         .map(|Path(n)| n.name)
