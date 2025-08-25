@@ -114,7 +114,7 @@ impl NUDState {
         }
     }
     /// dumb UI label
-    pub fn dumber_state(&self) -> &'static str {
+    pub fn _dumber_state(&self) -> &'static str {
         match self {
             NUDState::Permanent | NUDState::Reachable => "online",
             NUDState::Stale => "maybe online",

@@ -7,7 +7,7 @@ use tokio::{
     time::timeout,
 };
 
-pub async fn ping_ip<T: ToSocketAddrs>(addr: T) -> bool {
+pub async fn _ping_ip<T: ToSocketAddrs>(addr: T) -> bool {
     timeout(Duration::from_secs(1), TcpStream::connect(addr))
         .await
         .is_ok()

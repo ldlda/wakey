@@ -1,115 +1,29 @@
 use axum::{
     Router,
-    extract::Query,
-    http::StatusCode,
-    response::{Html, IntoResponse},
     routing::{get, post},
 };
 use tokio::net::TcpListener;
 mod arpparse;
+mod dhcpparse;
 mod route;
-mod r#static;
+pub mod r#static;
 mod utils;
-use crate::{
-    route::DeviceQuery,
-    utils::{ping::ping_ip, query::get_macs_2_1, wake::wake},
-};
-use r#static as st;
 use std::io;
 
 const MACHINE_NAME: &str = "lda.lan";
 
-async fn home() -> Html<String> {
-    Html(format!(
-        r#"
-      <html>
-        <body>
-        <p><a href="/home_2">Alternate UI</a></p>
-        <p>the machine is {}! <a href="/status">Status</a></p>
-          <form method="POST" action="/wake">
-            <button type="submit">Wake LDA</button>
-          </form>
-        </body>
-      </html>
-    "#,
-        if ping_ip((MACHINE_NAME, 22)).await {
-            "on"
-        } else {
-            "off"
-        } // match get_ips(MACHINE_NAME).await {
-          //     Ok(ips) => {
-          //         // let addrs: Vec<SocketAddr> = ips.into_iter().map(|ip|(ip, 22).into()).collect();
-          //     }
-          //     Err(_) => "off",
-          // }
-    ))
-}
-
-async fn wake_handler(
-    Query(DeviceQuery { name, .. }): Query<DeviceQuery>,
-) -> axum::response::Result<impl IntoResponse> {
-    match wake(name.as_deref().unwrap_or(MACHINE_NAME)).await {
-        Ok(0) => Err((StatusCode::NOT_FOUND, "No packets sent!").into()),
-        Ok(x) => Ok((
-            StatusCode::ACCEPTED,
-            format!("{x} packet{s} sent!", s = if x > 1 { "s" } else { "" }),
-        )),
-        _ => Err((StatusCode::GATEWAY_TIMEOUT, "Wake failed").into()),
-    }
-}
-
-pub async fn status_build(machine_name: &str) -> String {
-    let formatted_macs = match get_macs_2_1(machine_name).await {
-        Ok(table) => {
-            let the: String = table
-                .iter()
-                .map(|(ip, mac, state)| {
-                    let mac_str = // if let Some(mac) = mac {
-                        mac.to_string()
-                    // } else {
-                    //     "None".into()
-                    // }
-                    ;
-                    format!(
-                        "<tr><td>{ip}</td><td>{mac_str}</td><td>{state}</td></tr>",
-                        state = state.dumber_state()
-                    )
-                })
-                .collect();
-            format!(
-                r#"<p>info of {machine_name}:</p>
-<table>
-<tr><th>IP</th><th>MAC</th><th>State</th></tr>
-{the}
-</table>"#
-            )
-        }
-        Err(e) => format!("<p>errors getting table for {machine_name}: {e}</p>"),
-    };
-
-    format!(
-        r#"
-<html>
-<body>
-{formatted_macs}
-</body>
-</html>     
-"#,
-    )
-}
 #[cfg(target_os = "linux")]
 #[tokio::main]
 async fn entry() -> io::Result<()> {
-    use crate::route::{api_status, devs_router, get_status_2, home_2, home_2_route};
+    use crate::route::{api_router, home_2, home_2_route, wake_handler};
 
     let app = Router::new()
-        .route("/home", get(home))
+        // .route("/home", get(home))
         .route("/", get(home_2))
         .merge(home_2_route())
         .route("/wake", post(wake_handler))
-        .route("/status", get(get_status_2))
-        .merge(api_status())
-        .route("/api/devs", get(devs_router));
+        // .route("/status", get(get_status_2))
+        .nest("/api", api_router());
 
     let port = TcpListener::bind("0.0.0.0:12012").await?;
     axum::serve(port, app.into_make_service()).await?;
@@ -119,7 +33,6 @@ async fn entry() -> io::Result<()> {
 #[cfg(not(target_os = "linux"))]
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
-    use std::net::ToSocketAddrs;
     // use crate::arpparse::NUDState;
     // println!("{}", NUDState::Reachable.to_string().to_lowercase());
     println!("{:?}", "svuhuvshdv:331".to_socket_addrs());

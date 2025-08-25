@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-pub async fn get_macs_2_1(machine_name: &str) -> Result<HashSet<(IpAddr, MacAddr, NUDState)>> {
+pub async fn _get_macs_2_1(machine_name: &str) -> Result<HashSet<(IpAddr, MacAddr, NUDState)>> {
     Ok(get_macs_1(machine_name)
         .await?
         .into_iter()

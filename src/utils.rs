@@ -10,6 +10,8 @@
 pub mod wake;
 use std::net::IpAddr;
 
+use crate::utils::query::_get_macs_2_1;
+
 pub mod error;
 
 /// generic so you can do "123.45.67.89:22" or "lda.lan:22" as an input
@@ -70,4 +72,44 @@ pub mod de_many {
         }
         Ok(out)
     }
+}
+
+pub async fn _status_build(machine_name: &str) -> String {
+    let formatted_macs = match _get_macs_2_1(machine_name).await {
+        Ok(table) => {
+            let the: String = table
+                .iter()
+                .map(|(ip, mac, state)| {
+                    let mac_str = // if let Some(mac) = mac {
+                        mac.to_string()
+                    // } else {
+                    //     "None".into()
+                    // }
+                    ;
+                    format!(
+                        "<tr><td>{ip}</td><td>{mac_str}</td><td>{state}</td></tr>",
+                        state = state._dumber_state()
+                    )
+                })
+                .collect();
+            format!(
+                r#"<p>info of {machine_name}:</p>
+<table>
+<tr><th>IP</th><th>MAC</th><th>State</th></tr>
+{the}
+</table>"#
+            )
+        }
+        Err(e) => format!("<p>errors getting table for {machine_name}: {e}</p>"),
+    };
+
+    format!(
+        r#"
+<html>
+<body>
+{formatted_macs}
+</body>
+</html>     
+"#,
+    )
 }
