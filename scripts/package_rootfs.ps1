@@ -36,6 +36,16 @@ Get-ChildItem (Join-Path $root 'scripts/init/openwrt') -File | ForEach-Object {
     Copy-Item $_.FullName $dest -Force
 }
 
+# Copy helper scripts intended for /etc/ldlda_help
+$helpSrc = Join-Path $root 'scripts/ldlda_help'
+if (Test-Path $helpSrc) {
+    $etcHelpDir = Join-Path $staging 'etc/ldlda_help'
+    New-Item -ItemType Directory -Force -Path $etcHelpDir | Out-Null
+    Get-ChildItem $helpSrc -File | ForEach-Object {
+        Copy-Item $_.FullName (Join-Path $etcHelpDir $_.Name) -Force
+    }
+}
+
 # Create tarball
 $pkgName = "wakey-rootfs-$Version-$Target.tgz"
 Push-Location $staging
@@ -54,4 +64,4 @@ Remove-Item -Recurse -Force $staging
 Write-Host "Rootfs package: " (Join-Path $dist $pkgName)
 Write-Host "On router: wget -O- <URL/$pkgName> | tar -xz -C /"
 Write-Host "Then: chmod +x /etc/init.d/wakey && /etc/init.d/wakey enable && /etc/init.d/wakey start"
-Write-Host "For any additional init scripts (e.g., update_tailscale), also chmod +x and enable/start as needed."
+Write-Host "Helper scripts: /etc/ldlda_help/* (e.g., update_wakey.sh, update_tailscale.sh). Mark executable if needed: chmod +x /etc/ldlda_help/*.sh"
