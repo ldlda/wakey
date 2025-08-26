@@ -38,7 +38,10 @@ if (-not (Test-Path $configFile)) {
     }
     if ($ForceConfigure) {
         Write-Host "Config not found. Initializing non-interactively (ForceConfigure)..."
+        $configParent = Split-Path -Parent $configFile
+        Push-Location $configParent
         & $RunnerPath register --no-interactive --config $configFile --instance $ServerUrl --token $Token --labels $Labels
+        Pop-Location
     }
     else {
         Write-Host "Config not found. Run this manually once (note labels embed host executor on Windows):"
@@ -49,9 +52,15 @@ if (-not (Test-Path $configFile)) {
 
 if ($Attach) {
     Write-Host "Starting act_runner (attached)... Ctrl+C to stop"
+    $configParent = Split-Path -Parent $configFile
+    Push-Location $configParent
     & $RunnerPath daemon --config $configFile
+    Pop-Location
 }
 else {
-    Start-Process -FilePath $RunnerPath -ArgumentList @("daemon", "--config", $configFile) -WindowStyle Hidden
-    Write-Host "act_runner started."
+    $configParent = Split-Path -Parent $configFile
+    Push-Location $configParent
+    $proc = Start-Process -FilePath $RunnerPath -ArgumentList @("daemon", "--config", $configFile) -WindowStyle Hidden -PassThru
+    Pop-Location
+    Write-Host "act_runner started (PID=$($proc.Id))."
 }

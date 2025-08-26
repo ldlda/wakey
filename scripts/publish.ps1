@@ -31,10 +31,11 @@ if (-not $Version) {
 if ($Version) {
     $pattern = '(?m)^version\s*=\s*"[^"]+"'
     $replacement = ('version = "{0}"' -f $Version)
-    (Get-Content Cargo.toml -Raw) -replace $pattern, $replacement | Set-Content Cargo.toml -Encoding UTF8
+    (Get-Content Cargo.toml -Raw) -replace $pattern, $replacement | Set-Content Cargo.toml -Encoding UTF8 -NoNewline
 }
 
 # Ensure build ok
+cargo fmt
 cargo build --release
 
 # Publish crate (only if -Publish and registry auth is available)
@@ -52,7 +53,7 @@ if ($Publish) {
 
 if ($Tag -and $Version) {
     # If you git push a tag, this will trigger the act_runner and the release workflow on your self-hosted runner (see .gitea/workflows/release.yml)
-    $actRunnerScript = Join-Path (Split-Path -Parent $PSScriptRoot) 'act_runner.ps1'
+    $actRunnerScript = Join-Path  $PSScriptRoot 'act_runner.ps1'
     if (Test-Path $actRunnerScript) {
         Write-Host "Ensuring act_runner is running..."
         & $actRunnerScript
