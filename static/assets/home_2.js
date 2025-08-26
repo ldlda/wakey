@@ -5,8 +5,21 @@ const elCheck = $("check");
 const elWake = $("wake");
 const elLog = $("log");
 const elHtml = $("html");
+const elLeases = $("leases_html");
 const pill = $("status-pill");
 const link = $("permalink");
+const elPreview = $("preview");
+
+// One-time delegated click handler for all pickable links
+function handlePickClick(e) {
+  const a = e.target && /** @type {HTMLElement} */ (e.target).closest("a.pick");
+  if (!a) return;
+  e.preventDefault();
+  const v = a.getAttribute("data-value");
+  pickTarget(v);
+}
+if (elHtml) elHtml.addEventListener("click", handlePickClick);
+if (elLeases) elLeases.addEventListener("click", handlePickClick);
 
 function setPill(kind, text) {
   pill.className = `pill ${kind}`;
@@ -21,6 +34,46 @@ function setLink(name) {
 }
 function getName() {
   return (elName.value || "").trim();
+}
+function extractHostLikeBackend(input) {
+  let s = String(input || "").trim();
+  if (!s) return "";
+  // strip scheme or network-path reference
+  const schemeIdx = s.indexOf("://");
+  if (schemeIdx >= 0) s = s.slice(schemeIdx + 3);
+  else if (s.startsWith("//")) s = s.slice(2);
+  // strip userinfo
+  const at = s.lastIndexOf("@");
+  if (at >= 0) s = s.slice(at + 1);
+  // bracketed IPv6
+  if (s.startsWith("[")) {
+    const end = s.indexOf("]");
+    if (end > 1) s = s.slice(1, end);
+  } else {
+    const slash = s.indexOf("/");
+    if (slash >= 0) s = s.slice(0, slash);
+    const colon = s.lastIndexOf(":");
+    if (colon > 0 && (s.match(/:/g) || []).length === 1) {
+      const port = s.slice(colon + 1);
+      if (/^\d+$/.test(port)) s = s.slice(0, colon);
+    }
+  }
+  return s.trim();
+}
+function updatePreview() {
+  if (!elPreview) return;
+  const raw = getName();
+  const host = extractHostLikeBackend(raw);
+  elPreview.textContent = host && host !== raw ? `→ ${host}` : "";
+}
+function pickTarget(value) {
+  const v = String(value || "").trim();
+  if (!v) return;
+  elName.value = v;
+  updatePreview();
+  saveName(v);
+  setLink(v);
+  fetchStatus(v);
 }
 function saveName(name) {
   try {
@@ -51,9 +104,15 @@ function rankState(s) {
 }
 
 function buildStatusUrl(name) {
+  // If no extra filters, use smart redirect for name/ip/mac/dev/nud detection
+  const hasExtraFilters = ["ip", "dev", "nud", "mac"].some(
+    (k) => qs.getAll(k).length
+  );
+  if (name && !hasExtraFilters) {
+    return new URL(`/api/smart/${encodeURIComponent(name)}`, location.origin);
+  }
   const u = new URL("/api/status", location.origin);
   if (name) u.searchParams.set("name", name);
-  // forward multi-value filters from current page URL
   for (const k of ["ip", "dev", "nud", "mac"]) {
     const vals = qs.getAll(k);
     for (const v of vals) u.searchParams.append(k, v);
@@ -64,12 +123,35 @@ function buildStatusUrl(name) {
 /** @param {{ name?: String, table: Array<{ ip, dev, mac, state }>, filters: {ip, dev, nud, mac}} | { name?: String, error }} data from /api/status */
 function renderStatus(data) {
   const tbl = document.createElement("table");
+  tbl.className = "table";
   tbl.innerHTML = `<tr><th>IP</th><th>MAC</th><th>State</th><th>IF</th></tr>`;
   for (const row of data.table || []) {
     const tr = document.createElement("tr");
-    const mac = row.mac ?? "";
-    const dev = row.dev ?? "";
-    tr.innerHTML = `<td>${row.ip}</td><td>${mac}</td><td>${row.state}</td><td>${dev}</td>`;
+    const ip = row.ip || "";
+    const mac = row.mac || "";
+    const dev = row.dev || "";
+    const state = row.state || "";
+    tr.innerHTML = `
+      <td>${
+        ip
+          ? `<a href="#" class="pick" data-value="${ip}" title="filter by ip">${ip}</a>`
+          : ""
+      }</td>
+      <td>${
+        mac
+          ? `<a href="#" class="pick" data-value="${mac}" title="filter by mac">${mac}</a>`
+          : ""
+      }</td>
+      <td>${
+        state
+          ? `<a href="#" class="pick" data-value="${state}" title="filter by state">${state}</a>`
+          : ""
+      }</td>
+      <td>${
+        dev
+          ? `<a href="#" class="pick" data-value="${dev}" title="filter by interface">${dev}</a>`
+          : ""
+      }</td>`;
     tbl.appendChild(tr);
   }
   elHtml.innerHTML = "";
@@ -92,6 +174,8 @@ function renderStatus(data) {
     }
   }
   elHtml.appendChild(tbl);
+
+  // click-to-filter handled by a single, persistent delegated listener (set once at load)
 
   if ((data.table || []).length > 0) {
     const best = data.table.reduce((a, b) =>
@@ -134,6 +218,72 @@ async function fetchStatus(name) {
   }
 }
 
+function renderLeases(leases) {
+  if (!elLeases) return;
+  if (!Array.isArray(leases) || leases.length === 0) {
+    elLeases.textContent = "no leases";
+    return;
+  }
+  const tbl = document.createElement("table");
+  tbl.className = "table";
+  tbl.innerHTML = `<tr><th></th><th>IP</th><th>MAC</th><th>Name</th><th>Expires</th></tr>`;
+  const nowSec = Math.floor(Date.now() / 1000);
+  for (const l of leases) {
+    const tr = document.createElement("tr");
+    const exp = Number(l.expires_epoch || 0);
+    const expired = exp > 0 && exp <= nowSec;
+    const when = exp > 0 ? new Date(exp * 1000) : null;
+    const whenText = when ? when.toLocaleString() : "";
+    let dotClass = "dot ok";
+    if (expired) {
+      dotClass = "dot bad";
+    } else if (typeof l?.rank === "number") {
+      if (l.rank >= 5) dotClass = "dot ok";
+      else if (l.rank >= 2) dotClass = "dot warn";
+      else dotClass = "dot bad";
+    }
+    const title = expired
+      ? "expired"
+      : l?.nud_state
+      ? String(l.nud_state).toLowerCase()
+      : "unknown";
+    const ip = l.ip || "";
+    const mac = l.mac || "";
+    const name = l.name || "";
+    tr.innerHTML = `
+      <td><span class="${dotClass}" title="${title}"></span></td>
+      <td>${
+        ip
+          ? `<a href="#" class="pick" data-value="${ip}" title="filter by ip">${ip}</a>`
+          : ""
+      }</td>
+      <td>${
+        mac
+          ? `<a href="#" class="pick" data-value="${mac}" title="filter by mac">${mac}</a>`
+          : ""
+      }</td>
+      <td>${
+        name
+          ? `<a href="#" class="pick" data-value="${name}" title="filter by name">${name}</a>`
+          : ""
+      }</td>
+      <td><span class="tiny">${whenText}</span></td>`;
+    tbl.appendChild(tr);
+  }
+  elLeases.innerHTML = "";
+  elLeases.appendChild(tbl);
+  // click-to-filter handled by a single, persistent delegated listener (set once at load)
+}
+
+async function fetchLeases() {
+  try {
+    const r = await fetch("/api/dhcp_leases?include_state=1");
+    if (!r.ok) return;
+    const leases = await r.json();
+    renderLeases(leases);
+  } catch {}
+}
+
 async function sendWake(name) {
   setPill("warn", "waking…");
   elLog.textContent = "POST /wake?name=" + name;
@@ -169,14 +319,18 @@ elWake.addEventListener("click", () => {
 elName.addEventListener("keydown", (e) => {
   if (e.key === "Enter") elCheck.click();
 });
+elName.addEventListener("input", updatePreview);
 
 // init
 const initial = loadName();
 if (initial) {
   elName.value = initial;
+  updatePreview();
   setLink(initial); // when the permalink doing YOUR job
   // auto-check on load in this A/B page
   fetchStatus(initial);
+  fetchLeases();
 } else {
   setPill("warn", "unknown");
+  fetchLeases();
 }

@@ -4,9 +4,9 @@ use axum::{
 };
 use tokio::net::TcpListener;
 mod arpparse;
+pub mod assets;
 mod dhcpparse;
 mod route;
-pub mod r#static;
 mod utils;
 use std::io;
 

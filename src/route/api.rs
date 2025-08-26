@@ -1,4 +1,4 @@
-use crate::utils::de_many;
+use crate::utils::parse::{boolish_str, de_many, serialize_macs};
 use std::collections::HashSet;
 use std::net::IpAddr;
 
@@ -11,7 +11,6 @@ use axum::{
 };
 use axum_extra::extract::Query;
 use macaddr::MacAddr;
-use serde::ser::Serializer;
 use serde_with::skip_serializing_none;
 
 use crate::{
@@ -25,9 +24,18 @@ use crate::{
 
 // Smart redirect: accept IP, MAC, dev, or NUD state and redirect to /api/status accordingly
 pub async fn status_smart_redirect(Path(q): Path<String>) -> Redirect {
-    let s = q.trim();
+    let s = if cfg!(feature = "very-smart-parsing") {
+        crate::utils::parse::extract_host(&q)
+    } else {
+        q.trim()
+    };
     // 1) IP
-    if let Ok(ip) = s.parse::<IpAddr>() {
+    let ip = if cfg!(feature = "very-smart-parsing") {
+        crate::utils::parse::parse_numeric_ipv4(s).or_else(|| s.parse::<IpAddr>().ok())
+    } else {
+        s.parse::<IpAddr>().ok()
+    };
+    if let Some(ip) = ip {
         return Redirect::to(&format!("/api/status?ip={ip}"));
     }
     // 2) MAC
@@ -46,7 +54,7 @@ pub async fn status_smart_redirect(Path(q): Path<String>) -> Redirect {
     if tokio::net::lookup_host((s, 0)).await.is_ok() {
         return Redirect::to(&format!("/api/status?name={}", urlencoding::encode(s)));
     }
-    // Default: name last
+    // Default: name last // it will fail also
     Redirect::to(&format!("/api/status?name={}", urlencoding::encode(s)))
 }
 
@@ -54,9 +62,42 @@ pub async fn devs_router() -> Json<Vec<String>> {
     dev::devs_sorted().into()
 }
 
-async fn get_dhcp_leases() -> impl IntoResponse {
-    match dhcpparse::read_dhcp_leases().await {
-        Ok(leases) => (StatusCode::OK, Json(leases)).into_response(),
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+struct DhcpLeasesQueryRaw {
+    include_state: Option<String>,
+}
+
+// #[skip_serializing_none]
+// #[derive(Debug, Clone, serde::Serialize)]
+// struct DhcpLeaseOut {
+//     expires_epoch: u64,
+//     ip: IpAddr,
+//     #[serde(serialize_with = "serialize_mac")]
+//     mac: macaddr::MacAddr,
+//     // #[serde(skip_serializing_if = "Option::is_none")]
+//     name: Option<String>,
+//     // extras
+//     // #[serde(skip_serializing_if = "Option::is_none")]
+//     nud_state: Option<NUDState>,
+//     // #[serde(skip_serializing_if = "Option::is_none")]
+//     rank: Option<u8>,
+// }
+
+async fn get_dhcp_leases(Query(raw): Query<DhcpLeasesQueryRaw>) -> impl IntoResponse {
+    let include_state = raw
+        .include_state
+        .as_deref()
+        .map(boolish_str)
+        .unwrap_or(false);
+
+    match dhcpparse::read_dhcp_leases_with_names().await {
+        Ok(leases_with_names) => {
+            if !include_state {
+                return (StatusCode::OK, Json(leases_with_names)).into_response();
+            }
+            let out = crate::utils::query::enrich_leases_with_nud_state(leases_with_names).await;
+            (StatusCode::OK, Json(out)).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(StatusError {
@@ -110,13 +151,6 @@ pub struct Filters {
     mac: Vec<MacAddr>,
 }
 
-fn serialize_macs<S>(macs: &[MacAddr], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    let strings: Vec<String> = macs.iter().map(|m| m.to_string()).collect();
-    serde::Serialize::serialize(&strings, serializer)
-}
 #[skip_serializing_none]
 #[derive(Debug, serde::Serialize)]
 pub struct StatusError {

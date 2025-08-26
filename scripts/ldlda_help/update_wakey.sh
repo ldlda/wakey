@@ -16,7 +16,9 @@
 set -eu
 
 ARCH=${WAKEY_ARCH:-armv7-unknown-linux-musleabihf}
-TMPFILE="/tmp/wakey-rootfs.$$.$ARCH.tgz"
+TMPDIR="/var/tmp"
+TMPFILE="$TMPDIR/wakey-rootfs.$$.$ARCH.tgz"
+STAGING="$TMPDIR/wakey-rootfs.$$.$ARCH"
 
 log() { echo "[update_wakey] $*"; }
 fail() { echo "[update_wakey] ERROR: $*" >&2; exit 1; }
@@ -90,12 +92,32 @@ main() {
 	fi
 
 	log "installing"
-	tar -xz -f "$TMPFILE" -C / || fail "extract failed"
+	mkdir -p "$TMPDIR" "$STAGING"
+	tar -xz -f "$TMPFILE" -C "$STAGING" || fail "extract failed"
+
+	# Ensure execute bits on staged files we know should be executable
+	for f in \
+		"$STAGING/etc/init.d/"* \
+		"$STAGING/etc/ldlda_help/"*.sh \
+		"$STAGING/root/.bin/wakey" \
+		"$STAGING/root/.bin/kill_wakey.sh"; do
+		[ -e "$f" ] && chmod +x "$f" 2>/dev/null || true
+	done
+
+	# Normalize line endings for shell scripts (avoid CRLF issues on OpenWrt)
+	for f in \
+		"$STAGING/etc/init.d/"* \
+		"$STAGING/etc/ldlda_help/"*.sh; do
+		[ -f "$f" ] && sed -i 's/\r$//' "$f" 2>/dev/null || true
+	done
+
+	# Copy staged tree into /
+	tar -C "$STAGING" -cf - . | tar -C / -xpf - || fail "install copy failed"
+
 	rm -f "$TMPFILE"
+	rm -rf "$STAGING"
 
 	if [ -f /etc/init.d/wakey ]; then
-		chmod +x /etc/init.d/wakey || true
-		chmod +x /etc/init.d/kill_wakey.sh || true
 		/etc/init.d/wakey enable || true
 		/etc/init.d/wakey restart || /etc/init.d/wakey start || true
 	fi

@@ -1,16 +1,75 @@
-use std::{collections::HashSet, net::IpAddr};
+use crate::arpparse::NUDState;
+use crate::dhcpparse::DhcpLeaseLine;
+use crate::utils::parse::serialize_mac;
+use std::net::IpAddr;
+
+#[skip_serializing_none]
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DhcpLeaseOut {
+    pub expires_epoch: u64,
+    pub ip: IpAddr,
+    #[serde(serialize_with = "serialize_mac")]
+    pub mac: macaddr::MacAddr,
+    pub name: Option<String>,
+    pub nud_state: Option<NUDState>,
+    pub rank: Option<u8>,
+}
+
+/// Enrich DHCP leases with NUD state and rank using get_macs
+pub async fn enrich_leases_with_nud_state(leases: Vec<DhcpLeaseLine>) -> Vec<DhcpLeaseOut> {
+    use crate::utils::query::get_macs;
+    let ips: Vec<IpAddr> = leases.iter().map(|l| l.ip).collect();
+    let mut map: std::collections::HashMap<IpAddr, (NUDState, u8)> =
+        std::collections::HashMap::new();
+    if let Ok(rows) = get_macs(None, Some(&ips), None, None).await {
+        for row in rows {
+            let state = row.state;
+            let r = state.rank();
+            map.entry(row.ip)
+                .and_modify(|e| {
+                    if r > e.1 {
+                        *e = (state, r)
+                    }
+                })
+                .or_insert((state, r));
+        }
+    }
+    leases
+        .into_iter()
+        .map(|l| DhcpLeaseOut {
+            expires_epoch: l.expires_epoch,
+            ip: l.ip,
+            mac: l.mac,
+            name: l.name,
+            nud_state: map.get(&l.ip).map(|(s, _)| *s),
+            rank: map.get(&l.ip).map(|(_, r)| *r),
+        })
+        .collect()
+}
+use std::collections::HashSet;
 
 use macaddr::MacAddr;
+use serde_with::skip_serializing_none;
 // use tokio::io;
 
 use crate::{
-    arpparse::{self, IpNeighLine, NUDState},
+    arpparse::{self, IpNeighLine},
     utils::{
         cmd::exec_command,
         error::{self, Error, Result},
-        get_ips,
     },
 };
+
+/// this is because i like [`IpAddr`] more than [`SocketAddr`](std::net::SocketAddr)
+pub async fn get_ips(machine_name: &str) -> error::Result<Vec<IpAddr>> {
+    let it = tokio::net::lookup_host((machine_name, 0))
+        .await
+        .map_err(|e| error::Error::DnsResolve {
+            name: machine_name.to_string(),
+            source: e,
+        })?;
+    Ok(it.map(|c| c.ip()).collect())
+}
 
 pub async fn _get_macs_2_1(machine_name: &str) -> Result<HashSet<(IpAddr, MacAddr, NUDState)>> {
     Ok(get_macs_1(machine_name)
@@ -92,7 +151,7 @@ pub async fn get_macs(
 
     // Helper to convert NUDState to the string expected by `ip neigh`
     let nud_arg = state.map(NUDState::as_ip_neigh_arg);
-    // let nud_arg = Rc::new(state.map(|s| s.to_string().to_lowercase()));
+    // let nud_arg = state.map(|s| s.to_string().to_lowercase());
     // Build a closure to run one `ip neigh` invocation and parse results
     let run_one = |to_ip: Option<IpAddr>| async move {
         let mut args: Vec<String> = vec!["neigh".into(), "show".into()];
@@ -141,7 +200,7 @@ pub async fn get_macs(
 }
 
 pub mod dev {
-    use std::{collections::HashSet, sync::LazyLock};
+    use std::collections::HashSet;
 
     pub fn get_dev() -> HashSet<String> {
         // Prefer /sys/class/net, fallback to /proc/net/dev; filter out loopback
@@ -169,15 +228,13 @@ pub mod dev {
         devs
     }
 
-    pub static DEVS: LazyLock<HashSet<String>> = LazyLock::new(get_dev);
-
     pub fn devs_sorted() -> Vec<String> {
-        let mut v: Vec<String> = DEVS.iter().cloned().collect();
+        let mut v: Vec<String> = get_dev().into_iter().collect();
         v.sort();
         v
     }
 
     pub fn has_dev(name: &str) -> bool {
-        DEVS.contains(name)
+        get_dev().contains(name)
     }
 }

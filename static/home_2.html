@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>wakey • home_2</title>
+    <title>wakey • home</title>
     <link rel="stylesheet" href="/home_2.css" />
     <script type="module" src="/home_2.js" defer></script>
   </head>
   <body>
     <div class="wrap">
       <header>
-        <h1>home_2 <span class="muted">A/B test page</span></h1>
+        <h1>home <span class="muted">ping your device with a WoL</span></h1>
         <span id="status-pill" class="pill warn">unknown</span>
       </header>
 
@@ -18,7 +18,7 @@
         <input
           id="name"
           type="text"
-          placeholder="target name e.g. lda.lan"
+          placeholder="target (name, ip, mac...)"
           spellcheck="false"
         />
         <button id="check" class="secondary">Check</button>
@@ -26,16 +26,24 @@
       </div>
       <div class="row muted" style="gap: 16px">
         <span
-          >Uses query <span title="available keys: name, ip, dev, nud">(?name=...)</span> on this page to view the
-          status.<!-- and header (X-Target-Name) so either extractor
+          >Uses query
+          <span title="available keys: name, ip, mac, dev, nud"
+            >(?name=...)</span
+          >
+          on this page to view the status.<!-- and header (X-Target-Name) so either extractor
           path works. --></span
-        >
-        <a id="permalink" href="#">permalink</a>
+        ><span id="preview" class="tiny"></span
+        ><a id="permalink" href="#">permalink</a>
       </div>
 
       <section id="out" class="card">
         <pre id="log">ready.</pre>
         <div id="html"></div>
+      </section>
+
+      <section id="leases" class="card">
+        <h3 style="margin-top: 0">DHCP leases</h3>
+        <div id="leases_html"></div>
       </section>
     </div>
   </body>

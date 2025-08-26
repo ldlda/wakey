@@ -37,6 +37,9 @@ WAKEY_HOST=git.ldlda.com WAKEY_OWNER=lda WAKEY_REPO=wakey sh /etc/ldlda_help/upd
 ## Scripts overview
 
 - `act_runner.ps1` — Start/seed the local Gitea runner. Use `-Attach` to see logs, `-ForceConfigure` to register non-interactively.
+- `dev_push.ps1` — Fast dev loop: build + upload to router. Usage:
+  - `./scripts/dev_push.ps1 -Pass <password> [-HostName <ip>] [-RemotePath </root/.bin/wakey>] [-Restart] [-Quiet]`
+  - Uploads to `<RemotePath>.tmp` then atomically moves into place; `-Restart` restarts the service; `-Quiet` silences MOTD.
 - `cross_build.ps1` — Simple wrapper for `cargo build` per target (default: armv7-unknown-linux-musleabihf).
 - `package_rootfs.ps1` — Produces `dist/wakey-rootfs-<version>-<target>.tgz` with `/root/.bin/wakey` and `/etc/init.d/*`.
 - `package.ps1` — Dev bundle with binaries + init scripts (not a rootfs layout).

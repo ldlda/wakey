@@ -15,7 +15,7 @@ fi
 kill -TERM "$pids" 2>/dev/null || true
 
 # Optional: hard kill if still alive after a short grace
-sleep 1 # uhhh sleep is stupid
+usleep 250000 # uhhh sleep is stupid
 remain=""
 for p in $pids; do
 	kill -0 "$p" 2>/dev/null && remain="$remain $p"

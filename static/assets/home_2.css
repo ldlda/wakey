@@ -111,6 +111,13 @@ pre {
 a {
   color: #93c5fd;
 }
+.table a.pick {
+  color: #93c5fd;
+  text-decoration: none;
+}
+.table a.pick:hover {
+  text-decoration: underline;
+}
 
 #html {
   overflow-y: auto;
@@ -125,4 +132,40 @@ a {
   margin-bottom: 8px;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* simple table styling */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table th,
+.table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #2a2a2a;
+  font-size: 12px;
+}
+.table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tiny {
+  font-size: 11px;
+}
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.dot.ok {
+  background: var(--ok);
+}
+.dot.bad {
+  background: var(--bad);
+}
+.dot.warn {
+  background: var(--warn);
 }

@@ -15,3 +15,9 @@ start_service() {
 stop_service() {
   : # one-shot
 }
+
+# Test manually:
+#   chmod +x /etc/init.d/update_wakey
+#   /etc/init.d/update_wakey start
+# Or enable on boot:
+#   /etc/init.d/update_wakey enable

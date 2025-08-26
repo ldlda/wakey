@@ -2,7 +2,7 @@ pub mod api;
 
 pub use crate::route::api::{DeviceQuery, api_router};
 use crate::{
-    r#static as st,
+    assets,
     utils::{ping::_ping_ip, wake::wake},
 };
 
@@ -17,7 +17,7 @@ use axum_extra::extract::Query;
 use crate::{MACHINE_NAME, utils::_status_build};
 
 pub async fn home_2() -> Html<&'static str> {
-    Html(st::HOME_2)
+    Html(assets::HOME_2)
 }
 async fn home_2_css() -> impl IntoResponse {
     (
@@ -25,7 +25,7 @@ async fn home_2_css() -> impl IntoResponse {
             (header::CONTENT_TYPE, "text/css; charset=utf-8"),
             (header::CACHE_CONTROL, "public, max-age=300"),
         ],
-        st::HOME_2_CSS,
+        assets::HOME_2_CSS,
     )
 }
 async fn home_2_js() -> impl IntoResponse {
@@ -34,7 +34,7 @@ async fn home_2_js() -> impl IntoResponse {
             (header::CONTENT_TYPE, "application/javascript"),
             (header::CACHE_CONTROL, "public, max-age=300"),
         ],
-        st::HOME_2_JS,
+        assets::HOME_2_JS,
     )
 }
 
