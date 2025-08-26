@@ -55,21 +55,13 @@ pub async fn devs_router() -> Json<Vec<String>> {
 }
 
 async fn get_dhcp_leases() -> impl IntoResponse {
-    match tokio::task::spawn_blocking(dhcpparse::read_dhcp_leases).await {
-        Ok(Ok(leases)) => (StatusCode::OK, Json(leases)).into_response(),
-        Ok(Err(e)) => (
+    match dhcpparse::read_dhcp_leases().await {
+        Ok(leases) => (StatusCode::OK, Json(leases)).into_response(),
+        Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(StatusError {
                 name: None,
                 error: e.to_string(),
-            }),
-        )
-            .into_response(),
-        Err(join_err) => (
-            StatusCode::BAD_GATEWAY,
-            Json(StatusError {
-                name: None,
-                error: join_err.to_string(),
             }),
         )
             .into_response(),

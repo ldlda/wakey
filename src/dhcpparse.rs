@@ -1,7 +1,7 @@
-use std::{fs::read_to_string, io, net::IpAddr};
-
 use macaddr::MacAddr;
 use serde::Serializer;
+use std::io::{self, ErrorKind};
+use std::net::IpAddr;
 
 /// A single line from /tmp/dhcp.leases
 #[derive(Debug, Clone, serde::Serialize)]
@@ -34,8 +34,11 @@ pub fn parse_dhcp_lease_line(line: &str) -> Option<DhcpLeaseLine> {
     })
 }
 
-/// Read all leases from /tmp/dhcp.leases
-pub fn read_dhcp_leases() -> io::Result<Vec<DhcpLeaseLine>> {
-    let file = read_to_string("/tmp/dhcp.leases")?;
-    Ok(file.lines().flat_map(parse_dhcp_lease_line).collect())
+/// Read all leases from /tmp/dhcp.leases (simple and fast)
+pub async fn read_dhcp_leases() -> io::Result<Vec<DhcpLeaseLine>> {
+    match tokio::fs::read_to_string("/tmp/dhcp.leases").await {
+        Ok(file) => Ok(file.lines().filter_map(parse_dhcp_lease_line).collect()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e),
+    }
 }

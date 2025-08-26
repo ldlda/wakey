@@ -12,14 +12,14 @@ fi
 [ -n "$pids" ] || exit 0
 
 # Send TERM first
-kill -TERM $pids 2>/dev/null || true
+kill -TERM "$pids" 2>/dev/null || true
 
 # Optional: hard kill if still alive after a short grace
-sleep 0.2
+sleep 1 # uhhh sleep is stupid
 remain=""
 for p in $pids; do
 	kill -0 "$p" 2>/dev/null && remain="$remain $p"
 done
-[ -z "$remain" ] || kill -KILL $remain 2>/dev/null || true
+[ -z "$remain" ] || kill -KILL "$remain" 2>/dev/null || true
 
 exit 0

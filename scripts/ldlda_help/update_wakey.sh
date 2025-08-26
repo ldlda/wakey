@@ -45,7 +45,6 @@ fetch() {
 	if command -v uclient-fetch >/dev/null 2>&1; then
 		uclient-fetch -O "$2" "$1" || return 1
 	elif command -v wget >/dev/null 2>&1; then
-		# shellcheck disable=SC2086
 		wget ${WAKEY_INSECURE:+--no-check-certificate} -O "$2" "$1" || return 1
 	elif command -v curl >/dev/null 2>&1; then
 		if [ -n "${WAKEY_INSECURE:-}" ]; then
@@ -96,6 +95,7 @@ main() {
 
 	if [ -f /etc/init.d/wakey ]; then
 		chmod +x /etc/init.d/wakey || true
+		chmod +x /etc/init.d/kill_wakey.sh || true
 		/etc/init.d/wakey enable || true
 		/etc/init.d/wakey restart || /etc/init.d/wakey start || true
 	fi

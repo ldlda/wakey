@@ -46,7 +46,6 @@ pub fn home_2_route() -> Router {
         .route("/home_2.js", get(home_2_js)) //js
 }
 
-
 pub async fn wake_handler(
     Query(DeviceQuery { name, .. }): Query<DeviceQuery>,
 ) -> axum::response::Result<impl IntoResponse> {
@@ -59,7 +58,6 @@ pub async fn wake_handler(
         _ => Err((StatusCode::GATEWAY_TIMEOUT, "Wake failed").into()),
     }
 }
-
 
 pub async fn _get_status_2(q: Query<DeviceQuery>) -> Html<String> {
     let name = match q {
@@ -96,5 +94,3 @@ pub async fn _home() -> Html<String> {
           // }
     ))
 }
-
-
