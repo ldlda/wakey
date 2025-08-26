@@ -9,7 +9,7 @@
 param(
     [string]$Version,
     [switch]$Tag,
-    [switch]$Publish
+    [switch]$Publish,
     [string]$Registry
 )
 
