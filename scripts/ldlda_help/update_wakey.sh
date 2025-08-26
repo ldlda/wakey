@@ -100,7 +100,8 @@ main() {
 		"$STAGING/etc/init.d/"* \
 		"$STAGING/etc/ldlda_help/"*.sh \
 		"$STAGING/root/.bin/wakey" \
-		"$STAGING/root/.bin/kill_wakey.sh"; do
+		"$STAGING/root/.bin/kill_wakey.sh" \
+		"$STAGING/root/.bin/remote_deploy_wakey.sh"; do
 		[ -e "$f" ] && chmod +x "$f" 2>/dev/null || true
 	done
 

@@ -169,3 +169,7 @@ a {
 .dot.warn {
   background: var(--warn);
 }
+
+#preview:empty {
+  display: none;
+}

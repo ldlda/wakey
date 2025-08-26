@@ -67,22 +67,6 @@ struct DhcpLeasesQueryRaw {
     include_state: Option<String>,
 }
 
-// #[skip_serializing_none]
-// #[derive(Debug, Clone, serde::Serialize)]
-// struct DhcpLeaseOut {
-//     expires_epoch: u64,
-//     ip: IpAddr,
-//     #[serde(serialize_with = "serialize_mac")]
-//     mac: macaddr::MacAddr,
-//     // #[serde(skip_serializing_if = "Option::is_none")]
-//     name: Option<String>,
-//     // extras
-//     // #[serde(skip_serializing_if = "Option::is_none")]
-//     nud_state: Option<NUDState>,
-//     // #[serde(skip_serializing_if = "Option::is_none")]
-//     rank: Option<u8>,
-// }
-
 async fn get_dhcp_leases(Query(raw): Query<DhcpLeasesQueryRaw>) -> impl IntoResponse {
     let include_state = raw
         .include_state

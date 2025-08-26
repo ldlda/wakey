@@ -10,11 +10,23 @@ param(
     [string]$Version,
     [switch]$Tag,
     [switch]$Publish
-    [switch]$ForceTag,
     [string]$Registry
 )
 
 $ErrorActionPreference = 'Stop'
+
+# If no version provided, deduce from Cargo.toml
+if (-not $Version) {
+    $cargoToml = Get-Content Cargo.toml -Raw
+    if ($cargoToml -match 'version\s*=\s*"([^"]+)"') {
+        $Version = $matches[1]
+        Write-Host "Deduced version from Cargo.toml: $Version"
+    }
+    else {
+        Write-Error "Could not deduce version from Cargo.toml. Please specify -Version."
+        exit 1
+    }
+}
 
 if ($Version) {
     $pattern = '(?m)^version\s*=\s*"[^"]+"'
@@ -39,6 +51,15 @@ if ($Publish) {
 }
 
 if ($Tag -and $Version) {
+    # If you git push a tag, this will trigger the act_runner and the release workflow on your self-hosted runner (see .gitea/workflows/release.yml)
+    $actRunnerScript = Join-Path (Split-Path -Parent $PSScriptRoot) 'act_runner.ps1'
+    if (Test-Path $actRunnerScript) {
+        Write-Host "Ensuring act_runner is running..."
+        & $actRunnerScript
+    }
+    else {
+        Write-Warning "act_runner.ps1 not found at $actRunnerScript. Skipping runner start."
+    }
     git tag -f "v$Version"
     git push -f origin "v$Version"
 }

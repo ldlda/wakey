@@ -4,35 +4,36 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
 
 ## Quick start (recommended)
 
-1. Start your Gitea runner on this Windows PC
+1. Start your Gitea runner on this Windows PC (if not already running):
 
-```powershell
-./scripts/act_runner.ps1
-```
+    ```powershell
+    ./scripts/act_runner.ps1
+    ```
 
-If first-time, it prints the exact register command. Run it once, check labels include `windows:host,self-hosted`, then rerun the script.
+    If first-time, it prints the exact register command. Run it once, check labels include `windows:host,self-hosted`, then rerun the script.
 
-1. Tag and push to trigger CI
+2. Publish, tag, and push (recommended):
 
-```powershell
-git tag v0.1.0
-git push origin v0.1.0
-```
+    ```powershell
+    ./scripts/publish.ps1 -Tag
+    ```
 
-1. Install on the router
+    This will bump the version (if you specify one), build, ensure the runner is started, tag, and push. To also publish to the registry, add `-Publish`.
 
-Use the release asset URL from your Gitea Release page:
+3. Install on the router
 
-```sh
-wget -O- https://<gitea>/<owner>/<repo>/releases/download/v0.1.0/wakey-rootfs-v0.1.0-armv7-unknown-linux-musleabihf.tgz | tar -xz -C /
-chmod +x /etc/init.d/wakey && /etc/init.d/wakey enable && /etc/init.d/wakey restart
-```
+    Use the release asset URL from your Gitea Release page:
 
-Alternatively, use the updater on the router to fetch the latest automatically:
+    ```sh
+    wget -O- https://<gitea>/<owner>/<repo>/releases/download/v0.1.0/wakey-rootfs-v0.1.0-armv7-unknown-linux-musleabihf.tgz | tar -xz -C /
+    chmod +x /etc/init.d/wakey && /etc/init.d/wakey enable && /etc/init.d/wakey restart
+    ```
 
-```sh
-WAKEY_HOST=git.ldlda.com WAKEY_OWNER=lda WAKEY_REPO=wakey sh /etc/ldlda_help/update_wakey.sh
-```
+    Alternatively, use the updater on the router to fetch the latest automatically:
+
+    ```sh
+    WAKEY_HOST=git.ldlda.com WAKEY_OWNER=lda WAKEY_REPO=wakey sh /etc/ldlda_help/update_wakey.sh
+    ```
 
 ## Scripts overview
 
