@@ -1,8 +1,12 @@
 pub mod api;
+pub mod devs;
+pub mod dhcp;
+pub mod status;
+pub mod wake;
 
 pub use crate::route::api::{DeviceQuery, api_router};
 use crate::{
-    assets,
+    assets::{self},
     utils::{ping::_ping_ip, wake::wake},
 };
 
@@ -14,37 +18,8 @@ use axum::{
 };
 use axum_extra::extract::Query;
 
+use crate::utils::route::serve_js;
 use crate::{MACHINE_NAME, utils::_status_build};
-
-pub async fn home_2() -> Html<&'static str> {
-    Html(assets::HOME_2)
-}
-async fn home_2_css() -> impl IntoResponse {
-    (
-        [
-            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
-            (header::CACHE_CONTROL, "public, max-age=300"),
-        ],
-        assets::HOME_2_CSS,
-    )
-}
-async fn home_2_js() -> impl IntoResponse {
-    (
-        [
-            (header::CONTENT_TYPE, "application/javascript"),
-            (header::CACHE_CONTROL, "public, max-age=300"),
-        ],
-        assets::HOME_2_JS,
-    )
-}
-
-/// all the pages related to home_2
-pub fn home_2_route() -> Router {
-    Router::new()
-        .route("/home_2", get(home_2))
-        .route("/home_2.css", get(home_2_css))
-        .route("/home_2.js", get(home_2_js)) //js
-}
 
 pub async fn wake_handler(
     Query(DeviceQuery { name, .. }): Query<DeviceQuery>,
@@ -93,4 +68,32 @@ pub async fn _home() -> Html<String> {
           //     Err(_) => "off",
           // }
     ))
+}
+pub async fn home_2() -> Html<&'static str> {
+    Html(assets::HOME_2_HTML)
+}
+pub fn home_2_route() -> Router {
+    use assets::*;
+    Router::new()
+        .route("/home_2", get(|| async { Html(HOME_2_HTML) }))
+        .route("/home_2/", get(|| async { Html(HOME_2_HTML) }))
+        .route("/home_2.html", get(|| async { Html(HOME_2_HTML) }))
+        .route(
+            "/home_2/styles.css",
+            get(|| async {
+                (
+                    [
+                        (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+                        (header::CACHE_CONTROL, "public, max-age=300"),
+                    ],
+                    home_2::STYLES_CSS,
+                )
+            }),
+        )
+        .route("/home_2/main.js", get(|| serve_js(home_2::MAIN_JS)))
+        .route("/home_2/leases.js", get(|| serve_js(home_2::LEASES_JS)))
+        .route("/home_2/status.js", get(|| serve_js(home_2::STATUS_JS)))
+        .route("/home_2/utils.js", get(|| serve_js(home_2::UTILS_JS)))
+        .route("/home_2/wake.js", get(|| serve_js(home_2::WAKE_JS)))
+        .route("/home_2/dom.js", get(|| serve_js(home_2::DOM_JS)))
 }

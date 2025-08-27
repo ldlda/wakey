@@ -1187,6 +1187,7 @@ dependencies = [
  "futures",
  "macaddr",
  "serde",
+ "serde_html_form",
  "serde_json",
  "serde_with",
  "strum",

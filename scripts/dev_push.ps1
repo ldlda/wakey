@@ -15,140 +15,105 @@ $ErrorActionPreference = 'Stop'
 try { $PSStyle.OutputRendering = 'Host' } catch {}
 
 function Invoke-Ext {
-    param(
-        [Parameter(Mandatory = $true)][string]$Exe,
-        [Parameter(Mandatory = $true)][string[]]$Args,
-        [Parameter(Mandatory = $true)][string]$Label
-    )
-    $displayArgs = @($Args)
+    param($Exe, $Arguments, $Label)
+    $displayArgs = $Arguments.Clone()
     for ($i = 0; $i -lt $displayArgs.Count; $i++) {
-        if ($displayArgs[$i] -eq '-pw' -and ($i + 1) -lt $displayArgs.Count) { $displayArgs[$i + 1] = '****' } # lowkey leaked my password
+        if ($displayArgs[$i] -eq '-pw' -and ($i + 1) -lt $displayArgs.Count) {
+            $displayArgs[$i + 1] = '****'
+        }
     }
     Write-Host ("[{0}] {1} {2}" -f $Label, $Exe, ($displayArgs -join ' ')) -ForegroundColor Cyan
-    $out = & $Exe @Args 2>&1
-    $code = $LASTEXITCODE
-    if ($code -ne 0) {
-        Write-Error ("{0} failed ({1}):`n{2}" -f $Label, $code, ($out -join "`n"))
-        throw ("{0} failed ({1})" -f $Label, $code)
+
+    $out = & $Exe @Arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error ("{0} failed ({1}):`n{2}" -f $Label, $LASTEXITCODE, ($out -join "`n"))
+        throw ("{0} failed ({1})" -f $Label, $LASTEXITCODE)
     }
     return $out
 }
 
+function Get-DeployScript {
+    param($DeployPreferred, $DeployTmp, $RemoteTmp, $RemotePath, $RestartFlag)
+    return @"
+DEPLOY=$DeployPreferred;
+if [ ! -x "`$DEPLOY" ] && [ -f $DeployTmp ]; then
+  sed -i "s/\r$//" $DeployTmp 2>/dev/null || true
+  chmod +x $DeployTmp
+  DEPLOY=$DeployTmp
+fi
+sh "`$DEPLOY" $RemoteTmp $RemotePath $RestartFlag
+"@ # -replace "`r", "" -replace "`r`n", "`n"
+
+}
+
+function Invoke-Scp {
+    param($Local, $Dest, $Pass, $HostKey, [switch]$Quiet)
+    if ($pscp = Get-Command pscp.exe -ErrorAction SilentlyContinue) {
+        $arguments = @('-scp')
+        if ($Quiet) { $arguments += '-q' }
+        if ($HostKey) { $arguments += @('-batch', '-hostkey', $HostKey) }
+        if ($Pass) { $arguments += @('-pw', $Pass) }
+        $arguments += @($Local, $Dest)
+        Invoke-Ext -Exe $pscp.Path -Arguments $arguments -Label 'scp'
+    }
+    else {
+        $arguments = @('-O')
+        if ($Quiet) { $arguments += '-q' }
+        $arguments += @($Local, $Dest)
+        Invoke-Ext -Exe 'scp' -Arguments $arguments -Label 'scp'
+    }
+}
+
+function Invoke-Ssh {
+    param($Cmd, $User, $Remote, $Pass, [switch]$Quiet)
+    $Cmd = $Cmd -replace "`r`n", "`n" -replace "`r", ""
+    if ($plink = Get-Command plink.exe -ErrorAction SilentlyContinue) {
+        $arguments = @('-batch', '-ssh')
+        if ($Pass) { $arguments += @('-pw', $Pass) }
+        $arguments += "$User@$Remote", $Cmd
+        Invoke-Ext -Exe $plink.Path -Arguments $arguments -Label 'ssh'
+    }
+    else {
+        $arguments = @()
+        if ($Quiet) { $arguments += '-q' }
+        $arguments += "$User@$Remote", $Cmd
+        Invoke-Ext -Exe 'ssh' -Arguments $arguments -Label 'ssh'
+    }
+}
+
+#---- Main Flow ----
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
+
 try {
     Write-Host "[build] cargo build --release --target $Target" -ForegroundColor Cyan
     cargo build --release --target $Target
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed ($LASTEXITCODE)" }
 
-    $local = Join-Path $repoRoot ("target/" + $Target + "/release/" + $BinName)
-    if (-not (Test-Path $local)) { throw "binary not found: $local" }
+    $localBin = Join-Path $repoRoot "target/$Target/release/$BinName"
+    if (-not (Test-Path $localBin)) { throw "binary not found: $localBin" }
 
     $remoteTmp = "$RemotePath.tmp"
-    $destTmp = "{0}@{1}:{2}" -f $User, $HostName, $remoteTmp
+    $destTmp = "$User@${HostName}:$remoteTmp"
     $localDeploy = Join-Path $repoRoot 'scripts/remote_deploy_wakey.sh'
     $deployTmp = '/var/tmp/remote_deploy_wakey.sh'
-    $destDeployTmp = "{0}@{1}:{2}" -f $User, $HostName, $deployTmp
     $deployPreferred = '/root/.bin/remote_deploy_wakey.sh'
 
-    if ($Pass) {
-        $pscp = Get-Command pscp.exe -ErrorAction SilentlyContinue
-        if ($pscp) {
-            $pscpArgs = @()
-            if ($Quiet) { $pscpArgs += '-q' }
-            if ($HostKey) { $pscpArgs += @('-batch', '-scp', '-hostkey', $HostKey, '-pw', $Pass, $local, $destTmp) }
-            else { $pscpArgs += @('-scp', '-pw', $Pass, $local, $destTmp) }
-            Invoke-Ext -Exe $pscp.Path -Args $pscpArgs -Label 'push'
+    # Push main binary
+    Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Quiet:$Quiet
 
-            $plink = Get-Command plink.exe -ErrorAction SilentlyContinue
-            if (Test-Path $localDeploy) {
-                $pscpArgsD = @()
-                if ($Quiet) { $pscpArgsD += '-q' }
-                if ($HostKey) { $pscpArgsD += @('-batch', '-scp', '-hostkey', $HostKey, '-pw', $Pass, $localDeploy, $destDeployTmp) }
-                else { $pscpArgsD += @('-scp', '-pw', $Pass, $localDeploy, $destDeployTmp) }
-                Invoke-Ext -Exe $pscp.Path -Args $pscpArgsD -Label 'push-deploy'
-            }
-            $remoteCmdCore = @'
-DEPLOY=$DEPLOY_PREFERRED
-if [ ! -x "$DEPLOY" ] && [ -f $DEPLOY_TMP ]; then
- sed -i "s/\r$//" $DEPLOY_TMP 2>/dev/null || true
- chmod +x $DEPLOY_TMP; DEPLOY=$DEPLOY_TMP
-fi
-sh "$DEPLOY" $REMOTE_TMP $REMOTE_PATH $DO_RESTART
-'@
-            $remoteCmdCore = $remoteCmdCore.Replace('$DEPLOY_PREFERRED', $deployPreferred).Replace('$DEPLOY_TMP', $deployTmp).Replace('$REMOTE_TMP', $remoteTmp).Replace('$REMOTE_PATH', $RemotePath)
-            $remoteCmdCore = if ($Restart) { $remoteCmdCore.Replace('$DO_RESTART', '1') } else { $remoteCmdCore.Replace('$DO_RESTART', '0') }
-            $remoteCmdCore = ($remoteCmdCore -replace "`r", "")
-            $remoteCmd = "sh -lc '$remoteCmdCore'"
-            if ($Quiet) { $remoteCmd = "$remoteCmd >/dev/null 2>&1" }
-            if ($plink) {
-                $plinkArgs = @('-batch', '-ssh', '-pw', $Pass, "$User@$HostName", $remoteCmd)
-                Invoke-Ext -Exe $plink.Path -Args $plinkArgs -Label 'ssh'
-            }
-            else {
-                $sshArgs = @()
-                if ($Quiet) { $sshArgs += '-q' }
-                $sshArgs += @("$User@$HostName", $remoteCmd)
-                Invoke-Ext -Exe 'ssh' -Args $sshArgs -Label 'ssh'
-            }
-        }
-        else {
-            Write-Warning "pscp.exe not found. Falling back to scp (you may be prompted for a password)."
-            $scpArgs = @('-O')
-            if ($Quiet) { $scpArgs += '-q' }
-            $scpArgs += @($local, $destTmp)
-            Invoke-Ext -Exe 'scp' -Args $scpArgs -Label 'push'
-            if (Test-Path $localDeploy) {
-                $scpArgsD = @('-O')
-                if ($Quiet) { $scpArgsD += '-q' }
-                $scpArgsD += @($localDeploy, $destDeployTmp)
-                Invoke-Ext -Exe 'scp' -Args $scpArgsD -Label 'push-deploy'
-            }
-            $remoteCmdCore = @'
-DEPLOY=$DEPLOY_PREFERRED
-if [ ! -x "$DEPLOY" ] && [ -f $DEPLOY_TMP ]; then
- sed -i "s/\r$//" $DEPLOY_TMP 2>/dev/null || true
- chmod +x $DEPLOY_TMP; DEPLOY=$DEPLOY_TMP
-fi
-sh "$DEPLOY" $REMOTE_TMP $REMOTE_PATH $DO_RESTART
-'@
-            $remoteCmdCore = $remoteCmdCore.Replace('$DEPLOY_PREFERRED', $deployPreferred).Replace('$DEPLOY_TMP', $deployTmp).Replace('$REMOTE_TMP', $remoteTmp).Replace('$REMOTE_PATH', $RemotePath)
-            $remoteCmdCore = if ($Restart) { $remoteCmdCore.Replace('$DO_RESTART', '1') } else { $remoteCmdCore.Replace('$DO_RESTART', '0') }
-            $remoteCmdCore = ($remoteCmdCore -replace "`r", "")
-            $remoteCmd = "sh -lc '$remoteCmdCore'"
-            if ($Quiet) { $remoteCmd = "$remoteCmd >/dev/null 2>&1" }
-            $sshArgs = @()
-            if ($Quiet) { $sshArgs += '-q' }
-            $sshArgs += @("$User@$HostName", $remoteCmd)
-            Invoke-Ext -Exe 'ssh' -Args $sshArgs -Label 'ssh'
-        }
+    # Push deploy helper if exists
+    if (Test-Path $localDeploy) {
+        Invoke-Scp -Local $localDeploy -Dest "$User@${HostName}:$deployTmp" -Pass $Pass -HostKey $HostKey -Quiet:$Quiet
     }
-    else {
-        $scpArgs = @('-O')
-        if ($Quiet) { $scpArgs += '-q' }
-        $scpArgs += @($local, $destTmp)
-        Invoke-Ext -Exe 'scp' -Args $scpArgs -Label 'push'
-        if (Test-Path $localDeploy) {
-            $scpArgsD = @('-O')
-            if ($Quiet) { $scpArgsD += '-q' }
-            $scpArgsD += @($localDeploy, $destDeployTmp)
-            Invoke-Ext -Exe 'scp' -Args $scpArgsD -Label 'push-deploy'
-        }
-        $remoteCmdCore = @'
-DEPLOY=$DEPLOY_PREFERRED
-if [ ! -x "$DEPLOY" ] && [ -f $DEPLOY_TMP ]; then sed -i "s/\r$//" $DEPLOY_TMP 2>/dev/null || true; chmod +x $DEPLOY_TMP; DEPLOY=$DEPLOY_TMP; fi
-sh "$DEPLOY" $REMOTE_TMP $REMOTE_PATH $DO_RESTART
-'@
-        $remoteCmdCore = $remoteCmdCore.Replace('$DEPLOY_PREFERRED', $deployPreferred).Replace('$DEPLOY_TMP', $deployTmp).Replace('$REMOTE_TMP', $remoteTmp).Replace('$REMOTE_PATH', $RemotePath)
-        $remoteCmdCore = if ($Restart) { $remoteCmdCore.Replace('$DO_RESTART', '1') } else { $remoteCmdCore.Replace('$DO_RESTART', '0') }
-        $remoteCmdCore = ($remoteCmdCore -replace "`r", "")
-        $remoteCmd = "sh -lc '$remoteCmdCore'"
-        if ($Quiet) { $remoteCmd = "$remoteCmd >/dev/null 2>&1" }
-        $sshArgs = @()
-        if ($Quiet) { $sshArgs += '-q' }
-        $sshArgs += @("$User@$HostName", $remoteCmd)
-        Invoke-Ext -Exe 'ssh' -Args $sshArgs -Label 'ssh'
-    }
+
+    # Build and run remote deploy command
+    $restartFlag = $(if ($Restart) { '1' } else { '0' })
+    $script = Get-DeployScript $deployPreferred $deployTmp $remoteTmp $RemotePath $restartFlag
+    $remoteCmd = "sh -lc '$($script -replace "`r",'')'"
+    if ($Quiet) { $remoteCmd += " >/dev/null 2>&1" }
+
+    Invoke-Ssh -Cmd $remoteCmd -User $User -Remote $HostName -Pass $Pass -Quiet:$Quiet
 
     Write-Host "done ✔" -ForegroundColor Green
 }

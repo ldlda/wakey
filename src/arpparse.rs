@@ -10,14 +10,14 @@
 
 use std::{net::IpAddr, str::FromStr};
 
-use r#impl::ser_opm;
+use impls::ser_opm;
 use macaddr::MacAddr;
 use serde_with::skip_serializing_none;
 use strum::{Display, EnumString};
 
 use crate::arpparse::error::IPNeighParseError;
 mod error;
-mod r#impl; // custom (de)serialization impls
+mod impls; // custom (de)serialization impls
 
 /// ip neigh has some cool shit.
 ///

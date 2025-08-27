@@ -1,9 +1,12 @@
 #!/bin/sh /etc/rc.common
-
-START=66  # Run after the resolvconf swap
+START=66
 USE_PROCD=1
 
+FLAG=/var/wakey_updated.flag
+
 start_service() {
+  [ -f "$FLAG" ] && return
+
   procd_open_instance
   procd_set_param command /etc/ldlda_help/update_wakey.sh
   procd_set_param respawn 0 0 0
@@ -13,11 +16,9 @@ start_service() {
 }
 
 stop_service() {
-  : # one-shot
+  :  # no-op
 }
 
-# Test manually:
-#   chmod +x /etc/init.d/update_wakey
-#   /etc/init.d/update_wakey start
-# Or enable on boot:
-#   /etc/init.d/update_wakey enable
+post_service() {
+  touch "$FLAG"
+}

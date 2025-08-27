@@ -1,231 +1,33 @@
-use crate::utils::parse::{boolish_str, de_many, serialize_macs};
-use std::collections::HashSet;
-use std::net::IpAddr;
 
-use axum::{
-    Json, Router,
-    extract::Path,
-    http::StatusCode,
-    response::{IntoResponse, Redirect},
-    routing::get,
-};
-use axum_extra::extract::Query;
-use macaddr::MacAddr;
-use serde_with::skip_serializing_none;
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::post;
+use axum::{Router, extract::Path, response::Redirect, routing::get};
 
-use crate::{
-    arpparse::{self, NUDState},
-    dhcpparse,
-    utils::query::{
-        dev::{self, has_dev},
-        get_macs,
-    },
-};
+use crate::utils::route;
 
 // Smart redirect: accept IP, MAC, dev, or NUD state and redirect to /api/status accordingly
-pub async fn status_smart_redirect(Path(q): Path<String>) -> Redirect {
-    let s = if cfg!(feature = "very-smart-parsing") {
-        crate::utils::parse::extract_host(&q)
-    } else {
-        q.trim()
-    };
-    // 1) IP
-    let ip = if cfg!(feature = "very-smart-parsing") {
-        crate::utils::parse::parse_numeric_ipv4(s).or_else(|| s.parse::<IpAddr>().ok())
-    } else {
-        s.parse::<IpAddr>().ok()
-    };
-    if let Some(ip) = ip {
-        return Redirect::to(&format!("/api/status?ip={ip}"));
-    }
-    // 2) MAC
-    if let Ok(mac) = s.parse::<MacAddr>() {
-        return Redirect::to(&format!("/api/status?mac={mac}"));
-    }
-    // 3) NUD state (reachable, stale, ...)
-    if let Ok(state) = s.parse::<NUDState>() {
-        return Redirect::to(&format!("/api/status?nud={state}"));
-    }
-    // 4) Known device? prefer dev first
-    if has_dev(s) {
-        return Redirect::to(&format!("/api/status?dev={}", urlencoding::encode(s)));
-    }
-    // 5) Try DNS: if it resolves, treat as name
-    if tokio::net::lookup_host((s, 0)).await.is_ok() {
-        return Redirect::to(&format!("/api/status?name={}", urlencoding::encode(s)));
-    }
-    // Default: name last // it will fail also
-    Redirect::to(&format!("/api/status?name={}", urlencoding::encode(s)))
-}
-
-pub async fn devs_router() -> Json<Vec<String>> {
-    dev::devs_sorted().into()
-}
-
-#[derive(Debug, Default, Clone, serde::Deserialize)]
-struct DhcpLeasesQueryRaw {
-    include_state: Option<String>,
-}
-
-async fn get_dhcp_leases(Query(raw): Query<DhcpLeasesQueryRaw>) -> impl IntoResponse {
-    let include_state = raw
-        .include_state
-        .as_deref()
-        .map(boolish_str)
-        .unwrap_or(false);
-
-    match dhcpparse::read_dhcp_leases_with_names().await {
-        Ok(leases_with_names) => {
-            if !include_state {
-                return (StatusCode::OK, Json(leases_with_names)).into_response();
-            }
-            let out = crate::utils::query::enrich_leases_with_nud_state(leases_with_names).await;
-            (StatusCode::OK, Json(out)).into_response()
-        }
-        Err(e) => (
+pub async fn status_smart_redirect(
+    Path(q): Path<String>,
+) -> axum::response::Result<Redirect, impl IntoResponse> {
+    match serde_html_form::to_string(route::status_smart_redirect(q).await) {
+        Ok(e) => Ok(Redirect::to(&format!("/api/status?{e}"))),
+        Err(e) => Err((
             StatusCode::BAD_GATEWAY,
             Json(StatusError {
-                name: None,
                 error: e.to_string(),
+                ..Default::default()
             }),
-        )
-            .into_response(),
+        )),
     }
 }
 
-#[derive(Debug, Default, Clone, Hash, serde::Deserialize)]
-pub struct DeviceQuery {
-    pub name: Option<String>,
-    // Accept single or many; ignore blanks
-    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
-    ip: Vec<IpAddr>,
-    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
-    mac: Vec<MacAddr>,
-    /// optional interface filter (e.g., br-lan)
-    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
-    pub dev: Vec<String>,
-    /// optional NUD state filter; accepts any case (e.g., reachable, REACHABLE)
-    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
-    pub nud: Vec<NUDState>,
-}
-#[derive(Debug, Default, Clone, Hash, serde::Deserialize)]
-pub struct NamePath {
-    name: String,
-}
-#[skip_serializing_none]
-#[derive(Debug, Default, serde::Serialize)]
-pub struct Status {
-    name: Option<String>,
-    table: Vec<arpparse::IpNeighLine>,
-    filters: Filters,
-}
+pub use crate::route::devs::*;
+pub use crate::route::dhcp::*;
+pub use crate::route::status::*;
+pub use crate::route::wake::*;
 
-#[derive(Debug, Default, serde::Serialize)]
-pub struct Filters {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    ip: Vec<IpAddr>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    dev: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    nud: Vec<NUDState>,
-    #[serde(
-        skip_serializing_if = "Vec::is_empty",
-        serialize_with = "serialize_macs"
-    )]
-    mac: Vec<MacAddr>,
-}
-
-#[skip_serializing_none]
-#[derive(Debug, serde::Serialize)]
-pub struct StatusError {
-    name: Option<String>,
-    error: String,
-}
-
-pub async fn get_status_json(
-    // p: Option<Path<NamePath>>,
-    Query(DeviceQuery {
-        name,
-        ip,
-        dev,
-        nud,
-        mac,
-        ..
-    }): Query<DeviceQuery>,
-) -> impl IntoResponse {
-    fn to_opts<T: Clone>(slice: &[T]) -> Vec<Option<T>> {
-        if slice.is_empty() {
-            vec![None]
-        } else {
-            slice.iter().cloned().map(Some).collect()
-        }
-    }
-    /*     let name = /* p
-    .map(|Path(n)| n.name)
-    .or */(name)
-    // .unwrap_or_else(|| MACHINE_NAME.to_owned())
-    ; */
-    // ip/dev/nud already parsed; assemble options
-    let ips_opt = if ip.is_empty() {
-        None
-    } else {
-        Some(ip.clone())
-    };
-    let dev_opts: Vec<Option<String>> = to_opts(&dev);
-    let nud_opts: Vec<Option<NUDState>> = to_opts(&nud);
-
-    let filters = Filters {
-        ip,
-        dev,
-        nud,
-        mac: mac.clone(),
-    };
-
-    // Run combinations of dev/nud and merge results
-    let mut tasks = Vec::new();
-    for d in &dev_opts {
-        for n in &nud_opts {
-            tasks.push(get_macs(
-                name.as_deref(),
-                ips_opt.as_deref(),
-                d.as_deref(),
-                *n,
-            ));
-        }
-    }
-
-    match futures::future::try_join_all(tasks)
-        .await
-        .map(|v| v.into_iter().flatten().collect::<Vec<_>>())
-    {
-        Ok(mut table) => {
-            // Optional MAC post-filtering if provided
-            if !mac.is_empty() {
-                let wanted: HashSet<MacAddr> = mac.into_iter().collect();
-                table.retain(|row| row.mac.map(|m| wanted.contains(&m)).unwrap_or(false));
-            }
-            // let canonical = format!("/api/status?name={name}");
-            (
-                StatusCode::OK,
-                // [(header::LINK, format!("<{canonical}>; rel=\"canonical\""))],
-                Json(Status {
-                    name,
-                    table,
-                    filters,
-                }),
-            )
-                .into_response()
-        }
-        Err(error) => (
-            StatusCode::BAD_GATEWAY,
-            Json(StatusError {
-                name,
-                error: error.to_string(),
-            }),
-        )
-            .into_response(), // holy clutch. Couldve been disasterous
-    }
-}
 pub async fn status_redirect(Path(NamePath { name }): Path<NamePath>) -> Redirect {
     Redirect::permanent(&format!(
         "/api/status?name={name}",
@@ -240,4 +42,5 @@ pub fn api_router() -> Router {
         .route("/dhcp_leases", get(get_dhcp_leases))
         .route("/smart/{q}", get(status_smart_redirect))
         .route("/devs", get(devs_router))
+        .route("/wake", post(wake_multi))
 }

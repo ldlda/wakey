@@ -45,6 +45,8 @@ if ($Publish) {
         $pubArgs = @('publish')
         if ($Registry) { $pubArgs += @('--registry', $Registry) }
         cargo @pubArgs
+
+        Write-Host ("published. ran cargo {0}" -f ($pubArgs -join " "))
     }
     catch {
         Write-Warning ("cargo publish failed: {0}" -f $_)
@@ -63,4 +65,6 @@ if ($Tag -and $Version) {
     }
     git tag -f "v$Version"
     git push -f origin "v$Version"
+
+    Write-Host "Pushed tag: $Version."
 }
