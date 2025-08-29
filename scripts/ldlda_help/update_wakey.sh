@@ -108,7 +108,8 @@ main() {
 	# Normalize line endings for shell scripts (avoid CRLF issues on OpenWrt)
 	for f in \
 		"$STAGING/etc/init.d/"* \
-		"$STAGING/etc/ldlda_help/"*.sh; do
+		"$STAGING/etc/ldlda_help/"*.sh \
+		"$STAGING/root/.bin/"*.sh ; do
 		[ -f "$f" ] && sed -i 's/\r$//' "$f" 2>/dev/null || true
 	done
 
