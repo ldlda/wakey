@@ -36,7 +36,9 @@ export function extractHostLikeBackend(input) {
 }
 
 export function rankState(s) {
-  const key = String(s || "").trim().toUpperCase();
+  const key = String(s || "")
+    .trim()
+    .toUpperCase();
   return (
     {
       PERMANENT: 5,

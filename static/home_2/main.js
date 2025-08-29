@@ -9,7 +9,12 @@ import {
   setPill,
   qs,
 } from "./dom.js";
-import { getName, saveName, loadName, extractHostLikeBackend } from "./utils.js";
+import {
+  getName,
+  saveName,
+  loadName,
+  extractHostLikeBackend,
+} from "./utils.js";
 import { fetchStatus } from "./status.js";
 import { fetchLeases } from "./leases.js";
 import { sendWake } from "./wake.js";
@@ -39,6 +44,7 @@ function pickTarget(value) {
   saveName(v);
   setLink(v);
   fetchStatus(v);
+  fetchLeases();
 }
 
 // events
@@ -48,6 +54,7 @@ elCheck.addEventListener("click", () => {
   saveName(name);
   setLink(name);
   fetchStatus(name);
+  fetchLeases();
 });
 elWake.addEventListener("click", () => {
   const name = getName(elName);
@@ -55,6 +62,7 @@ elWake.addEventListener("click", () => {
   saveName(name);
   setLink(name);
   sendWake(name);
+  fetchLeases();
 });
 elName.addEventListener("keydown", (e) => {
   if (e.key === "Enter") elCheck.click();

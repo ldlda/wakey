@@ -10,7 +10,7 @@ export async function sendWake(name) {
     });
     const t = await r.text();
     elLog.textContent = t || "ok";
-    setTimeout(() => fetchStatus(name), 1500);
+    setTimeout(() => fetchStatus(name), 800);
   } catch (e) {
     elLog.textContent = "wake error: " + e;
     setPill("bad", "error");

@@ -19,7 +19,7 @@ export function renderLeases(leases) {
     let dotClass = "dot ok";
     if (expired) {
       dotClass = "dot bad";
-    } else if (typeof l?.rank === "number") {
+    } /* rank from NUDState */ else if (typeof l?.rank === "number") {
       if (l.rank >= 5) dotClass = "dot ok";
       else if (l.rank >= 2) dotClass = "dot warn";
       else dotClass = "dot bad";
@@ -34,9 +34,15 @@ export function renderLeases(leases) {
     const name = l.name || "";
     tr.innerHTML = `
       <td><span class="${dotClass}" title="${title}"></span></td>
-      <td>${ip ? `<a href="#" class="pick" data-value="${ip}" title="filter by ip">${ip}</a>` : ""}</td>
-      <td>${mac ? `<a href="#" class="pick" data-value="${mac}" title="filter by mac">${mac}</a>` : ""}</td>
-      <td>${name ? `<a href="#" class="pick" data-value="${name}" title="filter by name">${name}</a>` : ""}</td>
+      ${[ip, mac, name]
+        .map(
+          (f) =>
+            `<td>${
+              f &&
+              `<a href="#" class="pick" data-value="${f}" title="filter by ip">${f}</a>`
+            }</td>`
+        )
+        .join("\n")}
       <td><span class="tiny">${whenText}</span></td>`;
     tbl.appendChild(tr);
   }

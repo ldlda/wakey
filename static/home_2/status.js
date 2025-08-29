@@ -1,16 +1,23 @@
 import { elHtml, elLog, setPill, qs } from "./dom.js";
 import { rankState } from "./utils.js";
 
+const status_map = {
+  ip: "ip",
+  mac: "mac",
+  state: "state",
+  dev: "interface",
+};
+
+const filter_array = ["ip", "dev", "nud", "mac"];
+
 function buildStatusUrl(name) {
-  const hasExtraFilters = ["ip", "dev", "nud", "mac"].some(
-    (k) => qs.getAll(k).length
-  );
+  const hasExtraFilters = f_array.some((k) => qs.getAll(k).length);
   if (name && !hasExtraFilters) {
     return new URL(`/api/smart/${encodeURIComponent(name)}`, location.origin);
   }
   const u = new URL("/api/status", location.origin);
   if (name) u.searchParams.set("name", name);
-  for (const k of ["ip", "dev", "nud", "mac"]) {
+  for (const k of Object.keys(status_map)) {
     const vals = qs.getAll(k);
     for (const v of vals) u.searchParams.append(k, v);
   }
@@ -24,41 +31,27 @@ export function renderStatus(data) {
 
   for (const row of data.table || []) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${
-        row.ip
-          ? `<a href="#" class="pick" data-value="${row.ip}" title="filter by ip">${row.ip}</a>`
-          : ""
-      }</td>
-      <td>${
-        row.mac
-          ? `<a href="#" class="pick" data-value="${row.mac}" title="filter by mac">${row.mac}</a>`
-          : ""
-      }</td>
-      <td>${
-        row.state
-          ? `<a href="#" class="pick" data-value="${row.state}" title="filter by state">${row.state}</a>`
-          : ""
-      }</td>
-      <td>${
-        row.dev
-          ? `<a href="#" class="pick" data-value="${row.dev}" title="filter by interface">${row.dev}</a>`
-          : ""
-      }</td>`;
+    tr.innerHTML = Object.entries(status_map)
+      .map(
+        (field, description) =>
+          `<td>${
+            row[field]
+              ? `<a href="#" class="pick" data-value="${row[field]}" title="filter by ${description}">${row[field]}</a>`
+              : ""
+          }</td>`
+      )
+      .join();
     tbl.appendChild(tr);
   }
 
   elHtml.innerHTML = "";
   if (data.filters) {
     const parts = [];
-    if (Array.isArray(data.filters.ip) && data.filters.ip.length)
-      parts.push(`ip=[${data.filters.ip.join(", ")}]`);
-    if (Array.isArray(data.filters.dev) && data.filters.dev.length)
-      parts.push(`dev=[${data.filters.dev.join(", ")}]`);
-    if (Array.isArray(data.filters.nud) && data.filters.nud.length)
-      parts.push(`nud=[${data.filters.nud.join(", ")}]`);
-    if (Array.isArray(data.filters.mac) && data.filters.mac.length)
-      parts.push(`mac=[${data.filters.mac.join(", ")}]`);
+    filter_array.forEach((field) => {
+      if (Array.isArray(data.filters[field]) && data.filters[field].length)
+        parts.push(`${field}=[${data.filters[field].join(", ")}]`);
+    });
+
     if (parts.length) {
       const info = document.createElement("div");
       info.className = "filters";
@@ -85,7 +78,6 @@ export async function fetchStatus(name) {
   setPill("warn", "checking…");
   const u = buildStatusUrl(name);
   elLog.textContent = "GET " + u.pathname + u.search;
-  elHtml.innerHTML = "";
   try {
     const r = await fetch(u);
     if (!r.ok) {
