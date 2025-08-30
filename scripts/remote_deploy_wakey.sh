@@ -14,7 +14,10 @@ if [ -z "$BIN_TMP" ] || [ -z "$DEST" ]; then
   exit 2
 fi
 
-[ -f "$BIN_TMP" ] || { echo "tmp binary not found: $BIN_TMP" >&2; exit 1; }
+[ -f "$BIN_TMP" ] || {
+  echo "tmp binary not found: $BIN_TMP" >&2
+  exit 1
+}
 chmod +x "$BIN_TMP" || true
 
 if [ "$RESTART" = "1" ]; then

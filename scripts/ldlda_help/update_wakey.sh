@@ -15,13 +15,18 @@
 
 set -eu
 
+# reboot == new file.
+FLAG=/var/wakey_updated.flag
 ARCH=${WAKEY_ARCH:-armv7-unknown-linux-musleabihf}
 TMPDIR="/var/tmp"
 TMPFILE="$TMPDIR/wakey-rootfs.$$.$ARCH.tgz"
 STAGING="$TMPDIR/wakey-rootfs.$$.$ARCH"
 
 log() { echo "[update_wakey] $*"; }
-fail() { echo "[update_wakey] ERROR: $*" >&2; exit 1; }
+fail() {
+	echo "[update_wakey] ERROR: $*" >&2
+	exit 1
+}
 
 http_get() {
 	# http_get <url>
@@ -65,13 +70,14 @@ latest_asset_url() {
 	API="https://$HOST/api/v1/repos/$OWNER/$REPO/releases/latest"
 	RESP=$(http_get "$API") || return 1
 	# Extract the first browser_download_url ending with our ARCH .tgz (BusyBox-friendly)
-	echo "$RESP" \
-	| grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*'"$ARCH"'\.tgz"' \
-	| head -n1 \
-	| cut -d '"' -f 4
+	echo "$RESP" |
+		grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*'"$ARCH"'\.tgz"' |
+		head -n1 |
+		cut -d '"' -f 4
 }
 
 main() {
+	[ -f "$FLAG" ] && return
 	URL="${WAKEY_TGZ_URL:-}"
 	if [ -z "$URL" ]; then
 		HOST=${WAKEY_HOST:-git.ldlda.com}
@@ -109,7 +115,7 @@ main() {
 	for f in \
 		"$STAGING/etc/init.d/"* \
 		"$STAGING/etc/ldlda_help/"*.sh \
-		"$STAGING/root/.bin/"*.sh ; do
+		"$STAGING/root/.bin/"*.sh; do
 		[ -f "$f" ] && sed -i 's/\r$//' "$f" 2>/dev/null || true
 	done
 
@@ -123,6 +129,7 @@ main() {
 		/etc/init.d/wakey enable || true
 		/etc/init.d/wakey restart || /etc/init.d/wakey start || true
 	fi
+	touch "$FLAG"
 	log "done"
 }
 
