@@ -1,11 +1,11 @@
 use crate::{
-    arpparse::{NUDState},
+    arpparse::NUDState,
     utils::parse::{de_many, serialize_macs},
 };
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::Query;
 use macaddr::MacAddr;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::collections::HashSet;
 use std::net::IpAddr;

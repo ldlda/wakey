@@ -1,9 +1,6 @@
 use std::net::IpAddr;
 
-use axum::{
-    http::header,
-    response::IntoResponse,
-};
+use axum::{http::header, response::IntoResponse};
 use macaddr::MacAddr;
 
 use crate::{arpparse::NUDState, route::DeviceQuery, utils::query::dev::has_dev};
