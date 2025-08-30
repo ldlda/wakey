@@ -1,16 +1,16 @@
 use crate::{
-    arpparse::{IpNeighLine, NUDState},
+    arpparse::{NUDState},
     utils::parse::{de_many, serialize_macs},
 };
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::Query;
 use macaddr::MacAddr;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use serde_with::skip_serializing_none;
 use std::collections::HashSet;
 use std::net::IpAddr;
 
-#[derive(Debug, Default, Clone, Hash, serde::Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Hash, Deserialize, Serialize)]
 pub struct DeviceQuery {
     pub name: Option<String>,
     #[serde(default, deserialize_with = "de_many::vec_from_strs")]
@@ -27,20 +27,20 @@ pub struct DeviceQuery {
     pub nud: Vec<NUDState>,
 }
 
-#[derive(Debug, Default, Clone, Hash, serde::Deserialize)]
+#[derive(Debug, Default, Clone, Hash, Deserialize)]
 pub struct NamePath {
     pub name: String,
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Default, serde::Serialize)]
-pub struct Status {
+#[derive(Debug, Default, Serialize)]
+pub struct Status<T> {
     pub name: Option<String>,
-    pub table: Vec<IpNeighLine>,
+    pub table: Vec<T>,
     pub filters: Filters,
 }
 
-#[derive(Debug, Default, serde::Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub struct Filters {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub ip: Vec<IpAddr>,
@@ -56,7 +56,7 @@ pub struct Filters {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, serde::Serialize, Default)]
+#[derive(Debug, Serialize, Default)]
 pub struct StatusError {
     pub name: Option<String>,
     pub error: String,
@@ -103,6 +103,7 @@ pub async fn get_status_json(
             ));
         }
     }
+    // why try join all?
     match futures::future::try_join_all(tasks)
         .await
         .map(|v| v.into_iter().flatten().collect::<Vec<_>>())

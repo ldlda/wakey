@@ -26,6 +26,7 @@ pub async fn read_dhcp_leases_with_names() -> io::Result<Vec<DhcpLeaseLine>> {
     for mut l in leases {
         let mac_s = l.mac.to_string();
         if let Some(ref name) = l.name {
+            // if no name in cache file or it changed
             if cache.get(&mac_s).map(|v| v != name).unwrap_or(true) {
                 cache.insert(mac_s, name.clone());
                 changed = true;

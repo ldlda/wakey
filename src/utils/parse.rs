@@ -154,7 +154,7 @@ pub mod mac {
     }
 
     /// Serialize a MacAddr as a string
-    pub fn serialize_mac<S>(mac: &MacAddr, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn _serialize_mac<S>(mac: &MacAddr, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {

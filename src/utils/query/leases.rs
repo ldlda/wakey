@@ -1,17 +1,13 @@
 use crate::arpparse::NUDState;
 use crate::dhcpparse::DhcpLeaseLine;
-use crate::utils::parse::serialize_mac;
 use serde_with::skip_serializing_none;
 use std::net::IpAddr;
 
 #[skip_serializing_none]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DhcpLeaseOut {
-    pub expires_epoch: u64,
-    pub ip: IpAddr,
-    #[serde(serialize_with = "serialize_mac")]
-    pub mac: macaddr::MacAddr,
-    pub name: Option<String>,
+    #[serde(flatten)]
+    pub lease_line: DhcpLeaseLine,
     pub nud_state: Option<NUDState>,
     pub rank: Option<u8>,
 }
@@ -37,13 +33,13 @@ pub async fn enrich_leases_with_nud_state(leases: Vec<DhcpLeaseLine>) -> Vec<Dhc
     }
     leases
         .into_iter()
-        .map(|l| DhcpLeaseOut {
-            expires_epoch: l.expires_epoch,
-            ip: l.ip,
-            mac: l.mac,
-            name: l.name,
-            nud_state: map.get(&l.ip).map(|(s, _)| *s),
-            rank: map.get(&l.ip).map(|(_, r)| *r),
+        .map(|lease_line| {
+            let (nud_state, rank) = map.get(&lease_line.ip).copied().unzip();
+            DhcpLeaseOut {
+                lease_line,
+                nud_state,
+                rank,
+            }
         })
         .collect()
 }

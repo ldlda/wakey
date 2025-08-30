@@ -8,7 +8,12 @@ export function renderLeases(leases) {
   }
   const tbl = document.createElement("table");
   tbl.className = "table";
-  tbl.innerHTML = `<tr><th></th><th>IP</th><th>MAC</th><th>Name</th><th>Expires</th></tr>`;
+
+  (
+    tbl.tHead || tbl.createTHead()
+  ).innerHTML = `<tr><th></th><th>IP</th><th>MAC</th><th>Name</th><th>Expires</th></tr>`;
+
+  const tbd = tbl.tBodies.item(0) || tbl.createTBody();
   const nowSec = Math.floor(Date.now() / 1000);
   for (const l of leases) {
     const tr = document.createElement("tr");
@@ -34,17 +39,17 @@ export function renderLeases(leases) {
     const name = l.name || "";
     tr.innerHTML = `
       <td><span class="${dotClass}" title="${title}"></span></td>
-      ${[ip, mac, name]
+      ${Object.entries({ ip, mac, name })
         .map(
-          (f) =>
+          ([name, value]) =>
             `<td>${
-              f &&
-              `<a href="#" class="pick" data-value="${f}" title="filter by ip">${f}</a>`
+              value &&
+              `<a href="#" class="pick" data-value="${value}" title="filter by ${name}">${value}</a>`
             }</td>`
         )
         .join("\n")}
       <td><span class="tiny">${whenText}</span></td>`;
-    tbl.appendChild(tr);
+    tbd.appendChild(tr);
   }
   elLeases.innerHTML = "";
   elLeases.appendChild(tbl);

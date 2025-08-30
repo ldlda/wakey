@@ -74,7 +74,7 @@ impl WakeTargetResult {
 pub async fn _wake_multi(
     targets: impl IntoIterator<Item = WakeTarget>,
 ) -> io::Result<Vec<WakeTargetResult>> {
-    let sock = UdpSocket::bind("0.0.0.0:0").await?;
+    let sock = UdpSocket::bind(":0").await?;
     sock.set_broadcast(true)?;
     let fs = targets.into_iter().map(|t| wake_one(&sock, t));
     Ok(futures::future::join_all(fs).await)
@@ -96,3 +96,5 @@ pub async fn wake_one(sock: &UdpSocket, t: WakeTarget) -> WakeTargetResult {
         Err(_) => t.errored(),
     }
 }
+
+// pub async fn wake_query();

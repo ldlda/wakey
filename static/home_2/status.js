@@ -1,5 +1,6 @@
-import { elHtml, elLog, setPill, qs } from "./dom.js";
+import { elHtml, elLog, setPill, qs, pill } from "./dom.js";
 import { rankState } from "./utils.js";
+import { merge_wake_data, translate_wake_message } from "./wake.js";
 
 const status_map = {
   ip: "ip",
@@ -11,7 +12,7 @@ const status_map = {
 const filter_array = ["ip", "dev", "nud", "mac"];
 
 function buildStatusUrl(name) {
-  const hasExtraFilters = f_array.some((k) => qs.getAll(k).length);
+  const hasExtraFilters = filter_array.some((k) => qs.getAll(k).length);
   if (name && !hasExtraFilters) {
     return new URL(`/api/smart/${encodeURIComponent(name)}`, location.origin);
   }
@@ -27,21 +28,33 @@ function buildStatusUrl(name) {
 export function renderStatus(data) {
   const tbl = document.createElement("table");
   tbl.className = "table";
-  tbl.innerHTML = `<tr><th>IP</th><th>MAC</th><th>State</th><th>IF</th></tr>`;
+  tbl.innerHTML = `<thead><tr>${
+    data.has_wake ? "<th>Wake status</th>" : ""
+  }<th>IP</th><th>MAC</th><th>State</th><th>IF</th></tr></thead>`;
 
-  for (const row of data.table || []) {
+  // sum hax
+  const tbd = tbl.tBodies.item(0) || tbl.createTBody();
+  for (const row of data.table) {
+    if (data.has_wake && !row.wake_status)
+      throw TypeError("specified has wake but no wake stats");
     const tr = document.createElement("tr");
-    tr.innerHTML = Object.entries(status_map)
-      .map(
-        (field, description) =>
-          `<td>${
-            row[field]
-              ? `<a href="#" class="pick" data-value="${row[field]}" title="filter by ${description}">${row[field]}</a>`
-              : ""
-          }</td>`
-      )
-      .join();
-    tbl.appendChild(tr);
+    tr.innerHTML = `${
+      row.wake_status
+        ? `<td><span class="dot ${
+            row.wake_status == "succeed" ? "ok" : "bad"
+          }" title="${translate_wake_message(row.wake_status)}"></span></td>`
+        : ""
+    }${Object.entries(status_map)
+      .map(([field, description]) => {
+        const value = row[field];
+        return `<td>${
+          value
+            ? `<a href="#" class="pick" data-value="${value}" title="filter by ${description}">${value}</a>`
+            : ""
+        }</td>`;
+      })
+      .join("")}`;
+    tbd.appendChild(tr);
   }
 
   elHtml.innerHTML = "";
@@ -69,12 +82,13 @@ export function renderStatus(data) {
     if (r >= 5) setPill("ok", "online");
     else if (r >= 2) setPill("warn", "maybe");
     else setPill("bad", "offline");
+    if (data.filters.nud?.length > 0) pill.textContent += " (filtered)";
   } else {
     setPill("warn", "unknown");
   }
 }
 
-export async function fetchStatus(name) {
+export async function fetchStatus(name, render = true, data_wake) {
   setPill("warn", "checking…");
   const u = buildStatusUrl(name);
   elLog.textContent = "GET " + u.pathname + u.search;
@@ -93,7 +107,13 @@ export async function fetchStatus(name) {
       return;
     }
     const data = await r.json();
-    renderStatus(data);
+
+    if (data_wake) {
+      data.table = merge_wake_data(data.table, data_wake);
+      data.has_wake = true;
+    }
+    if (render) renderStatus(data);
+    return data;
   } catch (e) {
     elLog.textContent = "status error: " + e;
     setPill("bad", "error");

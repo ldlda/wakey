@@ -1,5 +1,6 @@
 export const qs = new URLSearchParams(location.search);
 
+// not real cuh
 export const $ = (id) => document.getElementById(id);
 export const elName = $("name");
 export const elCheck = $("check");

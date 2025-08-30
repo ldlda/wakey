@@ -2,6 +2,8 @@
 use std::io;
 use std::net::IpAddr;
 
+/* use crate::arpparse::IpNeighLine;
+use crate::route::api::Status; */
 use crate::utils::parse::mac::{des_opm, ser_opm};
 use crate::utils::wake::wake_one;
 use axum::{extract::Json, http::StatusCode, response::IntoResponse};
@@ -26,7 +28,7 @@ pub struct WakeTargetResult {
 }
 
 #[derive(Debug, Serialize, Clone, Copy, Hash)]
-#[serde(rename_all="snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum WakeTargetStatus {
     Succeed,
     /// not a real address...
@@ -39,8 +41,9 @@ pub enum WakeTargetStatus {
 #[skip_serializing_none]
 #[derive(Debug, Deserialize, Clone, Copy)]
 pub struct WakeTarget {
+    #[serde(default)]
     pub ip: Option<IpAddr>,
-    #[serde(deserialize_with = "des_opm")]
+    #[serde(default, deserialize_with = "des_opm")]
     pub mac: Option<MacAddr>,
 }
 
@@ -91,3 +94,22 @@ pub async fn wake_multi_split(
         .await,
     )
 }
+/* #[derive(Debug, Serialize)]
+pub struct WakeStatusLine {
+    #[serde(flatten)]
+    pub status: IpNeighLine, // most powerful find of the century
+    pub wake_status: WakeTargetStatus,
+}
+pub type WakeStatus = Status<WakeStatusLine>; */
+// /// return status BUT plus a indicator of i sent a wake.
+// pub async fn wake_status(
+//     Query(DeviceQuery {
+//         name,
+//         ip,
+//         dev,
+//         nud,
+//         mac,
+//         ..
+//     }): Query<DeviceQuery>,
+// ) -> impl IntoResponse {
+// }
