@@ -54,7 +54,7 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
 ## Local build/install (manual path)
 
 ```powershell
-# Build 
+# Build
 cargo build --release --target armv7-unknown-linux-musleabihf
 
 # Package rootfs
