@@ -7,9 +7,11 @@ use crate::route::api::Status; */
 use crate::utils::parse::mac::{des_opm, ser_opm};
 use crate::utils::wake::wake_one;
 use axum::{extract::Json, http::StatusCode, response::IntoResponse};
+use futures::TryFutureExt;
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
+use tokio::net::UdpSocket;
 
 #[skip_serializing_none]
 #[derive(Debug, Default, Serialize, Clone)]
@@ -75,7 +77,9 @@ pub async fn wake_multi(Json(req): Json<Vec<WakeTarget>>) -> impl IntoResponse {
 pub async fn wake_multi_split(
     targets: impl IntoIterator<Item = WakeTarget>,
 ) -> io::Result<Vec<WakeTargetResult>> {
-    let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+    let sock = UdpSocket::bind("[::]:0")
+        .or_else(|_| UdpSocket::bind(":0"))
+        .await?;
     sock.set_broadcast(true)?;
 
     Ok(
