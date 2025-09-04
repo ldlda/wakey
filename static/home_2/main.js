@@ -42,7 +42,7 @@ function pickTarget(value) {
   elName.value = v;
   updatePreview();
   saveName(v);
-  setLink(v);
+  setLink(v, true);
   fetchStatus(v);
   fetchLeases();
 }
@@ -74,10 +74,16 @@ const initial = loadName(qs);
 if (initial) {
   elName.value = initial;
   updatePreview();
-  setLink(initial);
-  fetchStatus(initial);
+  if (qs.has("name")) {
+    setLink(initial);
+    fetchStatus(initial);
+  } else {
+    fetchStatus();
+  }
   fetchLeases();
 } else {
   setPill("warn", "unknown");
+  updatePreview();
+  fetchStatus();
   fetchLeases();
 }
