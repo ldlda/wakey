@@ -58,12 +58,12 @@ pub async fn status_smart_redirect(q: String) -> DeviceQuery {
         };
     }
     // 5) Try DNS: if it resolves, treat as name
-    if tokio::net::lookup_host((s, 0)).await.is_ok() {
+    /* if tokio::net::lookup_host((s, 0)).await.is_ok() {
         return DeviceQuery {
             name: Some(s.to_string()),
             ..Default::default()
         };
-    }
+    } */
     // Default: name last // it will fail also
     DeviceQuery {
         name: Some(s.to_string()),
