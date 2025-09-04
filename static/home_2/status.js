@@ -8,8 +8,8 @@ const status_map = {
   state: "state",
   dev: "interface",
 };
-
-const filter_array = ["ip", "dev", "nud", "mac"];
+export const status_array = Object.keys(status_map);
+export const filter_array = ["ip", "dev", "nud", "mac"];
 
 function buildStatusUrl(name) {
   const hasExtraFilters = filter_array.some((k) => qs.getAll(k).length);
@@ -18,7 +18,7 @@ function buildStatusUrl(name) {
   }
   const u = new URL("/api/status", location.origin);
   if (name) u.searchParams.set("name", name);
-  for (const k of Object.keys(status_map)) {
+  for (const k of filter_array) {
     const vals = qs.getAll(k);
     for (const v of vals) u.searchParams.append(k, v);
   }

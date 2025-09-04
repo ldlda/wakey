@@ -1,6 +1,8 @@
+import { filter_array } from "./status.js";
+
 export const qs = new URLSearchParams(location.search);
 
-// not real cuh
+// $ is normally queryselector are we fr
 export const $ = (id) => document.getElementById(id);
 export const elName = $("name");
 export const elCheck = $("check");
@@ -17,10 +19,18 @@ export function setPill(kind, text) {
   pill.textContent = text;
 }
 
-export function setLink(name) {
+export function setLink(name, clear) {
+  if (clear) location.search = "";
   const url = new URL(location.href);
-  if (name) url.searchParams.set("name", name);
-  else url.searchParams.delete("name");
+/*   const hasExtraFilters = filter_array.some(
+    (k) => url.searchParams.getAll(k).length
+  );
+  if (hasExtraFilters) {
+    // jus returns whatever; they are specifying further
+  } else */ {
+    if (name) url.searchParams.set("name", name);
+    else url.searchParams.delete("name");
+  }
   history.replaceState(null, "", url);
   link.href = url.toString();
 }
