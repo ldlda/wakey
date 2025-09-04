@@ -20,9 +20,9 @@ export function setPill(kind, text) {
 }
 
 export function setLink(name, clear) {
-  if (clear) location.search = "";
   const url = new URL(location.href);
-/*   const hasExtraFilters = filter_array.some(
+  if (clear) url.searchParams.forEach((_, k) => url.searchParams.delete(k)); // FUCK
+  /* const hasExtraFilters = filter_array.some(
     (k) => url.searchParams.getAll(k).length
   );
   if (hasExtraFilters) {
