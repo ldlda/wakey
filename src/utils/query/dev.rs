@@ -1,10 +1,19 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fs};
 
 pub fn get_dev() -> HashSet<String> {
     let mut devs: HashSet<String> = HashSet::new();
     if let Ok(rd) = std::fs::read_dir("/sys/class/net") {
         for e in rd.flatten() {
-            if let Ok(name) = e.file_name().into_string()
+            if e.file_type()
+                .map(|ft| {
+                    if ft.is_symlink() {
+                        fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false)
+                    } else {
+                        ft.is_dir()
+                    }
+                })
+                .unwrap_or(false)
+                && let Ok(name) = e.file_name().into_string()
                 && name != "lo"
                 && !name.is_empty()
             {
