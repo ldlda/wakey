@@ -81,7 +81,7 @@ pub async fn get_macs(
     state: Option<NUDState>,
 ) -> Result<Vec<IpNeighLine>> {
     let ip_list: Option<Vec<IpAddr>> =
-        ips.map(|slice| slice.iter().copied().map(|ip| ip.to_canonical()).collect());
+        ips.map(|slice| slice.iter().map(|ip| ip.to_canonical()).collect());
     let ip_list = match (ip_list, machine_name) {
         (Some(list), _) => list,
         (None, Some(name)) => get_ips(name).await?.collect(),
@@ -136,7 +136,9 @@ pub async fn get_mac(
     Ok(rows)
 }
 
-/* pub async fn _get_macs_good(
+/* 
+/// get macs where you just run ip neigh then rust handles the filtering (faster than get mac)
+pub async fn get_macs_rust(
     machine_names: Option<&str>,
     ips: Option<&[IpAddr]>,
     devs: Option<&[&str]>,

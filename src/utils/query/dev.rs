@@ -7,6 +7,7 @@ pub fn get_dev() -> HashSet<String> {
             if e.file_type()
                 .map(|ft| {
                     if ft.is_symlink() {
+                        // true
                         fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false)
                     } else {
                         ft.is_dir()

@@ -89,7 +89,7 @@ pub async fn wake_multi_split(
             } else {
                 wake_one(
                     &sock,
-                    c.try_into().expect("complete struct failed to try_into"),
+                    c.try_into().expect("complete struct failed to try_into"), // type state pattern?
                 )
                 .await
                 .into()
