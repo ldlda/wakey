@@ -136,7 +136,7 @@ pub async fn get_mac(
     Ok(rows)
 }
 
-/* 
+/*
 /// get macs where you just run ip neigh then rust handles the filtering (faster than get mac)
 pub async fn get_macs_rust(
     machine_names: Option<&str>,

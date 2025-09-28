@@ -1,6 +1,9 @@
 use crate::{
     arpparse::NUDState,
-    utils::{parse::{de_many, serialize_macs}, query::get_macs},
+    utils::{
+        parse::{de_many, serialize_macs},
+        query::get_macs,
+    },
 };
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::Query;
@@ -96,7 +99,8 @@ pub async fn get_status_json(
     // can we jus collect the whole table instead of doing this.
     for d in &dev_opts {
         for n in &nud_opts {
-            tasks.push(get_macs( // this i hate sm
+            tasks.push(get_macs(
+                // this i hate sm
                 name.as_deref(),
                 ips_opt.as_deref(),
                 d.as_deref(),
@@ -110,7 +114,8 @@ pub async fn get_status_json(
         .map(|v| v.into_iter().flatten().collect::<Vec<_>>())
     {
         Ok(mut table) => {
-            if !mac.is_empty() { // mac here
+            if !mac.is_empty() {
+                // mac here
                 let wanted: HashSet<MacAddr> = mac.into_iter().collect();
                 table.retain(|row| row.mac.map(|m| wanted.contains(&m)).unwrap_or(false));
             }
