@@ -72,13 +72,8 @@ pub async fn get_macs(
     } else {
         devs.iter().next().map(AsRef::as_ref)
     };
-    let opt_state = if state.len() > 1 {
-        None
-    } else {
-        state.iter().next().copied()
-    };
 
-    let run_one = |to_ip: Option<IpAddr>| get_mac(to_ip, opt_dev, opt_state);
+    let run_one = |to_ip: Option<IpAddr>| get_mac(to_ip, opt_dev, state);
 
     let mut ip_filtered = if let Some(something) = ip_all {
         if something.len() == 1 {
@@ -97,7 +92,6 @@ pub async fn get_macs(
     // Apply additional filters if any were provided
     if !devs.is_empty() || !macs.is_empty() || !state.is_empty() {
         let devset: HashSet<_> = devs.iter().map(AsRef::as_ref).collect();
-        let nudset: HashSet<_> = state.iter().collect();
         let macset: HashSet<_> = macs.iter().collect();
 
         ip_filtered.retain(|entry| {
@@ -105,13 +99,10 @@ pub async fn get_macs(
             let dev_ok =
                 devset.is_empty() || entry.dev.as_deref().is_some_and(|d| devset.contains(d));
 
-            // NUD filter: always present, simple check
-            let nud_ok = nudset.is_empty() || nudset.contains(&entry.state);
-
             // MAC filter: if we're filtering by MAC, entry must have a MAC AND it must be in the set
             let mac_ok = macset.is_empty() || entry.mac.is_some_and(|m| macset.contains(&m));
 
-            dev_ok && nud_ok && mac_ok
+            dev_ok && mac_ok
         })
     };
     Ok(ip_filtered)
@@ -121,7 +112,7 @@ pub async fn get_macs(
 pub async fn get_mac(
     ip: Option<IpAddr>,
     dev: Option<&str>,
-    state: Option<NUDState>,
+    state: &[NUDState],
 ) -> Result<Vec<IpNeighLine>> {
     let mut args: Vec<String> = vec!["neigh".into(), "show".into()];
     if let Some(ip) = ip {
@@ -132,7 +123,7 @@ pub async fn get_mac(
         args.push("dev".into());
         args.push(d.to_string());
     }
-    if let Some(nud) = state {
+    for nud in state {
         args.push("nud".into());
         args.push(nud.as_ip_neigh_arg().into());
     }

@@ -26,3 +26,6 @@ strip = true
 [features]
 default = ["very-smart-parsing"]
 very-smart-parsing = [] # this is the a-bit-redundant parse thing that copilot made
+
+[workspace]
+members = ["ipjs"]
