@@ -1,6 +1,9 @@
 import { elHtml, elLog, setPill } from "./dom.js";
 import { fetchStatus, renderStatus } from "./status.js";
 
+/**
+ * @param {String} name just plain name
+ */
 export async function sendWake(name) {
   const data = await fetchStatus(name, false);
   if (!data) return; // can not proceed; theres nothing.
@@ -51,8 +54,29 @@ export async function sendWake(name) {
 
 /**
  *
- * @param {Array} table
- * @param {Array} wake
+ * @param {{
+ *          ip: String
+ *          dev: String
+ *          mac: String
+ *          state: String
+ *          }[]} table
+ * @param {{
+ *          ip: String,
+ *          mac: String,
+ *          status: "incomplete" | "succeed" | "nonexistent_address" | "wrong_size" 
+ *          }[]} wake
+ * @returns {{
+ *          ip: String
+ *          dev: String
+ *          mac: String
+ *          state: String
+ *          }[] | {
+ *          ip: String
+ *          dev: String
+ *          mac: String
+ *          state: String
+ *          wake_status: boolean
+ *          }[]}
  */
 export function merge_wake_data(table, wake) {
   if (!wake) return table;
@@ -90,7 +114,11 @@ export function merge_wake_data(table, wake) {
   return return_array;
 }
 
-
+/**
+ * 
+ * @param {"incomplete" | "succeed" | "nonexistent_address" | "wrong_size" | any} wake_msg 
+ * @returns {string}
+ */
 export function translate_wake_message(wake_msg) {
   switch (wake_msg) {
     case "incomplete":

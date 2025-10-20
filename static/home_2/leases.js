@@ -1,5 +1,17 @@
 import { elLeases } from "./dom.js";
 
+/**
+ * 
+ * @param {{
+ *          expires_epoch: Number
+ *          rank?: Number
+ *          ip: String
+ *          mac: String
+ *          nud_state?: String
+ *          name?: String
+ *      }[]} leases 
+ * @returns 
+ */
 export function renderLeases(leases) {
   if (!elLeases) return;
   if (!Array.isArray(leases) || leases.length === 0) {

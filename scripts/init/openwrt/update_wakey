@@ -2,12 +2,12 @@
 START=66
 
 start() {
-  LOGFILE=/var/log/update_wakey.log
-  MAX_RETRIES=10
-  RETRY_COUNT=0
+    LOGFILE=/var/log/update_wakey.log
+    MAX_RETRIES=10
+    RETRY_COUNT=0
 
-  # shellcheck disable=SC2016
-  nohup sh -c '
+    # shellcheck disable=SC2016
+    sh -c '
   while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
     if /etc/ldlda_help/update_wakey.sh; then
       echo "[update_wakey] Success at $(date)" >>"$LOGFILE"

@@ -2,7 +2,8 @@
 const MAC_NAME_CACHE: &str = "/tmp/wakey_mac_names.json";
 
 /// Load MAC->name cache from disk
-async fn load_mac_name_cache() -> io::Result<std::collections::BTreeMap<String, String>> {
+pub(crate) async fn load_mac_name_cache() -> io::Result<std::collections::BTreeMap<String, String>>
+{
     match tokio::fs::read_to_string(MAC_NAME_CACHE).await {
         Ok(s) => serde_json::from_str(&s).map_err(io::Error::other),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(Default::default()),
