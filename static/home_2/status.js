@@ -2,6 +2,7 @@ import { elHtml, elLog, setPill, qs, pill } from "./dom.js";
 import { rankState } from "./utils.js";
 import { merge_wake_data, translate_wake_message } from "./wake.js";
 
+// IpNeighLine
 const status_map = {
   ip: "ip",
   mac: "mac",
@@ -9,8 +10,14 @@ const status_map = {
   dev: "interface",
 };
 export const status_array = Object.keys(status_map);
-export const filter_array = ["ip", "dev", "nud", "mac"];
+// Filters
+export const filter_array = ["ips", "devs", "nuds", "macs"];
 
+/**
+ * 
+ * @param {String} name 
+ * @returns {URL}
+ */
 function buildStatusUrl(name) {
   const hasExtraFilters = filter_array.some((k) => qs.getAll(k).length);
   if (name && !hasExtraFilters) {
@@ -25,6 +32,25 @@ function buildStatusUrl(name) {
   return u;
 }
 
+/**
+ * 
+ * @param {{
+ *          has_wake?: true
+ *          table: {
+ *              wake_status?: Boolean
+ *              ips: String
+ *              dev: String
+ *              mac: String
+ *              state: String
+ *              }[]
+ *          filters: {
+ *              ips?: String[]
+ *              devs?: String[]
+ *              nuds?: String[]
+ *              macs?: String[]
+ *              }
+ *          }} data 
+ */
 export function renderStatus(data) {
   const tbl = document.createElement("table");
   tbl.className = "table";
@@ -82,12 +108,51 @@ export function renderStatus(data) {
     if (r >= 5) setPill("ok", "online");
     else if (r >= 2) setPill("warn", "maybe");
     else setPill("bad", "offline");
-    if (data.filters.nud?.length > 0) pill.textContent += " (filtered)";
+    if (data.filters.nuds?.length > 0) pill.textContent += " (filtered)";
   } else {
     setPill("warn", "unknown");
   }
 }
-
+/**
+ * @param {String} name 
+ * @param {Boolean} render 
+ * @param {{
+ *          ip: String,
+ *          mac: String,
+ *          status: 
+ * "incomplete" | "succeed" | "nonexistent_address" | "wrong_size" 
+ *          }} data_wake
+ * @returns {{
+ *          has_wake: false
+ *          table: {
+ *              ip: String
+ *              dev: String
+ *              mac: String
+ *              state: String
+ *              }[]
+ *          filters: {
+ *              ips?: String[]
+ *              devs?: String[]
+ *              nuds?: String[]
+ *              macs?: String[]
+ *              }
+ *          } | {
+ *          has_wake: true
+ *          table: {
+ *              wake_status: Boolean
+ *              ips: String
+ *              dev: String
+ *              mac: String
+ *              state: String
+ *              }[]
+ *          filters: {
+ *              ips?: String[]
+ *              devs?: String[]
+ *              nuds?: String[]
+ *              macs?: String[]
+ *              }
+ *          }}
+ */
 export async function fetchStatus(name, render = true, data_wake) {
   setPill("warn", "checking…");
   const u = buildStatusUrl(name);
@@ -97,6 +162,7 @@ export async function fetchStatus(name, render = true, data_wake) {
     if (!r.ok) {
       let msg = String(r.status);
       try {
+        /** @type {{error: string}} */
         const err = await r.clone().json();
         msg = err.error || JSON.stringify(err);
       } catch {
@@ -106,6 +172,26 @@ export async function fetchStatus(name, render = true, data_wake) {
       setPill("bad", "error");
       return;
     }
+
+    /**
+     * this one does not have data wake
+     *  @type {{
+     *      table: {
+     *          ip: String
+     *          dev: String
+     *          mac: String
+     *          state: String
+     *          wake_status?: String
+     *          }[]
+     *      filters: {
+     *          ips?: String[]
+     *          devs?: String[]
+     *          nuds?: String[]
+     *          macs?: String[]
+     *      }
+     *      has_wake?: true
+     *  }} 
+     */
     const data = await r.json();
 
     if (data_wake) {

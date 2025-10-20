@@ -15,7 +15,7 @@ start() {
   RETRY_COUNT=0
 
   # shellcheck disable=SC2016
-  nohup sh -c '
+  sh -c '
 while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
   if fn; then
     echo "[update_tailscale] Success at $(date)" >>"$LOGFILE"

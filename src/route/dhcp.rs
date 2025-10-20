@@ -1,4 +1,8 @@
-use crate::{dhcpparse, route::api::StatusError, utils::parse::boolish_str};
+use crate::{
+    dhcpparse::read_dhcp_leases_with_names,
+    route::error::ApiError,
+    utils::{parse::boolish_str, query::enrich_leases_with_nud_state},
+};
 use axum::{Json, extract::Query, http::StatusCode, response::IntoResponse};
 
 // DHCP lease endpoints
@@ -14,19 +18,18 @@ pub async fn get_dhcp_leases(Query(raw): Query<DhcpLeasesQueryRaw>) -> impl Into
         .map(boolish_str)
         .unwrap_or(false);
 
-    match dhcpparse::read_dhcp_leases_with_names().await {
+    match read_dhcp_leases_with_names().await {
         Ok(leases_with_names) => {
             if !include_state {
                 return (StatusCode::OK, Json(leases_with_names)).into_response();
             }
-            let out = crate::utils::query::enrich_leases_with_nud_state(leases_with_names).await;
+            let out = enrich_leases_with_nud_state(leases_with_names).await;
             (StatusCode::OK, Json(out)).into_response()
         }
         Err(e) => (
             StatusCode::BAD_GATEWAY,
-            Json(StatusError {
+            Json(ApiError {
                 error: e.to_string(),
-                ..Default::default()
             }),
         )
             .into_response(),

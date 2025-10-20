@@ -1,5 +1,6 @@
 use crate::arpparse::NUDState;
 use crate::dhcpparse::DhcpLeaseLine;
+use crate::utils::query::get_macs;
 use serde_with::skip_serializing_none;
 use std::net::IpAddr;
 
@@ -14,11 +15,10 @@ pub struct DhcpLeaseOut {
 
 /// Enrich DHCP leases with NUD state and rank using get_macs
 pub async fn enrich_leases_with_nud_state(leases: Vec<DhcpLeaseLine>) -> Vec<DhcpLeaseOut> {
-    use crate::utils::query::macs::get_macs;
     let ips: Vec<IpAddr> = leases.iter().map(|l| l.ip).collect();
     let mut map: std::collections::HashMap<IpAddr, (NUDState, u8)> =
         std::collections::HashMap::new();
-    if let Ok(rows) = get_macs(None, Some(&ips), None, None).await {
+    if let Ok(rows) = get_macs(&[] as &[&str], &ips, &[] as &[&str], &[], &[]).await {
         for row in rows {
             let state = row.state;
             let r = state.rank();

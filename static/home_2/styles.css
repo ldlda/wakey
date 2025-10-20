@@ -15,6 +15,13 @@ body {
   padding: 0;
   font-family: system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
 }
+
+@media screen and (max-width: 768px) {
+  wrap {
+    margin-inline: 8px;
+  }
+}
+
 body {
   display: flex;
   min-height: 100dvh;

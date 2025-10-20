@@ -23,9 +23,8 @@ pub struct WakeResult {
 #[skip_serializing_none]
 #[derive(Debug, Serialize, Clone, Copy)]
 pub struct WakeTargetResult {
-    pub ip: Option<IpAddr>,
-    #[serde(serialize_with = "ser_opm")]
-    pub mac: Option<MacAddr>,
+    #[serde(flatten)]
+    pub target: WakeTarget,
     pub status: WakeTargetStatus,
 }
 
@@ -41,11 +40,11 @@ pub enum WakeTargetStatus {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct WakeTarget {
     #[serde(default)]
     pub ip: Option<IpAddr>,
-    #[serde(default, deserialize_with = "des_opm")]
+    #[serde(default, serialize_with = "ser_opm", deserialize_with = "des_opm")]
     pub mac: Option<MacAddr>,
 }
 
@@ -82,21 +81,15 @@ pub async fn wake_multi_split(
         .await?;
     sock.set_broadcast(true)?;
 
-    Ok(
-        futures::future::join_all(targets.into_iter().map(async |c| {
-            if c.is_incomplete() {
-                c.to_incomplete()
-            } else {
-                wake_one(
-                    &sock,
-                    c.try_into().expect("complete struct failed to try_into"), // type state pattern?
-                )
-                .await
-                .into()
-            }
-        }))
-        .await,
-    )
+    let iter = targets.into_iter().map(async |c| {
+        if c.is_incomplete() {
+            c.to_incomplete()
+        } else {
+            let t = c.try_into().expect("complete struct failed to try_into");
+            wake_one(&sock, t).await.into()
+        }
+    });
+    Ok(futures::future::join_all(iter).await)
 }
 /* #[derive(Debug, Serialize)]
 pub struct WakeStatusLine {

@@ -22,11 +22,19 @@ impl TryFrom<RouteWakeTarget> for WakeTarget {
     }
 }
 
-impl From<WakeTargetResult> for RouteWakeResult {
-    fn from(WakeTargetResult { ip, mac, status }: WakeTargetResult) -> Self {
+impl From<WakeTarget> for RouteWakeTarget {
+    fn from(WakeTarget { ip, mac }: WakeTarget) -> Self {
         Self {
             ip: Some(ip),
             mac: Some(mac),
+        }
+    }
+}
+
+impl From<WakeTargetResult> for RouteWakeResult {
+    fn from(WakeTargetResult { target, status }: WakeTargetResult) -> Self {
+        Self {
+            target: target.into(),
             status: status.into(),
         }
     }
@@ -35,8 +43,7 @@ impl From<WakeTargetResult> for RouteWakeResult {
 impl RouteWakeTarget {
     pub fn to_incomplete(self) -> RouteWakeResult {
         RouteWakeResult {
-            ip: self.ip,
-            mac: self.mac,
+            target: self,
             status: RouteWakeStatus::Incomplete,
         }
     }

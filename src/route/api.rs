@@ -1,31 +1,62 @@
+use crate::route::error::ApiError;
+use crate::utils::query_parser::{QueryType, parse_query};
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::post;
-use axum::{Router, extract::Path, response::Redirect, routing::get};
+use axum::{extract::Path, response::Redirect};
 
-use crate::utils::route;
+use crate::route::status::{DeviceQuery, Filters, NamePath};
+use crate::utils::query::get_ips;
 
 // Smart redirect: accept IP, MAC, dev, or NUD state and redirect to /api/status accordingly
 pub async fn status_smart_redirect(
     Path(q): Path<String>,
 ) -> axum::response::Result<Redirect, impl IntoResponse> {
-    match serde_html_form::to_string(route::status_smart_redirect(q).await) {
+    // no less bullshit
+    let query = match parse_query(q) {
+        QueryType::Ip(ip_addr) => DeviceQuery {
+            filter: Filters {
+                ips: vec![ip_addr],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        QueryType::Mac(mac_addr) => DeviceQuery {
+            filter: Filters {
+                macs: vec![mac_addr],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        QueryType::Dev(s) => DeviceQuery {
+            filter: Filters {
+                devs: vec![s],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        QueryType::Nud(nudstate) => DeviceQuery {
+            filter: Filters {
+                nuds: vec![nudstate],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        QueryType::Unknown(n) => DeviceQuery {
+            name: Some(n),
+            ..Default::default()
+        },
+    };
+    match serde_html_form::to_string(query) {
         Ok(e) => Ok(Redirect::to(&format!("/api/status?{e}"))),
         Err(e) => Err((
             StatusCode::BAD_GATEWAY,
-            Json(StatusError {
+            Json(ApiError {
                 error: e.to_string(),
-                ..Default::default()
             }),
         )),
     }
 }
-
-pub use crate::route::devs::*;
-pub use crate::route::dhcp::*;
-pub use crate::route::status::*;
-pub use crate::route::wake::*;
 
 pub async fn status_redirect(Path(NamePath { name }): Path<NamePath>) -> Redirect {
     Redirect::permanent(&format!(
@@ -34,12 +65,14 @@ pub async fn status_redirect(Path(NamePath { name }): Path<NamePath>) -> Redirec
     ))
 }
 
-pub fn api_router() -> Router {
-    Router::new()
-        .route("/status/{name}", get(status_redirect))
-        .route("/status", get(get_status_json))
-        .route("/dhcp_leases", get(get_dhcp_leases))
-        .route("/smart/{q}", get(status_smart_redirect))
-        .route("/devs", get(devs_router))
-        .route("/wake", post(wake_multi))
+pub async fn ip(Path(name): Path<String>) -> impl IntoResponse {
+    get_ips(&name).await.map_or_else(
+        |e| {
+            ApiError {
+                error: e.to_string(),
+            }
+            .into_response()
+        },
+        |ips| Json(ips.collect::<Vec<_>>()).into_response(),
+    )
 }
