@@ -16,4 +16,4 @@
 pub mod neighbor;
 pub mod utils;
 
-// i want a generalized way to build and call 
+// i want a generalized way to build and call

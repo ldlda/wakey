@@ -1,44 +1,45 @@
-    use macaddr::MacAddr;
-    use serde::{self, Deserialize, Deserializer, de::Error as DeError};
-    use serde::{Serialize, Serializer, de};
 
-    pub fn serialize_macs<S>(macs: &[MacAddr], serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let strings: Vec<String> = macs.iter().map(|m| m.to_string()).collect();
-        serde::Serialize::serialize(&strings, serializer)
-    }
+use macaddr::MacAddr;
+use serde::{self, Deserialize, Deserializer, de::Error as DeError};
+use serde::{Serialize, Serializer, de};
 
-    /// Serialize a MacAddr as a string
-    pub fn serialize_mac<S>(mac: &MacAddr, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&mac.to_string())
-    }
+pub fn serialize_macs<S>(macs: &[MacAddr], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let strings: Vec<String> = macs.iter().map(|m| m.to_string()).collect();
+    serde::Serialize::serialize(&strings, serializer)
+}
 
-    /// Deserialize a MacAddr from a string
-    pub fn deserialize_mac<'de, D>(deserializer: D) -> Result<MacAddr, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = <String as serde::Deserialize>::deserialize(deserializer)?;
-        s.parse::<MacAddr>().map_err(DeError::custom)
-    }
+/// Serialize a MacAddr as a string
+pub fn serialize_mac<S>(mac: &MacAddr, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&mac.to_string())
+}
 
-    /// serialize an [`Option<MacAddr>`]
-    pub fn ser_opm<S: Serializer>(bro: &Option<MacAddr>, ser: S) -> Result<S::Ok, S::Error> {
-        Option::<String>::serialize(&bro.as_ref().map(ToString::to_string), ser)
-    }
+/// Deserialize a MacAddr from a string
+pub fn deserialize_mac<'de, D>(deserializer: D) -> Result<MacAddr, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = <String as serde::Deserialize>::deserialize(deserializer)?;
+    s.parse::<MacAddr>().map_err(DeError::custom)
+}
 
-    /// deserialize an [`Option<MacAddr>`]
-    pub fn des_opm<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Option::<&str>::deserialize(des)?
-            .map(str::parse)
-            .transpose()
-            .map_err(de::Error::custom)
-    }
+/// serialize an [`Option<MacAddr>`]
+pub fn ser_opm<S: Serializer>(bro: &Option<MacAddr>, ser: S) -> Result<S::Ok, S::Error> {
+    Option::<String>::serialize(&bro.as_ref().map(ToString::to_string), ser)
+}
+
+/// deserialize an [`Option<MacAddr>`]
+pub fn des_opm<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<&str>::deserialize(des)?
+        .map(str::parse)
+        .transpose()
+        .map_err(de::Error::custom)
+}

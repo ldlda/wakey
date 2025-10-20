@@ -1,11 +1,11 @@
 //! ```
 //! ip -j n s
 //! ```
-//! 
+//!
 //! yes. this is a real call.
 
 use crate::utils::serialize::mac::{des_opm, ser_opm};
-use std::{borrow::Cow, net::IpAddr};
+use std::net::IpAddr;
 
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ pub struct NeighborInput {
     nud: Vec<NUDState>,
 }
 
-// as input this must be lowercase. as output it is uppercase   
+// as input this must be lowercase. as output it is uppercase
 #[derive(Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, Serialize, Deserialize)]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 #[serde(rename_all = "UPPERCASE")]
@@ -68,5 +68,3 @@ pub struct NeighborItem {
     lladdr: Option<MacAddr>,
     state: Vec<NUDState>,
 }
-
-
