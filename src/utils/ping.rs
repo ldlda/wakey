@@ -19,7 +19,7 @@ pub async fn _ping_ip_2<T: ToSocketAddrs>(_addr: T) -> bool {
 }
 
 pub async fn _ping_ip_3<T: Into<IpAddr>>(addr: T) -> u8 {
-    match get_mac(Some(addr.into()), None, None).await {
+    match get_mac(Some(addr.into()), None, &[] as &[NUDState]).await {
         Err(_) => 0,
         Ok(l) => l
             .into_iter()
