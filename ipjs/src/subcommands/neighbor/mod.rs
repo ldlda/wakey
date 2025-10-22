@@ -1,4 +1,4 @@
-//! ```
+//! ```bash
 //! ip -j n s
 //! ```
 //!
@@ -14,14 +14,15 @@ use strum::{Display, EnumString};
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct NeighborInput {
     /// supports only the last item (ignore), `to` keyword is optional
-    to: IpAddr,
-    /// supports only one item (it complains)
-    dev: String, // im all for simplicity
+    to: Option<IpAddr>,
+    /// supports only one item (it complains if multiple)
+    dev: Option<String>, // im all for simplicity
     /// takes multiple, has to have `nud` before bro or it will think you `to`
     nud: Vec<NUDState>,
 }
 
 // as input this must be lowercase. as output it is uppercase
+/// docs for items come from a random ahh man website idk
 #[derive(Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, Serialize, Deserialize)]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 #[serde(rename_all = "UPPERCASE")]
@@ -59,8 +60,9 @@ pub enum NUDState {
     Failed,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 
+/// everything i see
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct NeighborItem {
     dst: IpAddr,
     dev: String,
