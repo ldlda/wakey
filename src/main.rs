@@ -8,14 +8,11 @@
 //! 2. incorporate ip -j;
 //! 3. small 1-5 second caching;
 
-use axum::{Router, routing::get};
-use tokio::net::TcpListener;
 mod arpparse;
 pub mod assets;
 mod dhcpparse;
 mod route;
 mod utils;
-use std::io;
 
 #[cfg(target_os = "linux")]
 #[tokio::main]
@@ -36,6 +33,7 @@ async fn entry() -> io::Result<()> {
 
 #[cfg(not(target_os = "linux"))]
 fn main() -> color_eyre::Result<()> {
+    use std::net::ToSocketAddrs;
     color_eyre::install()?;
     // use crate::arpparse::NUDState;
     // println!("{}", NUDState::Reachable.to_string().to_lowercase());

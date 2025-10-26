@@ -5,6 +5,7 @@
 //! yes. this is a real call.
 
 pub mod json;
+pub mod nl;
 
 use crate::utils::serialize::mac::{des_opm, ser_opm};
 use std::net::IpAddr;
@@ -25,7 +26,9 @@ pub struct NeighborInput {
 
 // as input this must be lowercase. as output it is uppercase
 /// docs for items come from a random ahh man website idk
-#[derive(Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, Serialize, Deserialize, Default,
+)]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum NUDState {
@@ -47,6 +50,7 @@ pub enum NUDState {
     /// this is a pseudo state used when initially
     /// creating a neighbour entry or after trying to
     /// remove it before it becomes free to do so.
+    #[default]
     None,
     /// the neighbour entry has not (yet) been
     /// validated/resolved.

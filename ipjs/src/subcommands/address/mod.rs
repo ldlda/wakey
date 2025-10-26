@@ -4,7 +4,7 @@
 //!
 //! lowk why its free but its indirection and its ass
 
-use macaddr::{MacAddr, MacAddr6};
+use macaddr::MacAddr6;
 use serde::{Deserialize, Serialize};
 
 /// i dont include what i dont know about (almost all ts)
