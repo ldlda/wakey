@@ -69,9 +69,16 @@ pub enum NUDState {
 /// everything i see
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct NeighborItem {
-    dst: IpAddr,
+    #[serde(rename(deserialize = "dst"))]
+    ip: IpAddr,
     dev: String,
-    #[serde(deserialize_with = "des_opm", serialize_with = "ser_opm")]
-    lladdr: Option<MacAddr>,
+    #[serde(
+        deserialize_with = "des_opm",
+        serialize_with = "ser_opm",
+        default,
+        rename(deserialize = "lladdr")
+    )]
+    mac: Option<MacAddr>,
+    #[serde(default)]
     state: Vec<NUDState>,
 }
