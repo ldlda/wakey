@@ -1,7 +1,7 @@
 //! ts
-//! 
+//!
 //! deals with both ip a (addroutput) and ip l (commonoutput)
-//! 
+//!
 //! lowk why its free but its indirection and its ass
 
 use macaddr::{MacAddr, MacAddr6};

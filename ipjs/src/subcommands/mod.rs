@@ -1,2 +1,2 @@
-pub mod neighbor;
 pub mod address;
+pub mod neighbor;

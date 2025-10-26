@@ -4,6 +4,8 @@
 //!
 //! yes. this is a real call.
 
+pub mod json;
+
 use crate::utils::serialize::mac::{des_opm, ser_opm};
 use std::net::IpAddr;
 
@@ -59,7 +61,6 @@ pub enum NUDState {
     /// failed.
     Failed,
 }
-
 
 /// everything i see
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]

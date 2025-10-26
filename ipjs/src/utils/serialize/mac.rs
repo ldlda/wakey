@@ -1,4 +1,3 @@
-
 use macaddr::MacAddr;
 use serde::{self, Deserialize, Deserializer, de::Error as DeError};
 use serde::{Serialize, Serializer, de};
