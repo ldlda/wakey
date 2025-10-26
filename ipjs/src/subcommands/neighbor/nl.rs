@@ -33,6 +33,7 @@ pub async fn get(
             neighbour_message_item.header.family,
             AddressFamily::Inet | AddressFamily::Inet6
         ) || matches!(neighbour_message_item.header.state, NeighbourState::Noarp)
+        // copilot says this to match ip -j n s
         {
             continue 'big;
         }

@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 
 # Build tests
 Write-Host "Building tests for $Package..." -ForegroundColor Cyan
-cargo test --no-run -p $Package --target armv7-unknown-linux-musleabihf $(if ($BuildProfile -eq "release") { "-r" }) --test test
+cargo test --no-run -p $Package --target armv7-unknown-linux-musleabihf $(if ($BuildProfile -eq "release") { "-r" })
 
 # Find the test binary
 $testBinary = Get-ChildItem -Path "target\armv7-unknown-linux-musleabihf\$BuildProfile\deps\test-*" -File | 
@@ -35,11 +35,11 @@ pscp.exe -l root -batch -scp -pw $password $testBinary.FullName root@192.168.100
 
 # Run on target
 Write-Host "Running tests on target..." -ForegroundColor Cyan
-$testArgs = "--nocapture --show-output"
+$testArgs = "$(if (!$Quiet) {" --nocapture --show-output"})"
 if ($TestName) {
-    $testArgs = "$TestName$(if (!$Quiet) {" $testArgs"})"
+    $testArgs = "$TestName$testArgs"
 }
 
-plink -batch -ssh root@192.168.100.1 -pw $password "chmod +x /tmp/test && /tmp/test$(if (!$Quiet) {" $testArgs"})"
+plink -batch -ssh root@192.168.100.1 -pw $password "chmod +x /tmp/test && /tmp/test $testArgs"
 
 Write-Host "Done!" -ForegroundColor Green
