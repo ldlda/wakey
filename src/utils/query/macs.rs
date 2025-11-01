@@ -48,7 +48,7 @@ pub async fn get_macs(
     let ip_m: HashSet<IpAddr> = futures::future::try_join_all(
         machine_names
             .iter()
-            .map(|c| async { get_ips(c.as_ref()).await }),
+            .map(|c| get_ips(c.as_ref())),
     )
     .await?
     .into_iter()

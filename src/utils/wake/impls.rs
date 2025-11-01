@@ -41,13 +41,13 @@ impl From<WakeTargetResult> for RouteWakeResult {
 }
 
 impl RouteWakeTarget {
-    pub fn to_incomplete(self) -> RouteWakeResult {
+    pub const fn to_incomplete(self) -> RouteWakeResult {
         RouteWakeResult {
             target: self,
             status: RouteWakeStatus::Incomplete,
         }
     }
-    pub fn is_incomplete(&self) -> bool {
+    pub const fn is_incomplete(&self) -> bool {
         !matches!(
             self,
             Self {

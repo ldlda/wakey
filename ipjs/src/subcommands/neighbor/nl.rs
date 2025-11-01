@@ -134,7 +134,7 @@ impl TryFrom<NeighbourState> for NUDState {
             NeighbourState::Noarp => Ok(Self::Noarp),
             NeighbourState::Permanent => Ok(Self::Permanent),
             NeighbourState::None => Ok(Self::None),
-            NeighbourState::Other(e) => Err(e),
+            NeighbourState::Other(e) => Ok(Self::Other(e)),
             _ => Err(u16::MAX), // idk
         }
     }

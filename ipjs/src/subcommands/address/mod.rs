@@ -4,39 +4,38 @@
 //!
 //! lowk why its free but its indirection and its ass
 
-use macaddr::MacAddr6;
+pub mod json;
+
+use crate::utils::serialize::mac::option_mac;
+use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
 
 /// i dont include what i dont know about (almost all ts)
-#[derive(Debug, Serialize, Deserialize)]
-struct CommmonOutput {
-    ifindex: u32,
-    ifname: String,
-    /// i imagine UP or DOWN, unknown
-    operstate: String,
-    // 6 has a serde and the enum doesnt? why.
-    address: Option<MacAddr6>,
-}
-
 #[derive(Serialize, Debug, Deserialize)]
-struct AddrOutput {
-    #[serde(flatten)]
-    c: CommmonOutput,
-    addr_info: Vec<AddrInfo>,
+pub struct AddrOutput {
+    pub ifindex: u32,
+    pub ifname: String,
+    /// i imagine UP or DOWN, unknown
+    pub operstate: String,
+    // 6 has a serde and the enum doesnt? why. (serializing ts is ass although... im not given an array. they string formatted ts)
+    #[serde(with = "option_mac", default)]
+    pub address: Option<MacAddr>,
+    #[serde(default)] // i wish we have intellisense for this... fuck you metaprogramming
+    pub addr_info: Vec<AddrInfo>,
 }
 
 // i be copying
 // Raw JSON shape from ip -j -4 address show
 #[derive(Debug, Deserialize, Serialize)]
-struct AddrInfo {
-    family: Option<String>,
+pub struct AddrInfo {
+    pub family: Option<String>,
 
-    local: Option<String>,
-    prefixlen: Option<u8>,
+    pub local: Option<String>,
+    pub prefixlen: Option<u8>,
 
-    broadcast: Option<String>,
+    pub broadcast: Option<String>,
 
-    scope: Option<String>,
-    label: Option<String>,
+    pub scope: Option<String>,
+    pub label: Option<String>,
     // many more exist; we only take what we need
 }

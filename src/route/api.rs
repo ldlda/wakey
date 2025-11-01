@@ -49,12 +49,10 @@ pub async fn status_smart_redirect(
     };
     match serde_html_form::to_string(query) {
         Ok(e) => Ok(Redirect::to(&format!("/api/status?{e}"))),
-        Err(e) => Err((
-            StatusCode::BAD_GATEWAY,
-            Json(ApiError {
-                error: e.to_string(),
-            }),
-        )),
+        Err(e) => Err(ApiError {
+            error: e.to_string(),
+            code: StatusCode::BAD_GATEWAY,
+        }),
     }
 }
 
@@ -67,12 +65,7 @@ pub async fn status_redirect(Path(NamePath { name }): Path<NamePath>) -> Redirec
 
 pub async fn ip(Path(name): Path<String>) -> impl IntoResponse {
     get_ips(&name).await.map_or_else(
-        |e| {
-            ApiError {
-                error: e.to_string(),
-            }
-            .into_response()
-        },
+        |e| ApiError::ise(e.to_string()).into_response(),
         |ips| Json(ips.collect::<Vec<_>>()).into_response(),
     )
 }

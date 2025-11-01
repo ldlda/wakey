@@ -7,7 +7,7 @@
 pub mod json;
 pub mod nl;
 
-use crate::utils::serialize::mac::{des_opm, ser_opm};
+use crate::utils::serialize::mac::option_mac;
 use std::net::IpAddr;
 
 use macaddr::MacAddr;
@@ -17,11 +17,11 @@ use strum::{Display, EnumString};
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct NeighborInput {
     /// supports only the last item (ignore), `to` keyword is optional
-    to: Option<IpAddr>,
+    pub to: Option<IpAddr>,
     /// supports only one item (it complains if multiple)
-    dev: Option<String>, // im all for simplicity
+    pub dev: Option<String>, // im all for simplicity
     /// takes multiple, has to have `nud` before bro or it will think you `to`
-    nud: Vec<NUDState>,
+    pub nud: Vec<NUDState>,
 }
 
 // as input this must be lowercase. as output it is uppercase
@@ -64,21 +64,18 @@ pub enum NUDState {
     /// success, neighbor validation has ultimately
     /// failed.
     Failed,
+
+    Other(u16)
 }
 
 /// everything i see
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct NeighborItem {
     #[serde(rename(deserialize = "dst"))]
-    ip: IpAddr,
-    dev: String,
-    #[serde(
-        deserialize_with = "des_opm",
-        serialize_with = "ser_opm",
-        default,
-        rename(deserialize = "lladdr")
-    )]
-    mac: Option<MacAddr>,
+    pub ip: IpAddr,
+    pub dev: String,
+    #[serde(with = "option_mac", default, rename(deserialize = "lladdr"))]
+    pub mac: Option<MacAddr>,
     #[serde(default)]
-    state: Vec<NUDState>,
+    pub state: Vec<NUDState>,
 }

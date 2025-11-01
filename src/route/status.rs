@@ -94,13 +94,11 @@ pub async fn get_status_json(
             )
                 .into_response()
         }
-        Err(error) => (
-            StatusCode::BAD_GATEWAY,
-            Json(ApiError {
-                error: error.to_string(),
-            }),
-        )
-            .into_response(),
+        Err(error) => ApiError {
+            code: StatusCode::BAD_GATEWAY,
+            error: error.to_string(),
+        }
+        .into_response(),
     }
 }
 // Status endpoints
