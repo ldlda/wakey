@@ -4,42 +4,58 @@
 param(
     [string]$Package = "lda-ipjs",
     [string]$TestName = "",
+    [ValidateSet("debug", "release")]
     [string]$BuildProfile = "debug",
     [string]$password,
-    [switch]$Quiet
-
+    [switch]$Verbose,
+    [string]$RemoteTestPath = "/root/.bin/test",
+    [string]$RemoteHost = "root@192.168.100.1"
 )
 
 $ErrorActionPreference = "Stop"
 
-# Build tests
+# Build tests and capture output
 Write-Host "Building tests for $Package..." -ForegroundColor Cyan
-cargo test --no-run -p $Package --target armv7-unknown-linux-musleabihf $(if ($BuildProfile -eq "release") { "-r" })
 
-# Find the test binary
-$testBinary = Get-ChildItem -Path "target\armv7-unknown-linux-musleabihf\$BuildProfile\deps\test-*" -File | 
-Where-Object { $_.Name -match '^test-[a-f0-9]+$' } |
-Sort-Object LastWriteTime -Descending |
-Select-Object -First 1
+# Stream cargo output anc convert to text
+$cargoOutput = cargo test --no-run -p $Package --target armv7-unknown-linux-musleabihf $(if ($BuildProfile -eq "release") { "-r" }) 2>&1 |
+ForEach-Object { 
+    $line = if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { $_ }
+    if ($Verbose) {
+        Write-Host $line
+    }
+    $line  # Pass through to capture
+}
 
-if (-not $testBinary) {
-    Write-Error "Test binary not found!"
+# Parse test binary paths from cargo output
+$testBinaries = $cargoOutput | 
+Select-String -Pattern "Executable.*\((.+)\)" | 
+ForEach-Object { $_.Matches.Groups[1].Value } |
+Get-Item
+
+if ($testBinaries.Count -eq 0) {
+    Write-Error "No test binaries found!"
+    Write-Host "Cargo output:" -ForegroundColor Yellow
+    $cargoOutput | ForEach-Object { Write-Host $_ }
     exit 1
 }
 
-Write-Host "Found test binary: $($testBinary.Name)" -ForegroundColor Green
+Write-Host "Found $($testBinaries.Count) test $($testBinaries.Count -eq 1 ? "binary" : "binaries")" -ForegroundColor Green
 
-# Copy to target
-Write-Host "Copying to target..." -ForegroundColor Cyan
-pscp.exe -l root -batch -scp -pw $password $testBinary.FullName root@192.168.100.1:/tmp/test
-
-# Run on target
-Write-Host "Running tests on target..." -ForegroundColor Cyan
-$testArgs = "$(if (!$Quiet) {" --nocapture --show-output"})"
-if ($TestName) {
-    $testArgs = "$TestName$testArgs"
+# Run each test binary
+foreach ($testBinary in $testBinaries) {
+    Write-Host "`nTesting: $($testBinary.Name)" -ForegroundColor Cyan
+    
+    # Copy to target
+    pscp.exe -batch -scp -pw $password $testBinary.FullName ${RemoteHost}:$RemoteTestPath | Out-Null
+    
+    # Run on target
+    $testArgs = "$(if ($Verbose) {"--nocapture --show-output"})"
+    if ($TestName) {
+        $testArgs = "$TestName $testArgs"
+    }
+    
+    plink -batch -ssh $RemoteHost -pw $password "chmod +x $RemoteTestPath && $RemoteTestPath $testArgs"
 }
 
-plink -batch -ssh root@192.168.100.1 -pw $password "chmod +x /tmp/test && /tmp/test $testArgs"
-
-Write-Host "Done!" -ForegroundColor Green
+Write-Host "`nDone!" -ForegroundColor Green
