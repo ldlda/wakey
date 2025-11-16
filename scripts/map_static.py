@@ -2,11 +2,14 @@
 
 from pathlib import Path
 
-
 root = Path(__file__).parent.parent
-static = root / "static"  # change "assets" to your folder
-out_rs = root / "src" / "assets.rs"
+static = root / "static"
+src = root / "src"
+out_rs = src / "assets.rs"
 
+assert 'name = "wakey"' in (root / "Cargo.toml").read_text(
+    encoding="utf-8"
+), "uhh how do i explain this"
 
 def sanitize(name: str) -> str:
     # Valid Rust identifiers: letters, digits, underscores; no starting digit
@@ -35,7 +38,7 @@ class RsAssetFile:
         const_name = sanitize(self.path.name).upper()
         return (
             f"pub const {const_name}: &str = "
-            f'include_str!("{self.path.relative_to(out_rs.parent, walk_up=True).as_posix()}");'
+            f'include_str!("{self.path.relative_to(src, walk_up=True).as_posix()}");'
         )
         # specify walk_up to have .. in yo path
 
@@ -62,4 +65,4 @@ rs_code = "// generated with ./scripts/map_static.py\n" + str(
     RsAssetModule(static, True)
 )
 out_rs.write_text(rs_code, encoding="utf-8")
-print(f"written to {out_rs}")
+print(f"written to {out_rs.relative_to(Path.cwd(), walk_up=True)}")

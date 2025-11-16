@@ -118,3 +118,8 @@ async fn ball_compare_backends() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn cidr_filter() {
+    unimplemented!("never. i aint add what i dont need")
+}

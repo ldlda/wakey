@@ -21,8 +21,19 @@
 
 use super::AddrInfo;
 
+pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrInfo>> {
+    let mut cmd = tokio::process::Command::new("ip");
+    cmd.args(["-j", "address", "show"]);
 
+    if let Some(d) = dev {
+        cmd.args(["dev", d]);
+    }
 
-pub async fn get() -> Vec<AddrInfo> {
-    todo!()
+    let output = cmd.output().await?;
+
+    if !output.status.success() {
+        anyhow::bail!(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+
+    Ok(serde_json::from_slice(&output.stdout)?)
 }
