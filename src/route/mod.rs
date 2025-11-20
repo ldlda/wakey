@@ -6,6 +6,7 @@ pub mod status;
 pub mod wake;
 
 use crate::assets;
+use crate::dhcpparse::load_mac_name_cache;
 use crate::route::api::ip;
 use crate::route::api::status_redirect;
 use crate::route::api::status_smart_redirect;
@@ -14,6 +15,8 @@ use crate::route::dhcp::get_dhcp_leases;
 use crate::route::status::get_status_json;
 use crate::route::wake::wake_multi;
 
+use axum::Json;
+use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::{Router, http::header, response::Html, routing::get};
 
@@ -57,4 +60,13 @@ pub fn api_router() -> Router {
         .route("/devs", get(devs_router))
         .route("/wake", post(wake_multi))
         .route("/ips/{name}", get(ip))
+        .route(
+            "/mac-cache",
+            get(|| async {
+                match load_mac_name_cache().await {
+                    Ok(h) => Json(h).into_response(),
+                    Err(e) => e.to_string().into_response(),
+                }
+            }),
+        )
 }

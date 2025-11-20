@@ -6,7 +6,7 @@ pids="$(pidof wakey 2>/dev/null)"
 
 # 2) Fallback: ps | awk (avoid matching awk/grep themselves)
 if [ -z "$pids" ]; then
-	pids="$(ps w 2>/dev/null | awk '/\/\.bin\/wakey/ && $0 !~ /awk/ {print $1}')"
+    pids="$(ps w 2>/dev/null | awk '/\/\.bin\/wakey/ && $0 !~ /awk/ {print $1}')"
 fi
 
 [ -n "$pids" ] || exit 0
@@ -18,7 +18,7 @@ kill -TERM "$pids" 2>/dev/null || true
 usleep 250000 # uhhh sleep is stupid
 remain=""
 for p in $pids; do
-	kill -0 "$p" 2>/dev/null && remain="$remain $p"
+    kill -0 "$p" 2>/dev/null && remain="$remain $p"
 done
 [ -z "$remain" ] || kill -KILL "$remain" 2>/dev/null || true
 

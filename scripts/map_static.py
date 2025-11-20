@@ -55,7 +55,7 @@ class RsAssetModule:
         body = "\n".join(files + subs)
         return (
             f"pub mod {sanitize(self.folder.name).lower()} {{" * self.full
-            + f"\n{indent(body, 4*self.full)}\n"
+            + f"\n{indent(body, 4 * self.full)}\n"
             + self.full * "}"
         )
 
