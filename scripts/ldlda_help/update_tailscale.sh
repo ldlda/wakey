@@ -3,22 +3,22 @@
 set -e
 # 0th step from lda is to move the pre assed resolv.conf to the real resolv.conf
 if [ -f /tmp/resolv.conf ]; then
-  cp -af /tmp/resolv.conf /etc/resolv.conf
+    cp -af /tmp/resolv.conf /etc/resolv.conf
 elif [ -f /rom/etc/resolv.conf ]; then
-  cp -af /rom/etc/resolv.conf /etc/resolv.conf
+    cp -af /rom/etc/resolv.conf /etc/resolv.conf
 fi
 
 if [ -x "$(which tailscale)" ]; then
-  tailscale update
-  exit 0
+    tailscale update
+    exit 0
 fi
 
 # 1. Fetch the latest version number from Tailscale's site
 LATEST=$(curl -s https://pkgs.tailscale.com/stable/ | grep -Eo 'tailscale_[0-9\.]+_arm.tgz' | head -n1)
 
 [ -z "$LATEST" ] && {
-  echo "❌ Couldn't find latest ARM binary."
-  exit 1
+    echo "❌ Couldn't find latest ARM binary."
+    exit 1
 }
 
 URL="https://pkgs.tailscale.com/stable/${LATEST}"
@@ -26,8 +26,8 @@ URL="https://pkgs.tailscale.com/stable/${LATEST}"
 cd /var/tmp
 
 if [ -f "$LATEST" ]; then
-  echo "file exists"
-  rm "$LATEST"
+    echo "file exists"
+    rm "$LATEST"
 fi
 
 echo "Downloading $LATEST..."

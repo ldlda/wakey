@@ -10,12 +10,12 @@
 START=50 # Run before Tailscale (typically START~80)
 
 start() {
-  LOGFILE=/var/log/update_tailscale.log
-  MAX_RETRIES=10
-  RETRY_COUNT=0
+    LOGFILE=/var/log/update_tailscale.log
+    MAX_RETRIES=10
+    RETRY_COUNT=0
 
-  # shellcheck disable=SC2016
-  sh -c '
+    # shellcheck disable=SC2016
+    sh -c '
 while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
   if fn; then
     echo "[update_tailscale] Success at $(date)" >>"$LOGFILE"

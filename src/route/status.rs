@@ -47,14 +47,6 @@ pub struct Filters {
     pub macs: Vec<MacAddr>,
 }
 
-#[deprecated = "use ApiError"]
-#[skip_serializing_none]
-#[derive(Debug, Serialize, Default)]
-pub struct StatusError {
-    pub name: Option<String>,
-    pub error: String,
-}
-
 pub async fn get_status_json(
     Query(DeviceQuery {
         name,

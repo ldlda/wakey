@@ -5,8 +5,6 @@ pub mod error;
 pub mod status;
 pub mod wake;
 
-use std::collections::HashMap;
-
 use crate::assets;
 use crate::dhcpparse::load_mac_name_cache;
 use crate::route::api::ip;
@@ -18,13 +16,9 @@ use crate::route::status::get_status_json;
 use crate::route::wake::wake_multi;
 
 use axum::Json;
-use axum::http::Error;
-use axum::http::header::ToStrError;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::{Router, http::header, response::Html, routing::get};
-use futures::FutureExt;
-use futures::TryFutureExt;
 
 use crate::utils::route::serve_js;
 
@@ -67,7 +61,7 @@ pub fn api_router() -> Router {
         .route("/wake", post(wake_multi))
         .route("/ips/{name}", get(ip))
         .route(
-            "mac-cache/",
+            "/mac-cache",
             get(|| async {
                 match load_mac_name_cache().await {
                     Ok(h) => Json(h).into_response(),
