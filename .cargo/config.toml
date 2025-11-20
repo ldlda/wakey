@@ -3,3 +3,8 @@ target = "armv7-unknown-linux-musleabihf"
 
 [target.armv7-unknown-linux-musleabihf]
 linker = "rust-lld"
+
+[alias]
+ldabr = "b -r --target=target.armv7-unknown-linux-musleabihf"
+t = "test -- --nocapture --test-threads=1"
+tdebug = "test -- --nocapture --test-threads=1 --show-output"
