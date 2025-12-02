@@ -10,6 +10,10 @@ use super::{NUDState, NeighborItem};
 // i think ill write tokio::process every time tho (for this if let thing) because iterate through all ts youll have to as str and all the hooplas.
 // it all turns to live osstr tho so ts just for my own sanity
 // thiserror? anyhow
+
+// what is vro sayin
+// ahh. instead of using [wakey::utils::cmd::exec_command] which is ass we jus write everything out. so i dont have to .as_str() so often.
+
 pub async fn get(
     ip: Option<IpAddr>,
     dev: Option<&str>,
@@ -23,8 +27,7 @@ pub async fn get(
     };
 
     if let Some(dev) = dev {
-        cmd.arg("dev");
-        cmd.arg(dev);
+        cmd.args(["dev", dev]);
     }
     for nud in nud {
         cmd.arg("nud");

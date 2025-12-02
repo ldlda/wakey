@@ -36,6 +36,8 @@ def indent(text: str, n: int) -> str:
 
 
 class RsAsset(ABC):
+    path: Path
+
     @abstractmethod
     def plain(self) -> str: ...
     @abstractmethod
@@ -64,8 +66,8 @@ class RsAssetFile(RsAsset):
 
 
 class RsAssetModule(RsAsset):
-    def __init__(self, folder: Path, body_only: bool = False):
-        self.folder = folder
+    def __init__(self, path: Path, body_only: bool = False):
+        self.path = path
         self.full = not body_only
 
     plain_template = "pub mod {sanitized_name} {{\n{indented_body}\n}}"
@@ -85,7 +87,7 @@ class RsAssetModule(RsAsset):
         if not self.full:
             return body
         return template.format(
-            sanitized_name=sanitize(self.folder.name).lower(),
+            sanitized_name=sanitize(self.path.name).lower(),
             indented_body=indent(body, 4),
         )
 
@@ -95,12 +97,45 @@ class RsAssetModule(RsAsset):
 
     def iterate_assets(self) -> Iterable[RsAsset]:
         subs = []
-        for f in self.folder.iterdir():
+        for f in self.path.iterdir():
             if f.is_file():
                 yield RsAssetFile(f)
             elif f.is_dir():
                 subs.append(RsAssetModule(f))
         yield from subs
+
+
+# i meant plain
+def render_pain(ass: RsAsset) -> str:
+    """
+    fym i have to deal with all RsAsset subclasses
+
+    whats the point then. unless there is a `Intermediate Representation` whats the point then.
+    """
+    match ass:
+        case RsAssetFile() as file:
+            return file.apply_template(file.plain_template)
+        case RsAssetModule() as folder:
+            return folder.apply_template(folder.plain_template, render_pain)
+        case RsAssetRoot() as r:
+            return r.plain()
+        case _:
+            raise TypeError("who are you?")
+
+
+def render_macro(ass: RsAsset) -> str:
+    """
+    ts is ridiculous
+    """
+    match ass:
+        case RsAssetFile() as file:
+            return file.apply_template(file.macroed_template)
+        case RsAssetModule() as folder:
+            return folder.apply_template(folder.macroed_template, render_macro)
+        case RsAssetRoot() as r:
+            return r.macroed()
+        case _:
+            raise TypeError("who are you?")
 
 
 lda_macro = """
@@ -124,11 +159,11 @@ macro_rules! hehe {
 header = "// generated with ./scripts/map_static.py"
 
 
-def announce_yourself(what: str):
+def announce_yourself(*pa, **pkw):
     def wpr[**P, R](f: Callable[P, R]) -> Callable[P, R]:
         @wraps(f)
         def wpd(*a: P.args, **k: P.kwargs) -> R:
-            print(what)
+            print(*pa, **pkw)
             return f(*a, **k)
 
         return wpd
@@ -138,7 +173,11 @@ def announce_yourself(what: str):
 
 class RsAssetRoot(RsAsset):
     def __init__(self, asset: Path) -> None:
-        self.a = RsAssetModule(asset, True)
+        self.path = asset
+
+    @property
+    def a(self):
+        return RsAssetModule(self.path, True)
 
     @announce_yourself("generating code macro style")
     def macroed(self):

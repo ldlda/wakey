@@ -36,3 +36,6 @@ very-smart-parsing = [
 
 [workspace]
 members = ["ipjs"]
+
+[dependencies.lda-ipjs]
+path = "ipjs"

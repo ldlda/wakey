@@ -19,9 +19,9 @@
 
 // prefix seems to be a cidr. both 6 and 4 works. idfk dog
 
-use super::AddrInfo;
+use super::AddrOutput;
 
-pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrInfo>> {
+pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrOutput>> {
     let mut cmd = tokio::process::Command::new("ip");
     cmd.args(["-j", "address", "show"]);
 

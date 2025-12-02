@@ -1,3 +1,5 @@
+//! this is purely experimental. im not doing ts no mo
+
 // hallo
 use std::{
     collections::{HashMap, HashSet},
