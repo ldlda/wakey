@@ -1,12 +1,31 @@
 // generated with ./scripts/map_static.py
 
-pub const HOME_2_HTML: &str = include_str!("../static/home_2.html");
-pub mod home_2 {
-    pub const DOM_JS: &str = include_str!("../static/home_2/dom.js");
-    pub const LEASES_JS: &str = include_str!("../static/home_2/leases.js");
-    pub const MAIN_JS: &str = include_str!("../static/home_2/main.js");
-    pub const STATUS_JS: &str = include_str!("../static/home_2/status.js");
-    pub const STYLES_CSS: &str = include_str!("../static/home_2/styles.css");
-    pub const UTILS_JS: &str = include_str!("../static/home_2/utils.js");
-    pub const WAKE_JS: &str = include_str!("../static/home_2/wake.js");
+macro_rules! hehe {
+    // Folder
+    (folder $name:ident { $($children:tt)* } $($rest:tt)*) => {
+        pub mod $name {
+            hehe!{$($children)*}
+        }
+        hehe!{$($rest)*}
+    };
+    // File
+    (file $name:ident $file:literal $($rest:tt)*) => {
+        pub const $name: &str = include_str!($file);
+        hehe!{$($rest)*}
+    };
+    // Base case
+    () => {};
+}
+
+hehe! {
+    file HOME_2_HTML "../static/home_2.html"
+    folder home_2 {
+        file DOM_JS "../static/home_2/dom.js"
+        file LEASES_JS "../static/home_2/leases.js"
+        file MAIN_JS "../static/home_2/main.js"
+        file STATUS_JS "../static/home_2/status.js"
+        file STYLES_CSS "../static/home_2/styles.css"
+        file UTILS_JS "../static/home_2/utils.js"
+        file WAKE_JS "../static/home_2/wake.js"
+    }
 }

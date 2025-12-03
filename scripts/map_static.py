@@ -4,7 +4,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from functools import wraps
 from pathlib import Path
-from typing import Callable
+from pprint import pprint
+from typing import Callable, TypedDict, overload
+
 
 root = Path(__file__).parent.parent
 static = root / "static"
@@ -45,12 +47,16 @@ class RsAsset(ABC):
 
 
 class RsAssetFile(RsAsset):
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, name: str | None = None):
         self.path = path
+        if name is None:
+            self.name = sanitize(self.path.name).upper()
+        else:
+            self.name = name
 
-    def apply_template(self, template):
+    def _apply_template(self, template):
         return template.format(
-            const_name=sanitize(self.path.name).upper(),
+            const_name=self.name,
             relative_path=self.path.relative_to(src, walk_up=True).as_posix(),
         )
 
@@ -59,45 +65,46 @@ class RsAssetFile(RsAsset):
     macroed_template = 'file {const_name} "{relative_path}"'
 
     def plain(self):
-        return self.apply_template(self.plain_template)
+        return self._apply_template(self.plain_template)
 
     def macroed(self):
-        return self.apply_template(self.macroed_template)
+        return self._apply_template(self.macroed_template)
 
 
 class RsAssetModule(RsAsset):
-    def __init__(self, path: Path, body_only: bool = False):
+    def __init__(self, path: Path, name: str | None = None):
         self.path = path
-        self.full = not body_only
+        if name is None:
+            self.name = sanitize(self.path.name).lower()
+        else:
+            self.name = name
 
     plain_template = "pub mod {sanitized_name} {{\n{indented_body}\n}}"
 
     macroed_template = "folder {sanitized_name} {{\n{indented_body}\n}}"
 
-    sibling = "\n"
-
     def plain(self):
-        return self.apply_template(self.plain_template, lambda it: it.plain())
+        return self._apply_template(self.plain_template, lambda it: it.plain())
 
     def macroed(self):
-        return self.apply_template(self.macroed_template, lambda it: it.macroed())
+        return self._apply_template(self.macroed_template, lambda it: it.macroed())
 
-    def apply_template(self, template: str, renderer: Callable[[RsAsset], str]):
-        body = self.process_body(renderer)
-        if not self.full:
-            return body
+    def _apply_template(self, template: str, renderer: Callable[[RsAsset], str]):
+        body = self._process_body(self.path, renderer)
         return template.format(
-            sanitized_name=sanitize(self.path.name).lower(),
+            sanitized_name=self.name,
             indented_body=indent(body, 4),
         )
 
-    def process_body(self, renderer: Callable[[RsAsset], str]):
-        body = self.iterate_assets()
-        return self.sibling.join(map(renderer, body))
+    @staticmethod
+    def _process_body(path: Path, renderer: Callable[[RsAsset], str]):
+        body = RsAssetModule.iterate_assets(path)
+        return "\n".join(map(renderer, body))
 
-    def iterate_assets(self) -> Iterable[RsAsset]:
+    @staticmethod
+    def iterate_assets(path: Path) -> "Iterable[RsAssetFile | RsAssetModule]":
         subs = []
-        for f in self.path.iterdir():
+        for f in path.iterdir():
             if f.is_file():
                 yield RsAssetFile(f)
             elif f.is_dir():
@@ -113,12 +120,12 @@ def render_pain(ass: RsAsset) -> str:
     whats the point then. unless there is a `Intermediate Representation` whats the point then.
     """
     match ass:
-        case RsAssetFile() as file:
-            return file.apply_template(file.plain_template)
-        case RsAssetModule() as folder:
-            return folder.apply_template(folder.plain_template, render_pain)
         case RsAssetRoot() as r:
             return r.plain()
+        case RsAssetModule() as folder:
+            return folder.plain()
+        case RsAssetFile() as file:
+            return file.plain()
         case _:
             raise TypeError("who are you?")
 
@@ -128,12 +135,58 @@ def render_macro(ass: RsAsset) -> str:
     ts is ridiculous
     """
     match ass:
-        case RsAssetFile() as file:
-            return file.apply_template(file.macroed_template)
-        case RsAssetModule() as folder:
-            return folder.apply_template(folder.macroed_template, render_macro)
         case RsAssetRoot() as r:
             return r.macroed()
+        case RsAssetModule() as folder:
+            return folder.macroed()
+        case RsAssetFile() as file:
+            return file.macroed()
+        case _:
+            raise TypeError("who are you?")
+
+
+class RsAssetModule2(TypedDict):
+    name: str
+    path: Path
+    children: "list[RsAssetModule2 | RsAssetFile2]"
+
+
+class RsAssetFile2(TypedDict):
+    name: str
+    path: Path
+
+
+@overload
+def dictionary(im: "RsAssetRoot") -> RsAssetModule2: ...
+@overload
+def dictionary(im: RsAssetModule) -> RsAssetModule2: ...
+@overload
+def dictionary(im: RsAssetFile) -> RsAssetFile2: ...
+@overload
+def dictionary(im: RsAssetFile | RsAssetModule) -> RsAssetFile2 | RsAssetModule2: ...
+
+
+def dictionary(im: RsAsset) -> RsAssetModule2 | RsAssetFile2:
+    match im:
+        case RsAssetRoot() as r:
+            return RsAssetModule2(
+                name="ROOT",
+                path=r.path,
+                children=list(map(dictionary, RsAssetModule.iterate_assets(r.path))),
+            )
+        case RsAssetModule() as folder:
+            return RsAssetModule2(
+                name=sanitize(folder.path.name).lower(),
+                path=folder.path,
+                children=list(
+                    map(dictionary, RsAssetModule.iterate_assets(folder.path))
+                ),
+            )
+        case RsAssetFile() as file:
+            return RsAssetFile2(
+                name=sanitize(file.path.name).upper(),
+                path=file.path,
+            )
         case _:
             raise TypeError("who are you?")
 
@@ -172,31 +225,55 @@ def announce_yourself(*pa, **pkw):
 
 
 class RsAssetRoot(RsAsset):
-    def __init__(self, asset: Path) -> None:
-        self.path = asset
+    plain_template = """{header}
 
-    @property
-    def a(self):
-        return RsAssetModule(self.path, True)
-
-    @announce_yourself("generating code macro style")
-    def macroed(self):
-        return f"""{header}
+{body}
+"""
+    macroed_template = """{header}
 {lda_macro}
 hehe! {{
-{indent(self.a.macroed(), 4)}
+{indented_body}
 }}
 """
 
-    @announce_yourself("generating code plain ahh style")
+    def __init__(self, asset_root: Path) -> None:
+        self.path = asset_root
+        self._w = RsAssetModule(asset_root)
+
     def plain(self) -> str:
-        return f"""{header}
+        body = RsAssetModule._process_body(self.path, lambda it: it.plain())
+        return self.plain_template.format(
+            header=header,
+            body=body,
+        )
 
-{self.a.plain()}
-"""
+    def macroed(self) -> str:
+        body = RsAssetModule._process_body(self.path, lambda it: it.macroed())
+        return self.macroed_template.format(
+            header=header,
+            lda_macro=lda_macro,
+            indented_body=indent(body, 4),
+        )
 
 
-rs_code = RsAssetRoot(static).plain()
+asset_root = RsAssetRoot(static)
+
+pprint(dictionary(asset_root))
+
+
+def render_ir(node: RsAssetModule2 | RsAssetFile2) -> str:
+    "gemini 3 pro"
+    if "children" in node:
+        body = "\n".join(map(render_ir, node["children"]))  # type: ignore[typeddict-item]
+        if node["name"] == "ROOT":
+            return f"{header}\n\n{body}\n"
+        return f"pub mod {node['name']} {{\n{indent(body, 4)}\n}}"
+
+    rel = node["path"].relative_to(src, walk_up=True).as_posix()
+    return f'pub const {node["name"]}: &str = include_str!("{rel}");'
+
+
+rs_code = render_macro(asset_root)
 
 # generate
 out_rs.write_text(rs_code, encoding="utf-8")
