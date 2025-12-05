@@ -5,6 +5,7 @@ edition = "2024"
 publish = ["gitea"]
 
 [dependencies]
+anyhow = "1.0.100"
 axum = { version = "0.8.4", features = ["macros"] }
 axum-extra = { version = "0.10.1", features = ["query"] }
 color-eyre = "0.6.5"

@@ -10,7 +10,7 @@
 
 use std::{net::IpAddr, str::FromStr};
 
-use impls::ser_opm;
+use crate::utils::parse::mac::ser_opm;
 use macaddr::MacAddr;
 use serde_with::skip_serializing_none;
 use strum::{Display, EnumString};
@@ -41,7 +41,9 @@ pub struct IpNeighLine {
 
 // NUDState custom Deserialize now lives in arpparse/impl.rs; use serde_with OneOrMany for Vec
 
-#[derive(Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, serde::Serialize, Default)]
+#[derive(
+    Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, serde::Serialize, Default,
+)]
 #[strum(serialize_all = "UPPERCASE", ascii_case_insensitive)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum NUDState {
@@ -63,7 +65,6 @@ pub enum NUDState {
     /// neighbour state if it was valid and the
     /// address is not changed by this command.
     Stale,
-
 
     /// the neighbour entry has not (yet) been
     /// validated/resolved.
@@ -88,7 +89,7 @@ pub enum NUDState {
 
 impl NUDState {
     /// Argument form expected by `ip neigh ... nud <state>` (lowercase)
-    pub const fn as_ip_neigh_arg(self) -> &'static str {
+    pub const fn _as_ip_neigh_arg(self) -> &'static str {
         match self {
             NUDState::Permanent => "permanent",
             NUDState::Reachable => "reachable",
@@ -182,7 +183,7 @@ impl IpNeighLine {
         Self { state, ..self }
     }
     */
-    pub fn with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
+    pub fn _with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
         let dev = dev.into();
         move |self_| Self {
             dev: Some(dev.clone()),

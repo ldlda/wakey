@@ -1,8 +1,8 @@
 //! idk what to put here
 
-use std::net::IpAddr;
+use std::{io, net::IpAddr, process::Output};
 
-use anyhow::bail;
+use anyhow::{Context, bail};
 
 use super::{NUDState, NeighborItem};
 
@@ -19,6 +19,16 @@ pub async fn get(
     dev: Option<&str>,
     nud: &[NUDState],
 ) -> anyhow::Result<Vec<NeighborItem>> {
+    let output = _get(ip, dev, nud).await.context("Can not run command")?;
+
+    if !output.status.success() {
+        bail!(String::from_utf8_lossy(&output.stderr).into_owned())
+    } else {
+        Ok(serde_json::from_slice(&output.stdout)?)
+    }
+}
+
+pub async fn _get(ip: Option<IpAddr>, dev: Option<&str>, nud: &[NUDState]) -> io::Result<Output> {
     let mut cmd = tokio::process::Command::new("ip");
     cmd.args(["-j", "neigh", "show"]);
 
@@ -34,11 +44,5 @@ pub async fn get(
         cmd.arg(nud.to_string());
     }
 
-    let output = cmd.output().await?;
-
-    if !output.status.success() {
-        bail!(String::from_utf8_lossy(&output.stderr).into_owned())
-    } else {
-        Ok(serde_json::from_slice(&output.stdout)?)
-    }
+    cmd.output().await
 }

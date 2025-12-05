@@ -19,9 +19,22 @@
 
 // prefix seems to be a cidr. both 6 and 4 works. idfk dog
 
+use std::{io, process::Output};
+
+use anyhow::Context;
+
 use super::AddrOutput;
 
 pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrOutput>> {
+    let output = _get(dev).await.context("Can not run command")?;
+
+    if !output.status.success() {
+        anyhow::bail!(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+pub async fn _get(dev: Option<&str>) -> io::Result<Output> {
     let mut cmd = tokio::process::Command::new("ip");
     cmd.args(["-j", "address", "show"]);
 
@@ -29,11 +42,5 @@ pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrOutput>> {
         cmd.args(["dev", d]);
     }
 
-    let output = cmd.output().await?;
-
-    if !output.status.success() {
-        anyhow::bail!(String::from_utf8_lossy(&output.stderr).into_owned());
-    }
-
-    Ok(serde_json::from_slice(&output.stdout)?)
+    cmd.output().await
 }

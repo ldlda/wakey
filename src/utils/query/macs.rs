@@ -1,20 +1,15 @@
 use macaddr::MacAddr;
 
-use crate::arpparse::{self, IpNeighLine, NUDState};
-use crate::utils::{
-    cmd::exec_command,
-    error::{self, Result},
-};
+use crate::arpparse::{IpNeighLine, NUDState};
+use anyhow::{Context, Result};
+use lda_ipjs::subcommands::neighbor as ipjs_neigh;
 use std::collections::HashSet;
 use std::net::IpAddr;
 
 pub async fn get_ips(machine_name: &str) -> Result<impl Iterator<Item = IpAddr>> {
     Ok(tokio::net::lookup_host((machine_name, 0))
         .await
-        .map_err(|e| error::Error::DnsResolve {
-            name: machine_name.to_string(),
-            source: e,
-        })?
+        .with_context(|| format!("DNS resolve failed for {machine_name}"))?
         .map(|c| c.ip()))
 }
 
@@ -45,15 +40,12 @@ pub async fn get_macs(
     macs: &[MacAddr],
 ) -> Result<Vec<IpNeighLine>> {
     let mut ip_set: HashSet<IpAddr> = ips.iter().map(|ip| ip.to_canonical()).collect();
-    let ip_m: HashSet<IpAddr> = futures::future::try_join_all(
-        machine_names
-            .iter()
-            .map(|c| get_ips(c.as_ref())),
-    )
-    .await?
-    .into_iter()
-    .flatten()
-    .collect();
+    let ip_m: HashSet<IpAddr> =
+        futures::future::try_join_all(machine_names.iter().map(|c| get_ips(c.as_ref())))
+            .await?
+            .into_iter()
+            .flatten()
+            .collect();
     let ip_all = if ip_set.is_empty() && ip_m.is_empty() {
         None
     } else if ip_set.is_empty() {
@@ -114,37 +106,28 @@ pub async fn get_mac(
     dev: Option<&str>,
     state: &[NUDState],
 ) -> Result<Vec<IpNeighLine>> {
-    let mut args: Vec<String> = vec!["neigh".into(), "show".into()];
-    if let Some(ip) = ip {
-        args.push("to".into());
-        args.push(ip.to_string());
-    }
-    if let Some(d) = dev {
-        args.push("dev".into());
-        args.push(d.to_string());
-    }
-    for nud in state {
-        args.push("nud".into());
-        args.push(nud.as_ip_neigh_arg().into());
-    }
-    let cmd = "ip";
-    let out = exec_command(cmd, args.iter().map(String::as_str).collect::<Vec<_>>()).await?;
-    if !out.status.success() {
-        return Err(error::Error::CommandFailed {
-            cmd,
-            args,
-            status: out.status.code(),
-            stderr: String::from_utf8_lossy(&out.stderr).into(),
-        });
-    }
-    let lines = String::from_utf8_lossy(&out.stdout);
-    let parsed = lines.lines().flat_map(arpparse::parse_ip_neigh_line);
-    let rows: Vec<IpNeighLine> = if let Some(d) = dev {
-        parsed.map(IpNeighLine::with_dev(d)).collect()
-    } else {
-        parsed.collect()
-    };
-    Ok(rows)
+    let ipjs_states: Vec<ipjs_neigh::NUDState> = state.iter().copied().map(Into::into).collect();
+
+    let items = ipjs_neigh::json::get(ip, dev, &ipjs_states)
+        .await
+        .context("Calling ip -j neigh failed")?;
+
+    let lines = items
+        .into_iter()
+        .map(|item| IpNeighLine {
+            ip: item.ip,
+            dev: Some(item.dev),
+            mac: item.mac,
+            state: item
+                .state
+                .first()
+                .copied()
+                .map(Into::into)
+                .unwrap_or(NUDState::None),
+        })
+        .collect();
+
+    Ok(lines)
 }
 
 /*

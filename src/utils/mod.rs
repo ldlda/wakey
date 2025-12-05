@@ -9,8 +9,6 @@
 // pub static LDA_MACS_2: LazyLock<[MacAddr; 2]> = LazyLock::new(|| LDA_MACS.map(MacAddr::from));
 pub mod wake;
 
-pub mod cmd;
-pub mod error;
 /// generic so you can do "123.45.67.89:22" or "lda.lan:22" as an input
 // this is so bad
 pub mod ping;
