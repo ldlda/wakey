@@ -65,7 +65,7 @@ pub enum NUDState {
     /// failed.
     Failed,
 
-    Other(u16)
+    Other(u16),
 }
 
 /// everything i see

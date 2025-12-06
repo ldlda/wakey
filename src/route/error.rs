@@ -13,7 +13,7 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    /// [StatusCode::INTERNAL_SERVER_ERROR]
+    /// [StatusCode::INTERNAL_SERVER_ERROR] shortcut
     pub const fn ise(error: String) -> Self {
         Self {
             code: StatusCode::INTERNAL_SERVER_ERROR,

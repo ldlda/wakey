@@ -100,52 +100,12 @@ pub fn boolish_str(s: &str) -> bool {
             && t.parse::<u64>().map(|n| n != 0).unwrap_or(false))
 }
 
-pub mod de_many {
-    use serde::Deserialize;
-    use serde::de;
-
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum OneOrMany<T> {
-        One(T),
-        Many(Vec<T>),
-    }
-
-    pub fn vec_from_strs<'de, D, T>(des: D) -> Result<Vec<T>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-        T: std::str::FromStr,
-        T::Err: std::fmt::Display,
-    {
-        let raw: OneOrMany<String> = OneOrMany::<String>::deserialize(des)?;
-        let mut out = Vec::new();
-        match raw {
-            OneOrMany::One(s) => {
-                let t = s.trim();
-                if !t.is_empty() {
-                    out.push(t.parse().map_err(de::Error::custom)?);
-                }
-            }
-            OneOrMany::Many(vs) => {
-                for s in vs {
-                    let t = s.trim();
-                    if t.is_empty() {
-                        continue;
-                    }
-                    out.push(t.parse().map_err(de::Error::custom)?);
-                }
-            }
-        }
-        Ok(out)
-    }
-}
-
 pub mod mac {
     use macaddr::MacAddr;
     use serde::{self, Deserialize, Deserializer, de::Error as DeError};
     use serde::{Serialize, Serializer, de};
 
-    pub fn serialize_macs<S>(macs: &[MacAddr], serializer: S) -> Result<S::Ok, S::Error>
+    pub fn _serialize_macs<S>(macs: &[MacAddr], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -154,7 +114,7 @@ pub mod mac {
     }
 
     /// Serialize a MacAddr as a string
-    pub fn _serialize_mac<S>(mac: &MacAddr, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(mac: &MacAddr, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -162,7 +122,7 @@ pub mod mac {
     }
 
     /// Deserialize a MacAddr from a string
-    pub fn _deserialize_mac<'de, D>(deserializer: D) -> Result<MacAddr, D::Error>
+    pub fn _deserialize<'de, D>(deserializer: D) -> Result<MacAddr, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -170,21 +130,22 @@ pub mod mac {
         s.parse::<MacAddr>().map_err(DeError::custom)
     }
 
-    /// serialize an [`Option<MacAddr>`]
-    pub fn ser_opm<S: Serializer>(bro: &Option<MacAddr>, ser: S) -> Result<S::Ok, S::Error> {
-        Option::<String>::serialize(&bro.as_ref().map(ToString::to_string), ser)
-    }
+    pub mod option_mac {
+        use super::*;
+        /// serialize an [`Option<MacAddr>`]
+        pub fn serialize<S: Serializer>(bro: &Option<MacAddr>, ser: S) -> Result<S::Ok, S::Error> {
+            Option::<String>::serialize(&bro.as_ref().map(ToString::to_string), ser)
+        }
 
-    /// deserialize an [`Option<MacAddr>`]
-    pub fn des_opm<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Option::<&str>::deserialize(des)?
-            .map(str::parse)
-            .transpose()
-            .map_err(de::Error::custom)
+        /// deserialize an [`Option<MacAddr>`]
+        pub fn deserialize<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            Option::<&str>::deserialize(des)?
+                .map(str::parse)
+                .transpose()
+                .map_err(de::Error::custom)
+        }
     }
 }
-
-pub use mac::*;

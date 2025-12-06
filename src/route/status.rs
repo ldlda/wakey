@@ -4,11 +4,10 @@ use axum_extra::extract::Query;
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
+use serde_with::{DisplayFromStr, OneOrMany, serde_as};
 use std::net::IpAddr;
 
 use crate::arpparse::NUDState;
-use crate::utils::parse::de_many;
-use crate::utils::parse::serialize_macs;
 use crate::utils::query::get_macs;
 
 #[derive(Debug, Default, Clone, Hash, Deserialize, Serialize)]
@@ -31,19 +30,20 @@ pub struct Status<T> {
     pub filters: Filters,
 }
 
+#[serde_as]
 #[derive(Debug, Default, Clone, Hash, Serialize, Deserialize)]
 pub struct Filters {
-    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
+    #[serde_as(as = "OneOrMany<_>")]
+    #[serde(default)]
     pub ips: Vec<IpAddr>,
-    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
+    #[serde_as(as = "OneOrMany<_>")]
+    #[serde(default)]
     pub devs: Vec<String>,
-    #[serde(default, deserialize_with = "de_many::vec_from_strs")]
+    #[serde_as(as = "OneOrMany<_>")]
+    #[serde(default)]
     pub nuds: Vec<NUDState>,
-    #[serde(
-        default,
-        deserialize_with = "de_many::vec_from_strs",
-        serialize_with = "serialize_macs"
-    )]
+    #[serde_as(as = "OneOrMany<DisplayFromStr>")]
+    #[serde(default)]
     pub macs: Vec<MacAddr>,
 }
 

@@ -13,11 +13,6 @@ pub async fn get_ips(machine_name: &str) -> Result<impl Iterator<Item = IpAddr>>
         .map(|c| c.ip()))
 }
 
-// #[deprecated(
-//     since = "0.1.5",
-//     note = "just call once everything with get mac
-//     and then filter it bro WHY DO YOU EVEN DO TS"
-// )]
 // good now
 //
 // Current logic: When filtering by exactly 1 dev/mac, exclude entries missing that field.

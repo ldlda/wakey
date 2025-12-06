@@ -10,7 +10,7 @@
 
 use std::{net::IpAddr, str::FromStr};
 
-use crate::utils::parse::mac::ser_opm;
+use crate::utils::parse::mac;
 use macaddr::MacAddr;
 use serde_with::skip_serializing_none;
 use strum::{Display, EnumString};
@@ -33,7 +33,7 @@ pub struct IpNeighLine {
     pub ip: IpAddr,
     pub dev: Option<String>,
     /// link layer address
-    #[serde(serialize_with = "ser_opm")]
+    #[serde(with = "mac::option_mac")]
     pub mac: Option<MacAddr>,
     /// Neighbour Unreachability Detection
     pub state: NUDState,

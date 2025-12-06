@@ -8,7 +8,7 @@ enum OneOrMany<T> {
     Many(Vec<T>),
 }
 
-pub fn vec_from_strs<'de, D, T>(des: D) -> Result<Vec<T>, D::Error>
+pub fn deserialize<'de, D, T>(des: D) -> Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: std::str::FromStr,

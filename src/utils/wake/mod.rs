@@ -1,3 +1,5 @@
+//! why did my Head Ass split these into two.
+
 pub mod impls;
 use std::{io, net::IpAddr};
 

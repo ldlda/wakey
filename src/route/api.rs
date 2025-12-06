@@ -13,7 +13,7 @@ pub async fn status_smart_redirect(
     Path(q): Path<String>,
 ) -> axum::response::Result<Redirect, impl IntoResponse> {
     // no less bullshit
-    let query = match parse_query(q) {
+    let query = match parse_query(q).await {
         QueryType::Ip(ip_addr) => DeviceQuery {
             filter: Filters {
                 ips: vec![ip_addr],
