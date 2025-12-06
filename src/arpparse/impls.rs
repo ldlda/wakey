@@ -53,13 +53,19 @@ impl From<NUDState> for ipjs_neigh::NUDState {
 }
 
 impl From<NeighborItem> for IpNeighLine {
-    fn from(item: NeighborItem) -> Self {
+    fn from(
+        NeighborItem {
+            ip,
+            dev,
+            mac,
+            state,
+        }: NeighborItem,
+    ) -> Self {
         IpNeighLine {
-            ip: item.ip,
-            dev: Some(item.dev),
-            mac: item.mac,
-            state: item
-                .state
+            ip,
+            dev,
+            mac,
+            state: state
                 .first()
                 .copied()
                 .map(Into::into)

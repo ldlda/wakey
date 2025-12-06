@@ -107,20 +107,7 @@ pub async fn get_mac(
         .await
         .context("Calling ip -j neigh failed")?;
 
-    let lines = items
-        .into_iter()
-        .map(|item| IpNeighLine {
-            ip: item.ip,
-            dev: Some(item.dev),
-            mac: item.mac,
-            state: item
-                .state
-                .first()
-                .copied()
-                .map(Into::into)
-                .unwrap_or(NUDState::None),
-        })
-        .collect();
+    let lines = items.into_iter().map(Into::into).collect();
 
     Ok(lines)
 }

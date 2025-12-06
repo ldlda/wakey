@@ -24,7 +24,18 @@ pub async fn get(
     if !output.status.success() {
         bail!(String::from_utf8_lossy(&output.stderr).into_owned())
     } else {
-        serde_json::from_slice(&output.stdout).context("Deserialize failed")
+        let mut fuckass: Vec<NeighborItem> =
+            serde_json::from_slice(&output.stdout).context("Deserialize failed")?;
+
+        // i hate ts.
+        if let Some(dev) = dev {
+            for item in &mut fuckass {
+                if item.dev.is_none() {
+                    item.dev = Some(dev.to_owned());
+                }
+            }
+        };
+        Ok(fuckass)
     }
 }
 
@@ -33,6 +44,7 @@ pub async fn _get(ip: Option<IpAddr>, dev: Option<&str>, nud: &[NUDState]) -> io
     cmd.args(["-j", "neigh", "show"]);
 
     if let Some(ip) = ip {
+        // cmd.arg("to");
         cmd.arg(ip.to_canonical().to_string());
     };
 

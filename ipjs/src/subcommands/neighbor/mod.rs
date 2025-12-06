@@ -73,7 +73,8 @@ pub enum NUDState {
 pub struct NeighborItem {
     #[serde(rename(deserialize = "dst"))]
     pub ip: IpAddr,
-    pub dev: String,
+    #[serde(default)]
+    pub dev: Option<String>,
     #[serde(with = "option_mac", default, rename(deserialize = "lladdr"))]
     pub mac: Option<MacAddr>,
     #[serde(default)]

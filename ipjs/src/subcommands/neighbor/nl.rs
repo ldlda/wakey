@@ -93,7 +93,7 @@ pub async fn get(
             name
         };
 
-        let Some((ip, dev)) = ip.zip(dev) else {
+        let (Some(ip), Some(dev)) = (ip, dev) else {
             continue 'big;
         };
 
@@ -116,7 +116,7 @@ pub async fn get(
 
         result.push(NeighborItem {
             ip,
-            dev,
+            dev: Some(dev),
             mac,
             state,
         });
