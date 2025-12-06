@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use lda_ipjs::subcommands::neighbor;
+use lda_ipjs::subcommands::{address, neighbor};
 
 #[tokio::test] // ← Use tokio::test instead of manual #[tokio::main]
 async fn ball1() -> anyhow::Result<()> {
@@ -119,7 +119,21 @@ async fn ball_compare_backends() -> anyhow::Result<()> {
     Ok(())
 }
 
+// #[tokio::test]
+// async fn cidr_filter() {
+//     unimplemented!("never. i aint add what i dont need")
+// }
+
 #[tokio::test]
-async fn cidr_filter() {
-    unimplemented!("never. i aint add what i dont need")
+async fn ipjas() -> anyhow::Result<()> {
+    let cuh = address::json::get(None).await?;
+    println!("{cuh:#?}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn ipjas_raw() -> anyhow::Result<()> {
+    let cuh = address::json::_get(None).await?;
+    println!("{cuh:#?}");
+    Ok(())
 }

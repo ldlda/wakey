@@ -34,9 +34,9 @@ ForEach-Object { $_.Matches.Groups[1].Value } |
 Get-Item
 
 if ($testBinaries.Count -eq 0) {
-    Write-Error "No test binaries found!"
-    Write-Host "Cargo output:" -ForegroundColor Yellow
-    $cargoOutput | ForEach-Object { Write-Host $_ }
+    Write-Error "No test binaries found! Exiting..."
+    # Write-Host "Cargo output:" -ForegroundColor Yellow
+    # $cargoOutput | ForEach-Object { Write-Host $_ }
     exit 1
 }
 

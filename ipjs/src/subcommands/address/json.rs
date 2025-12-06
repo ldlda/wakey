@@ -32,7 +32,7 @@ pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrOutput>> {
         anyhow::bail!(String::from_utf8_lossy(&output.stderr).into_owned());
     }
 
-    Ok(serde_json::from_slice(&output.stdout)?)
+    serde_json::from_slice(&output.stdout).context("Deserialize failed")
 }
 pub async fn _get(dev: Option<&str>) -> io::Result<Output> {
     let mut cmd = tokio::process::Command::new("ip");

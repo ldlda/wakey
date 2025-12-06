@@ -1,4 +1,5 @@
-[System.Diagnostics.CodeAnalysis.SuppressMessage('PSAvoidDefaultValueSwitchParameter', 'Default true is intentional for fast dev loop')]
+[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidDefaultValueSwitchParameter', "", 
+    Justification = 'Default true is intentional for fast dev loop')]
 param(
     [string]$Pass,
     [string]$HostName = "192.168.100.1",

@@ -24,7 +24,7 @@ pub async fn get(
     if !output.status.success() {
         bail!(String::from_utf8_lossy(&output.stderr).into_owned())
     } else {
-        Ok(serde_json::from_slice(&output.stdout)?)
+        serde_json::from_slice(&output.stdout).context("Deserialize failed")
     }
 }
 

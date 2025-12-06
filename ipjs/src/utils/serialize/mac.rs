@@ -1,6 +1,6 @@
 use macaddr::MacAddr;
 use serde::{self, Deserialize, Deserializer, de::Error as DeError};
-use serde::{Serialize, Serializer, de};
+use serde::{Serialize, Serializer};
 
 pub fn serialize_macs<S>(macs: &[MacAddr], serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -33,14 +33,18 @@ pub mod option_mac {
     pub fn serialize<S: Serializer>(bro: &Option<MacAddr>, ser: S) -> Result<S::Ok, S::Error> {
         Option::<String>::serialize(&bro.as_ref().map(ToString::to_string), ser)
     }
-    /// deserialize an [`Option<MacAddr>`]
+    /// deserialize an [`Option<MacAddr>`], returns None for invalid input (::, 0.0.0.0)
     pub fn deserialize<'de, D>(des: D) -> Result<Option<MacAddr>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        Option::<&str>::deserialize(des)?
-            .map(str::parse)
-            .transpose()
-            .map_err(de::Error::custom)
+        let s: Option<&str> = Option::<&str>::deserialize(des)?;
+        match s {
+            Some(val) => match val.parse::<MacAddr>() {
+                Ok(mac) => Ok(Some(mac)),
+                Err(_) => Ok(None),
+            },
+            None => Ok(None),
+        }
     }
 }
