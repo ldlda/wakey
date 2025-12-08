@@ -16,9 +16,13 @@ use crate::route::status::get_status_json;
 use crate::route::wake::wake_multi;
 
 use axum::Json;
-use axum::response::IntoResponse;
-use axum::routing::post;
-use axum::{Router, http::header, response::Html, routing::get};
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, header};
+use axum::middleware::{self, Next};
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get, post};
+use std::time::Instant;
 
 use crate::utils::route::serve_js;
 
@@ -51,6 +55,17 @@ pub fn home_2_route() -> Router {
         .route("/home_2/dom.js", get(|| serve_js(home_2::DOM_JS)))
 }
 
+async fn add_performance_header(req: Request<Body>, next: Next) -> Response {
+    let start = Instant::now();
+    let mut response = next.run(req).await;
+    let elapsed = start.elapsed();
+
+    if let Ok(val) = format!("work-time={}us", elapsed.as_micros()).parse() {
+        response.headers_mut().insert("Lda-Performance", val);
+    }
+    response
+}
+
 pub fn api_router() -> Router {
     Router::new()
         .route("/status/{name}", get(status_redirect))
@@ -69,4 +84,5 @@ pub fn api_router() -> Router {
                 }
             }),
         )
+        .layer(middleware::from_fn(add_performance_header))
 }
