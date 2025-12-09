@@ -89,7 +89,7 @@ pub enum NUDState {
 
 impl NUDState {
     /// Argument form expected by `ip neigh ... nud <state>` (lowercase)
-    pub const fn _as_ip_neigh_arg(self) -> &'static str {
+    pub const fn as_ip_neigh_arg(self) -> &'static str {
         match self {
             NUDState::Permanent => "permanent",
             NUDState::Reachable => "reachable",
@@ -183,7 +183,7 @@ impl IpNeighLine {
         Self { state, ..self }
     }
     */
-    pub fn _with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
+    pub fn with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
         let dev = dev.into();
         move |self_| Self {
             dev: Some(dev.clone()),

@@ -1,8 +1,7 @@
 use macaddr::MacAddr;
 
-use crate::arpparse::{IpNeighLine, NUDState};
-use anyhow::{Context, Result};
-use lda_ipjs::subcommands::neighbor as ipjs_neigh;
+use crate::arpparse::{self, IpNeighLine, NUDState};
+use anyhow::{Context, Result, bail};
 use std::collections::HashSet;
 use std::net::IpAddr;
 
@@ -95,21 +94,60 @@ pub async fn get_macs(
     Ok(ip_filtered)
 }
 
+// /// the atomic get_macs. handle ONE thing only.
+// pub async fn get_mac(
+//     ip: Option<IpAddr>,
+//     dev: Option<&str>,
+//     state: &[NUDState],
+// ) -> Result<Vec<IpNeighLine>> {
+// use lda_ipjs::subcommands::neighbor as ipjs_neigh;
+//     let ipjs_states: Vec<ipjs_neigh::NUDState> = state.iter().copied().map(Into::into).collect();
+
+//     let items = ipjs_neigh::json::get(ip, dev, &ipjs_states)
+//         .await
+//         .context("Calling ip -j neigh failed")?;
+
+//     let lines = items.into_iter().map(Into::into).collect();
+
+//     Ok(lines)
+// }
+
 /// the atomic get_macs. handle ONE thing only.
 pub async fn get_mac(
     ip: Option<IpAddr>,
     dev: Option<&str>,
     state: &[NUDState],
 ) -> Result<Vec<IpNeighLine>> {
-    let ipjs_states: Vec<ipjs_neigh::NUDState> = state.iter().copied().map(Into::into).collect();
+    let mut args: Vec<String> = vec!["neigh".into(), "show".into()];
+    if let Some(ip) = ip {
+        args.push("to".into());
+        args.push(ip.to_string());
+    }
+    if let Some(d) = dev {
+        args.push("dev".into());
+        args.push(d.to_string());
+    }
+    for nud in state {
+        args.push("nud".into());
+        args.push(nud.as_ip_neigh_arg().into());
+    }
+    let cmd = "ip";
+    let mut u = tokio::process::Command::new(cmd);
+    u.args(args);
+    let out = u.output().await?;
 
-    let items = ipjs_neigh::json::get(ip, dev, &ipjs_states)
-        .await
-        .context("Calling ip -j neigh failed")?;
+    if !out.status.success() {
+        bail!(String::from_utf8_lossy(&out.stderr).into_owned());
+    }
 
-    let lines = items.into_iter().map(Into::into).collect();
-
-    Ok(lines)
+    let lines = String::from_utf8_lossy(&out.stdout);
+    let parsed = lines.lines().flat_map(arpparse::parse_ip_neigh_line);
+    let rows: Vec<IpNeighLine> = if let Some(d) = dev {
+        parsed.map(IpNeighLine::with_dev(d)).collect()
+    } else {
+        parsed.collect()
+    };
+    Ok(rows)
 }
 
 /*
