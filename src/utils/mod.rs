@@ -13,7 +13,6 @@ pub mod wake;
 // this is so bad
 pub mod ping;
 pub mod query;
-pub mod query_parser;
 pub mod route;
 
 // no custom ip deserializer needed when using axum_extra::extract::Query

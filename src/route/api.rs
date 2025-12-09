@@ -1,5 +1,5 @@
 use crate::route::error::ApiError;
-use crate::utils::query_parser::{QueryType, parse_query};
+use crate::utils::query::parser::{QueryType, parse_query};
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
