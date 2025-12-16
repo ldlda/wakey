@@ -20,12 +20,15 @@ use std::io;
 #[cfg(target_os = "linux")]
 #[tokio::main]
 async fn entry() -> io::Result<()> {
-    use crate::route::{api_router, home_2, home_2_route};
+    use crate::route::api_router;
+    use axum::routing::get_service;
+    use tower_http::services::ServeDir;
 
     let app = Router::new()
         // .route("/home", get(home))
-        .route("/", get(home_2))
-        .merge(home_2_route())
+        // .route("/", get(home_2))
+        // .merge(home_2_route())
+        .nest_service("/", get_service(ServeDir::new("static")))
         // .route("/status", get(get_status_2))
         .nest("/api", api_router());
 

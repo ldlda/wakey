@@ -39,7 +39,7 @@ pub fn home_2_route() -> Router {
             "/home_2/styles.css",
             get(|| async {
                 (
-                    [
+                    [ 
                         (header::CONTENT_TYPE, "text/css; charset=utf-8"),
                         (header::CACHE_CONTROL, "public, max-age=300"),
                     ],

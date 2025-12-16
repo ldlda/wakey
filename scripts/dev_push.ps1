@@ -48,10 +48,11 @@ sh "`$DEPLOY" $RemoteTmp $RemotePath $RestartFlag
 }
 
 function Invoke-Scp {
-    param($Local, $Dest, $Pass, $HostKey, [switch]$Quiet)
+    param($Local, $Dest, $Pass, $HostKey, [switch]$Quiet, [switch]$Recurse)
     if ($pscp = Get-Command pscp.exe -ErrorAction SilentlyContinue) {
         $arguments = @('-scp')
         if ($Quiet) { $arguments += '-q' }
+        if ($Recurse) { $arguments += '-r' }
         if ($HostKey) { $arguments += @('-batch', '-hostkey', $HostKey) }
         if ($Pass) { $arguments += @('-pw', $Pass) }
         $arguments += @($Local, $Dest)
@@ -60,6 +61,7 @@ function Invoke-Scp {
     else {
         $arguments = @('-O')
         if ($Quiet) { $arguments += '-q' }
+        if ($Recurse) { $arguments += '-r' }
         $arguments += @($Local, $Dest)
         Invoke-Ext -Exe 'scp' -Arguments $arguments -Label 'scp'
     }
@@ -102,6 +104,20 @@ try {
 
     # Push main binary
     Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Quiet:$Quiet
+
+    # Push static assets
+    $localStatic = Join-Path $repoRoot "static"
+    if (Test-Path $localStatic) {
+        # Assuming RemotePath is like /root/.bin/wakey, we want /root/.bin/static
+        # So we push 'static' directory to /root/.bin/
+        $remoteDir = Split-Path $RemotePath -Parent
+        # Ensure remote dir exists (ssh mkdir -p)
+        Invoke-Ssh -Cmd "mkdir -p $remoteDir" -User $User -Remote $HostName -Pass $Pass -Quiet:$Quiet
+        
+        # SCP -r static user@host:/root/.bin/
+        # Note: pscp/scp behavior: if dest is a dir, it copies the source dir INTO it.
+        Invoke-Scp -Local $localStatic -Dest "$User@${HostName}:$remoteDir/" -Pass $Pass -HostKey $HostKey -Quiet:$Quiet -Recurse
+    }
 
     # Push deploy helper if exists
     if (Test-Path $localDeploy) {

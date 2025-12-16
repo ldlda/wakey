@@ -34,6 +34,7 @@ function updatePreview() {
   const raw = getName(elName);
   const host = extractHostLikeBackend(raw);
   elPreview.textContent = host && host !== raw ? `→ ${host}` : "";
+  return host;
 }
 
 function pickTarget(value) {

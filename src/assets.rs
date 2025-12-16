@@ -18,7 +18,7 @@ macro_rules! hehe {
 }
 
 hehe! {
-    file HOME_2_HTML "../static/home_2.html"
+    file HOME_2_HTML "../static/index.html"
     folder home_2 {
         file DOM_JS "../static/home_2/dom.js"
         file LEASES_JS "../static/home_2/leases.js"
