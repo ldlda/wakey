@@ -8,14 +8,14 @@
 //! 2. incorporate ip -j;
 //! 3. small 1-5 second caching;
 
-use axum::{Router, routing::get};
+use axum::Router;
 use tokio::net::TcpListener;
 mod arpparse;
 pub mod assets;
 mod dhcpparse;
 mod route;
 mod utils;
-use std::io;
+use std::{env, io};
 
 #[cfg(target_os = "linux")]
 #[tokio::main]
@@ -23,14 +23,18 @@ async fn entry() -> io::Result<()> {
     use crate::route::api_router;
     use axum::routing::get_service;
     use tower_http::services::ServeDir;
-
+    let exe = env::current_exe()?;
+    let root = exe
+        .parent()
+        .ok_or_else(|| io::Error::other("no parent dir"))?;
+    let static_dir = ServeDir::new(root.join("static"));
     let app = Router::new()
         // .route("/home", get(home))
         // .route("/", get(home_2))
         // .merge(home_2_route())
-        .nest_service("/", get_service(ServeDir::new("static")))
         // .route("/status", get(get_status_2))
-        .nest("/api", api_router());
+        .nest("/api", api_router())
+        .fallback_service(get_service(static_dir));
 
     let port = TcpListener::bind("0.0.0.0:12012").await?;
     axum::serve(port, app.into_make_service()).await?;

@@ -110,7 +110,7 @@ try {
     if (Test-Path $localStatic) {
         # Assuming RemotePath is like /root/.bin/wakey, we want /root/.bin/static
         # So we push 'static' directory to /root/.bin/
-        $remoteDir = Split-Path $RemotePath -Parent
+        $remoteDir = (Split-Path $RemotePath -Parent) -replace '\\', '/'
         # Ensure remote dir exists (ssh mkdir -p)
         Invoke-Ssh -Cmd "mkdir -p $remoteDir" -User $User -Remote $HostName -Pass $Pass -Quiet:$Quiet
         
