@@ -11,7 +11,6 @@
 use axum::Router;
 use tokio::net::TcpListener;
 mod arpparse;
-pub mod assets;
 mod dhcpparse;
 mod route;
 mod utils;
