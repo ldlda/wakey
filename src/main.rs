@@ -27,7 +27,12 @@ async fn entry() -> io::Result<()> {
     let root = exe
         .parent()
         .ok_or_else(|| io::Error::other("no parent dir"))?;
-    let static_dir = ServeDir::new(root.join("static"));
+    let static_dir = ServeDir::new(root.join("static"))
+        .append_index_html_on_directories(true)
+        .precompressed_br()
+        .precompressed_deflate()
+        .precompressed_gzip()
+        .precompressed_zstd();
     let app = Router::new()
         // .route("/home", get(home))
         // .route("/", get(home_2))
