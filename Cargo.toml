@@ -41,3 +41,5 @@ members = ["ipjs"]
 
 [dependencies.lda-ipjs]
 path = "ipjs"
+registry = "gitea"
+version = "*"

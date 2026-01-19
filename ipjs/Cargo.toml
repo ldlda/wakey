@@ -3,6 +3,7 @@ name = "lda-ipjs"
 description = "ip -j show schemas"
 version = "0.0.1"
 edition = "2024"
+publish = ["gitea"]
 
 [dependencies]
 macaddr = { version = "1", features = ["serde", "serde_std"] }
