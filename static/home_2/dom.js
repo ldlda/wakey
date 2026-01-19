@@ -21,7 +21,7 @@ export function setPill(kind, text) {
 
 export function setLink(name, clear) {
   const url = new URL(location.href);
-  if (clear) url.searchParams.forEach((_, k) => url.searchParams.delete(k)); // FUCK
+  if (clear) url.search = ""; // yo
   /* const hasExtraFilters = filter_array.some(
     (k) => url.searchParams.getAll(k).length
   );
