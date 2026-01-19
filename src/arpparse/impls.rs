@@ -66,9 +66,9 @@ impl From<NeighborItem> for IpNeighLine {
             dev,
             mac,
             state: state
-                .first()
-                .copied()
+                .into_iter()
                 .map(Into::into)
+                .max()
                 .unwrap_or(NUDState::None),
         }
     }

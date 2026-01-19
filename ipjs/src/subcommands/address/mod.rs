@@ -5,6 +5,7 @@
 //! lowk why its free but its indirection and its ass
 
 pub mod json;
+pub mod nl;
 
 use crate::utils::serialize::mac::option_mac;
 use macaddr::MacAddr;

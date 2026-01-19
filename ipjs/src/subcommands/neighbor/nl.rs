@@ -17,6 +17,7 @@ use rtnetlink::packet_route::{
 use super::{NUDState, NeighborItem};
 
 // dont you love https://github.com/rust-netlink/rtnetlink/blob/main/examples/get_neighbours.rs
+// NeighborItem.state guarantees to be a single thing.
 pub async fn get(
     ip: Option<IpAddr>,
     dev: Option<&str>,
@@ -27,6 +28,8 @@ pub async fn get(
     tokio::spawn(conn); // every time?
     let mut neighbor_data = handle.neighbours().get().execute();
     let nudset: HashSet<&NUDState> = HashSet::from_iter(gnud);
+
+    // map ifindex to name
     let mut ball: HashMap<u32, String> = HashMap::new();
     let mut result = vec![];
     'big: while let Some(neighbour_message_item) = neighbor_data.try_next().await? {

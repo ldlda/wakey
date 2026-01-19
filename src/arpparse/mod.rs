@@ -183,7 +183,7 @@ impl IpNeighLine {
         Self { state, ..self }
     }
     */
-    pub fn with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
+    pub fn _with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
         let dev = dev.into();
         move |self_| Self {
             dev: Some(dev.clone()),
