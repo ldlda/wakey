@@ -4,7 +4,7 @@ use std::net::IpAddr;
 
 /* use crate::arpparse::IpNeighLine;
 use crate::route::api::Status; */
-use crate::utils::parse::mac::{des_opm, ser_opm};
+use crate::utils::parse::mac;
 use crate::utils::wake::wake_one;
 use axum::{extract::Json, http::StatusCode, response::IntoResponse};
 use futures::TryFutureExt;
@@ -44,7 +44,7 @@ pub enum WakeTargetStatus {
 pub struct WakeTarget {
     #[serde(default)]
     pub ip: Option<IpAddr>,
-    #[serde(default, serialize_with = "ser_opm", deserialize_with = "des_opm")]
+    #[serde(default, with = "mac::option_mac")]
     pub mac: Option<MacAddr>,
 }
 

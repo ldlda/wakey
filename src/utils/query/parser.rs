@@ -12,7 +12,7 @@ pub enum QueryType {
     Unknown(String),
 }
 
-pub fn parse_query(q: String) -> QueryType {
+pub async fn parse_query(q: String) -> QueryType {
     let s = if cfg!(feature = "very-smart-parsing") {
         crate::utils::parse::extract_host(&q)
     } else {
@@ -36,7 +36,7 @@ pub fn parse_query(q: String) -> QueryType {
         return QueryType::Nud(state);
     }
     // 4) Known device? prefer dev first
-    if has_dev(s) {
+    if has_dev(s).await {
         return QueryType::Dev(s.to_string());
     }
     // Default: name last // it will fail also

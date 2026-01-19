@@ -1,3 +1,5 @@
+//! why did my Head Ass split these into two.
+
 pub mod impls;
 use std::{io, net::IpAddr};
 
@@ -22,21 +24,21 @@ pub enum WakeStatus {
     WrongSize,
 }
 impl WakeTarget {
-    fn _new(ip: IpAddr, mac: MacAddr) -> Self {
+    const fn _new(ip: IpAddr, mac: MacAddr) -> Self {
         Self { ip, mac }
     }
-    fn good(self) -> WakeTargetResult {
+    const fn good(self) -> WakeTargetResult {
         WakeTargetResult::new(self, WakeStatus::Success)
     }
-    fn bad(self) -> WakeTargetResult {
+    const fn bad(self) -> WakeTargetResult {
         WakeTargetResult::new(self, WakeStatus::WrongSize)
     }
-    fn errored(self) -> WakeTargetResult {
+    const fn errored(self) -> WakeTargetResult {
         WakeTargetResult::new(self, WakeStatus::NonexistentAddress)
     }
 }
 impl WakeTargetResult {
-    fn new(target: WakeTarget, status: WakeStatus) -> Self {
+    const fn new(target: WakeTarget, status: WakeStatus) -> Self {
         Self { target, status }
     }
 }

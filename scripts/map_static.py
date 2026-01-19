@@ -1,22 +1,25 @@
 "thanks chatgpt"
 
+import os
+import textwrap
+from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from pathlib import Path
-
+from typing import Callable
 
 root = Path(__file__).parent.parent
-static = root / "static"  # change "assets" to your folder
-out_rs = root / "src" / "assets.rs"
+static = root / "static"
+src = root / "src"
+out_rs = src / "assets.rs"
+
+assert 'name = "wakey"' in (root / "Cargo.toml").read_text(encoding="utf-8"), (
+    "uhh how do i explain this"
+)
 
 
 def sanitize(name: str) -> str:
     # Valid Rust identifiers: letters, digits, underscores; no starting digit
-    out = []
-    for c in name:
-        if c.isalnum() or c == "_":
-            out.append(c)
-        else:
-            out.append("_")
-    s = "".join(out)
+    s = "".join(c if c.isalnum() else "_" for c in name)
     if s and s[0].isdigit():
         s = "_" + s
     return s
@@ -24,42 +27,186 @@ def sanitize(name: str) -> str:
 
 def indent(text: str, n: int) -> str:
     pad = " " * n
-    return "\n".join(pad + line if line.strip() else line for line in text.splitlines())
+    return textwrap.indent(text, pad)
 
 
-class RsAssetFile:
-    def __init__(self, path: Path):
+class RsAsset(ABC):
+    path: Path
+
+
+class RsAssetWithName(ABC):
+    name: str
+
+    @staticmethod
+    @abstractmethod
+    def name_gen(path: Path) -> str:
+        "helper"
+
+
+class RsAssetFile(RsAsset, RsAssetWithName):
+    __match_args__ = ("path", "name")
+
+    def __init__(self, path: Path, name: str | None = None):
+        self.path = path
+        if name is None:
+            self.name: str = RsAssetFile.name_gen(path)
+        else:
+            self.name = name
+
+    def path_relative_to(self, path: Path):
+        "helper"
+        return self.path.relative_to(path, walk_up=True).as_posix()
+
+    @staticmethod
+    def plain_template(const_name: str, relative_path: str):
+        return f'pub const {const_name}: &str = include_str!("{relative_path}");'
+
+    @staticmethod
+    def macroed_template(const_name: str, relative_path: str):
+        return f'file {const_name} "{relative_path}"'
+
+    @staticmethod
+    def name_gen(path: Path) -> str:
+        return sanitize(path.name).upper()
+
+
+class RsAssetModule(RsAsset, RsAssetWithName):
+    __match_args__ = ("path", "name")
+
+    def __init__(self, path: Path, name: str | None = None):
+        self.path = path
+        if name is None:
+            self.name: str = RsAssetModule.name_gen(path)
+        else:
+            self.name = name
+
+    @staticmethod
+    def plain_template(sanitized_name: str, body: str):
+        "braindead"
+        indented_body = indent(body, 4)
+        return f"pub mod {sanitized_name} {{\n{indented_body}\n}}"
+
+    @staticmethod
+    def macroed_template(sanitized_name: str, body: str):
+        indented_body = indent(body, 4)
+        return f"folder {sanitized_name} {{\n{indented_body}\n}}"
+
+    @staticmethod
+    def process_body(path: Path, renderer: Callable[[RsAsset], str]):
+        "here just cuz. Path has to be a folder... so idk"
+        body = RsAssetModule.iterate_assets(path)
+        return "\n".join(map(renderer, body))
+
+    @staticmethod
+    def iterate_assets(path: Path) -> "Iterable[RsAssetFile | RsAssetModule]":
+        subs = []
+        for f in path.iterdir():
+            if f.is_file():
+                yield RsAssetFile(f)
+            elif f.is_dir():
+                subs.append(RsAssetModule(f))
+        yield from subs
+
+    @staticmethod
+    def name_gen(path: Path) -> str:
+        return sanitize(path.name).lower()
+
+
+# i meant plain
+def render_pain(ass: RsAsset) -> str:
+    """
+    fym i have to deal with all RsAsset subclasses.
+
+    ts like a matrix of ahh.
+    """
+    match ass:
+        case RsAssetRoot(path):
+            body = RsAssetModule.process_body(path, render_pain)
+            return RsAssetRoot.plain_template(body)
+        case RsAssetModule(path, name):
+            body = RsAssetModule.process_body(path, render_pain)
+            return RsAssetModule.plain_template(name, body)
+        case RsAssetFile(path, name) as file:
+            return RsAssetFile.plain_template(name, file.path_relative_to(src))
+        case _:
+            raise TypeError("who are you?")
+
+
+def render_macro(ass: RsAsset) -> str:
+    """
+    ts is ridiculous
+    """
+    match ass:
+        case RsAssetRoot(path):
+            body = RsAssetModule.process_body(path, render_macro)
+            return RsAssetRoot.macroed_template(body)
+        case RsAssetModule(path, name):
+            body = RsAssetModule.process_body(path, render_macro)
+            return RsAssetModule.macroed_template(name, body)
+        case RsAssetFile(path, name) as file:
+            return RsAssetFile.macroed_template(name, file.path_relative_to(src))
+        case _:
+            raise TypeError("who are you?")
+
+
+# region shit ass
+# im deleting this code because its so ass
+# endregion
+
+lda_macro = """
+macro_rules! hehe {
+    // Folder
+    (folder $name:ident { $($children:tt)* } $($rest:tt)*) => {
+        pub mod $name {
+            hehe!{$($children)*}
+        }
+        hehe!{$($rest)*}
+    };
+    // File
+    (file $name:ident $file:literal $($rest:tt)*) => {
+        pub const $name: &str = include_str!($file);
+        hehe!{$($rest)*}
+    };
+    // Base case
+    () => {};
+}
+"""
+header = "// generated with ./scripts/map_static.py"
+
+
+class RsAssetRoot(RsAsset):
+    __match_args__ = ("path",)
+
+    @staticmethod
+    def plain_template(body: str):
+        return f"""{header}
+
+{body}
+"""
+
+    @staticmethod
+    def macroed_template(body: str):
+        indented_body = indent(body, 4)
+        return f"""{header}
+{lda_macro}
+hehe! {{
+{indented_body}
+}}
+"""
+
+    def __init__(self, path: Path) -> None:
+        os.scandir(path)  # is you a dir?
         self.path = path
 
-    def __str__(self):
-        const_name = sanitize(self.path.name).upper()
-        return (
-            f"pub const {const_name}: &str = "
-            f'include_str!("{self.path.relative_to(out_rs.parent, walk_up=True).as_posix()}");'
-        )
-        # specify walk_up to have .. in yo path
 
+asset_root = RsAssetRoot(static)
 
-class RsAssetModule:
-    def __init__(self, folder: Path, body_only: bool = False):
-        self.folder = folder
-        self.full = not body_only
+# print(render_pain(asset_root))
+# print(render_macro(asset_root))
 
-    def __str__(self):
-        files = [str(RsAssetFile(s)) for s in self.folder.iterdir() if s.is_file()]
-        subs = [str(RsAssetModule(s)) for s in self.folder.iterdir() if s.is_dir()]
-
-        body = "\n".join(files + subs)
-        return (
-            f"pub mod {sanitize(self.folder.name).lower()} {{" * self.full
-            + f"\n{indent(body, 4 * self.full)}\n"
-            + self.full * "}"
-        )
-
+# rs_code = render_pain(asset_root)
+rs_code = render_macro(asset_root)
 
 # generate
-rs_code = "// generated with ./scripts/map_static.py\n" + str(
-    RsAssetModule(static, True)
-)
 out_rs.write_text(rs_code, encoding="utf-8")
-print(f"written to {out_rs}")
+print(f"written to {out_rs.relative_to(Path.cwd(), walk_up=True)}")

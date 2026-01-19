@@ -1,0 +1,18 @@
+[package]
+name = "lda-ipjs"
+description = "ip -j show schemas"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+macaddr = { version = "1", features = ["serde", "serde_std"] }
+strum = { version = "0", features = ["derive", "strum_macros"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+serde_with = { version = "3", features = ["json"] }
+thiserror = "2"
+anyhow = "1"
+tokio = { version = "1", features = ["fs", "process", "rt-multi-thread", "io-util", "macros"] }
+rtnetlink = "0"
+futures = "0"
+

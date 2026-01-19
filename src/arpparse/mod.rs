@@ -10,7 +10,7 @@
 
 use std::{net::IpAddr, str::FromStr};
 
-use impls::ser_opm;
+use crate::utils::parse::mac;
 use macaddr::MacAddr;
 use serde_with::skip_serializing_none;
 use strum::{Display, EnumString};
@@ -33,7 +33,7 @@ pub struct IpNeighLine {
     pub ip: IpAddr,
     pub dev: Option<String>,
     /// link layer address
-    #[serde(serialize_with = "ser_opm")]
+    #[serde(with = "mac::option_mac")]
     pub mac: Option<MacAddr>,
     /// Neighbour Unreachability Detection
     pub state: NUDState,
@@ -41,7 +41,9 @@ pub struct IpNeighLine {
 
 // NUDState custom Deserialize now lives in arpparse/impl.rs; use serde_with OneOrMany for Vec
 
-#[derive(Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, serde::Serialize)]
+#[derive(
+    Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, serde::Serialize, Default,
+)]
 #[strum(serialize_all = "UPPERCASE", ascii_case_insensitive)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum NUDState {
@@ -63,10 +65,6 @@ pub enum NUDState {
     /// neighbour state if it was valid and the
     /// address is not changed by this command.
     Stale,
-    /// this is a pseudo state used when initially
-    /// creating a neighbour entry or after trying to
-    /// remove it before it becomes free to do so.
-    None,
 
     /// the neighbour entry has not (yet) been
     /// validated/resolved.
@@ -80,6 +78,13 @@ pub enum NUDState {
     /// success, neighbor validation has ultimately
     /// failed.
     Failed,
+
+    /// this is a pseudo state used when initially
+    /// creating a neighbour entry or after trying to
+    /// remove it before it becomes free to do so.
+    #[serde(other)]
+    #[default]
+    None,
 }
 
 impl NUDState {
@@ -178,7 +183,7 @@ impl IpNeighLine {
         Self { state, ..self }
     }
     */
-    pub fn with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
+    pub fn _with_dev(dev: impl Into<String>) -> impl FnMut(Self) -> Self {
         let dev = dev.into();
         move |self_| Self {
             dev: Some(dev.clone()),

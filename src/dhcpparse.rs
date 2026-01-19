@@ -42,8 +42,8 @@ pub async fn read_dhcp_leases_with_names() -> io::Result<Vec<DhcpLeaseLine>> {
     }
     Ok(leases_with_names)
 }
+use crate::utils::parse::mac;
 use macaddr::MacAddr;
-use serde::Serializer;
 use std::io::{self, ErrorKind};
 use std::net::IpAddr;
 
@@ -53,13 +53,9 @@ pub struct DhcpLeaseLine {
     /// Epoch seconds when the lease expires
     pub expires_epoch: u64,
     pub ip: IpAddr,
-    #[serde(serialize_with = "ser_mac")]
+    #[serde(with = "mac")]
     pub mac: MacAddr,
     pub name: Option<String>,
-}
-
-fn ser_mac<S: Serializer>(m: &MacAddr, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_str(&m.to_string())
 }
 
 /// Parse one line of /tmp/dhcp.leases

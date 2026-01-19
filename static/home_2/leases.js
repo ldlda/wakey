@@ -1,7 +1,8 @@
 import { elLeases } from "./dom.js";
+import { rankState } from "./utils.js";
 
 /**
- * 
+ *
  * @param {{
  *          expires_epoch: Number
  *          rank?: Number
@@ -9,8 +10,8 @@ import { elLeases } from "./dom.js";
  *          mac: String
  *          nud_state?: String
  *          name?: String
- *      }[]} leases 
- * @returns 
+ *      }[]} leases
+ * @returns
  */
 export function renderLeases(leases) {
   if (!elLeases) return;
@@ -36,7 +37,11 @@ export function renderLeases(leases) {
     let dotClass = "dot ok";
     if (expired) {
       dotClass = "dot bad";
-    } /* rank from NUDState */ else if (typeof l?.rank === "number") {
+    } else if (l?.nud_state) {
+      if (rankState(l.nud_state) >= 5) dotClass = "dot ok";
+      else if (rankState(l.nud_state) >= 2) dotClass = "dot warn";
+      else dotClass = "dot bad";
+    } else if (typeof l?.rank === "number") {
       if (l.rank >= 5) dotClass = "dot ok";
       else if (l.rank >= 2) dotClass = "dot warn";
       else dotClass = "dot bad";

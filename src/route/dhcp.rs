@@ -26,12 +26,10 @@ pub async fn get_dhcp_leases(Query(raw): Query<DhcpLeasesQueryRaw>) -> impl Into
             let out = enrich_leases_with_nud_state(leases_with_names).await;
             (StatusCode::OK, Json(out)).into_response()
         }
-        Err(e) => (
-            StatusCode::BAD_GATEWAY,
-            Json(ApiError {
-                error: e.to_string(),
-            }),
-        )
-            .into_response(),
+        Err(e) => ApiError {
+            error: e.to_string(),
+            code: StatusCode::BAD_GATEWAY,
+        }
+        .into_response(),
     }
 }

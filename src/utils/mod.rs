@@ -9,14 +9,10 @@
 // pub static LDA_MACS_2: LazyLock<[MacAddr; 2]> = LazyLock::new(|| LDA_MACS.map(MacAddr::from));
 pub mod wake;
 
-pub mod cmd;
-pub mod error;
 /// generic so you can do "123.45.67.89:22" or "lda.lan:22" as an input
 // this is so bad
 pub mod ping;
 pub mod query;
-pub mod query_parser;
-pub mod route;
 
 // no custom ip deserializer needed when using axum_extra::extract::Query
 // but we add a generic one to ignore blanks and accept OneOrMany
