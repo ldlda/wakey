@@ -35,12 +35,15 @@ pub async fn get_macs(
     macs: &[MacAddr],
 ) -> Result<Vec<IpNeighLine>> {
     let mut ip_set: HashSet<IpAddr> = ips.iter().map(|ip| ip.to_canonical()).collect();
-    let ip_m: HashSet<IpAddr> =
+    let ip_m: HashSet<IpAddr> = if !machine_names.is_empty() {
         futures::future::try_join_all(machine_names.iter().map(|c| get_ips(c.as_ref())))
             .await?
             .into_iter()
             .flatten()
-            .collect();
+            .collect()
+    } else {
+        Default::default()
+    };
     let ip_all = if ip_set.is_empty() && ip_m.is_empty() {
         None
     } else if ip_set.is_empty() {

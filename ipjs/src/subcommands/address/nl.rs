@@ -16,5 +16,6 @@ pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrOutput>> {
             address = address.set_link_index_filter(ind);
         }
     };
+    address.execute().try_next().await?;
     todo!()
 }
