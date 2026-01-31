@@ -9,23 +9,22 @@
 
 START=50 # Run before Tailscale (typically START~80)
 
-start() {
-    LOGFILE=/var/log/update_tailscale.log
+do_update() {
     MAX_RETRIES=10
     RETRY_COUNT=0
+    while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
+        if /etc/ldlda_help/update_tailscale.sh; then
+            echo "[update_tailscale] Success at $(date)"
+            return 0
+        fi
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        echo "[update_tailscale] Retry $RETRY_COUNT at $(date)"
+        sleep 5
+    done
+    echo "[update_tailscale] Too many retries. Exiting at $(date)"
+    return 1
+}
 
-    # shellcheck disable=SC2016
-    sh -c '
-while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
-  if fn; then
-    echo "[update_tailscale] Success at $(date)" >>"$LOGFILE"
-    exit 0
-  fi
-  RETRY_COUNT=$((RETRY_COUNT + 1))
-  echo "[update_tailscale] Retry $RETRY_COUNT at $(date)" >>"$LOGFILE"
-  sleep 5
-done
-echo "[update_tailscale] Too many retries. Exiting at $(date)" >>"$LOGFILE"
-exit 1
-' >>"$LOGFILE" 2>&1 &
+start() {
+    do_update >> /var/log/update_tailscale.log 2>&1 &
 }

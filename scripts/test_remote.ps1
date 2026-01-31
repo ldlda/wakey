@@ -14,6 +14,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. "$PSScriptRoot/lib.ps1"
+
 # Build tests and capture output
 Write-Host "Building tests for $Package..." -ForegroundColor Cyan
 
@@ -47,7 +49,7 @@ foreach ($testBinary in $testBinaries) {
     Write-Host "`nTesting: $($testBinary.Name)" -ForegroundColor Cyan
     
     # Copy to target
-    pscp.exe -batch -scp -pw $password $testBinary.FullName ${RemoteHost}:$RemoteTestPath | Out-Null
+    Invoke-Scp -Local $testBinary.FullName -Dest "${RemoteHost}:$RemoteTestPath" -Pass $password -Quiet
     
     # Run on target
     $testArgs = "$(if ($Verbose) {"--nocapture --show-output"})"
@@ -55,7 +57,7 @@ foreach ($testBinary in $testBinaries) {
         $testArgs = "$TestName $testArgs"
     }
     
-    plink -batch -ssh $RemoteHost -pw $password "chmod +x $RemoteTestPath && $RemoteTestPath $testArgs"
+    Invoke-Ssh -Cmd "chmod +x $RemoteTestPath && $RemoteTestPath $testArgs" -Remote $RemoteHost -Pass $password
 }
 
 Write-Host "`nDone!" -ForegroundColor Green

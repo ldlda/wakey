@@ -10,7 +10,9 @@ param(
     # Opt-in to non-interactive configure; by default we print the command for you to run manually.
     [switch]$ForceConfigure,
     # When -Attach, run in the foreground to see logs (good for first-time troubleshooting)
-    [switch]$Attach
+    [switch]$Attach,
+    # Run one job then exit (great for CI tag pushes)
+    [switch]$Once
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,11 +52,13 @@ if (-not (Test-Path $configFile)) {
     }
 }
 
-if ($Attach) {
-    Write-Host "Starting act_runner (attached)... Ctrl+C to stop"
+if ($Attach -or $Once) {
+    Write-Host "Starting act_runner $(if ($Once) {'(once mode)'} else {'(attached)'})... $(if (-not $Once) {'Ctrl+C to stop'})"
     $configParent = Split-Path -Parent $configFile
     Push-Location $configParent
-    & $RunnerPath daemon --config $configFile
+    $daemonArgs = @('daemon', '--config', $configFile)
+    if ($Once) { $daemonArgs += '--once' }
+    & $RunnerPath @daemonArgs
     Pop-Location
 }
 else {

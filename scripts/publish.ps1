@@ -16,6 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # If no version provided, deduce from Cargo.toml
+$versionProvided = [bool]$Version
 if (-not $Version) {
     $cargoToml = Get-Content Cargo.toml -Raw
     if ($cargoToml -match 'version\s*=\s*"([^"]+)"') {
@@ -28,7 +29,8 @@ if (-not $Version) {
     }
 }
 
-if ($Version) {
+# Only write version if it was explicitly provided (not deduced)
+if ($versionProvided) {
     $pattern = '(?m)^version\s*=\s*"[^"]+"'
     $replacement = ('version = "{0}"' -f $Version)
     (Get-Content Cargo.toml -Raw) -replace $pattern, $replacement | Set-Content Cargo.toml -Encoding UTF8 -NoNewline
@@ -54,17 +56,17 @@ if ($Publish) {
 }
 
 if ($Tag -and $Version) {
-    # If you git push a tag, this will trigger the act_runner and the release workflow on your self-hosted runner (see .gitea/workflows/release.yml)
-    $actRunnerScript = Join-Path  $PSScriptRoot 'act_runner.ps1'
-    if (Test-Path $actRunnerScript) {
-        Write-Host "Ensuring act_runner is running..."
-        & $actRunnerScript
-    }
-    else {
-        Write-Warning "act_runner.ps1 not found at $actRunnerScript. Skipping runner start."
-    }
     git tag -f "v$Version"
     git push -f origin "v$Version"
+    Write-Host "Pushed tag: v$Version"
 
-    Write-Host "Pushed tag: $Version."
+    # Run act_runner in --once mode to process the release job
+    $actRunnerScript = Join-Path $PSScriptRoot 'act_runner.ps1'
+    if (Test-Path $actRunnerScript) {
+        Write-Host "Starting act_runner (once mode) to process release job..."
+        & $actRunnerScript -Once
+    }
+    else {
+        Write-Warning "act_runner.ps1 not found at $actRunnerScript. Skipping runner."
+    }
 }
