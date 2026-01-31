@@ -69,10 +69,10 @@ latest_asset_url() {
     HOST=$1 OWNER=$2 REPO=$3 ARCH=$4
     API="https://$HOST/api/v1/repos/$OWNER/$REPO/releases/latest"
     RESP=$(http_get "$API") || return 1
-    # Extract the first browser_download_url ending with our ARCH .tgz (BusyBox-friendly)
+    # Extract the LAST browser_download_url ending with our ARCH .tgz (BusyBox-friendly)
     echo "$RESP" |
         grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*'"$ARCH"'\.tgz"' |
-        head -n1 |
+        tail -n1 |
         cut -d '"' -f 4
 }
 
