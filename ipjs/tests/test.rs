@@ -4,7 +4,7 @@ use lda_ipjs::subcommands::{address, neighbor};
 
 #[tokio::test] // ← Use tokio::test instead of manual #[tokio::main]
 async fn ball1() -> anyhow::Result<()> {
-    let result = neighbor::nl::get(None, None, &[]).await?;
+    let result = neighbor::nl::get(&[], &[] as &[&str], &[], &[]).await?;
     println!("netlink results: {:?}", result);
     Ok(()) // ← Don't force error, let it succeed
 }
@@ -95,7 +95,7 @@ async fn ball_compare_backends() -> anyhow::Result<()> {
     println!("Got {} entries from JSON", json_result.len());
 
     println!("\n=== Netlink Backend ===");
-    let nl_result = neighbor::nl::get(None, None, &[]).await?;
+    let nl_result = neighbor::nl::get(&[], &[] as &[&str], &[], &[]).await?;
     println!("Got {} entries from netlink", nl_result.len());
 
     // Compare counts

@@ -1,6 +1,5 @@
-//! this is purely experimental. im not doing ts no mo
+//! rtnetlink-based neighbor table query. One syscall, filter in userspace.
 
-// hallo
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
@@ -16,115 +15,113 @@ use rtnetlink::packet_route::{
 
 use super::{NUDState, NeighborItem};
 
-// dont you love https://github.com/rust-netlink/rtnetlink/blob/main/examples/get_neighbours.rs
-// NeighborItem.state guarantees to be a single thing.
+/// Fetch neighbors via rtnetlink. Empty slice = no filter (match all).
+/// Non-empty slice = match ANY in the set.
+// https://github.com/rust-netlink/rtnetlink/blob/main/examples/get_neighbours.rs
 pub async fn get(
-    ip: Option<IpAddr>,
-    dev: Option<&str>,
-    nud: &[NUDState],
+    ips: &[IpAddr],
+    devs: &[impl AsRef<str>],
+    nuds: &[NUDState],
+    macs: &[MacAddr],
 ) -> anyhow::Result<Vec<NeighborItem>> {
-    let (gip, gdev, gnud) = (ip, dev, nud);
     let (conn, handle, _) = rtnetlink::new_connection()?;
-    tokio::spawn(conn); // every time?
-    let mut neighbor_data = handle.neighbours().get().execute();
-    let nudset: HashSet<&NUDState> = HashSet::from_iter(gnud);
+    tokio::spawn(conn);
 
-    // map ifindex to name
-    let mut ball: HashMap<u32, String> = HashMap::new();
+    let mut neighbor_data = handle.neighbours().get().execute();
+
+    // Build filter sets (empty = match all)
+    let ip_set: HashSet<IpAddr> = ips.iter().copied().collect();
+    let dev_set: HashSet<&str> = devs.iter().map(AsRef::as_ref).collect();
+    let nud_set: HashSet<&NUDState> = nuds.iter().collect();
+    let mac_set: HashSet<MacAddr> = macs.iter().copied().collect();
+
+    // Cache ifindex -> name
+    let mut ifname_cache: HashMap<u32, String> = HashMap::new();
     let mut result = vec![];
-    'big: while let Some(neighbour_message_item) = neighbor_data.try_next().await? {
-        // Filter by address family
+
+    'row: while let Some(msg) = neighbor_data.try_next().await? {
+        // Only IPv4/IPv6, skip NOARP
         if !matches!(
-            neighbour_message_item.header.family,
+            msg.header.family,
             AddressFamily::Inet | AddressFamily::Inet6
-        ) || matches!(neighbour_message_item.header.state, NeighbourState::Noarp)
-        // copilot says this to match ip -j n s
+        ) || matches!(msg.header.state, NeighbourState::Noarp)
         {
-            continue 'big;
+            continue 'row;
         }
 
-        let state = vec![
-            neighbour_message_item
-                .header
-                .state
-                .try_into()
-                .unwrap_or_default(),
-        ]; // ONE ITEM. why tf ts design json.
+        let state: NUDState = msg.header.state.try_into().unwrap_or_default();
         let mut ip = None;
         let mut mac = None;
 
-        for neigh_attr in neighbour_message_item.attributes {
-            match neigh_attr {
-                NeighbourAttribute::Destination(neighbour_address) => match neighbour_address {
-                    NeighbourAddress::Inet(ipv4_addr) => ip = Some(ipv4_addr.into()),
-                    NeighbourAddress::Inet6(ipv6_addr) => ip = Some(ipv6_addr.into()),
-                    _ => continue 'big,
+        for attr in msg.attributes {
+            match attr {
+                NeighbourAttribute::Destination(addr) => match addr {
+                    NeighbourAddress::Inet(v4) => ip = Some(IpAddr::from(v4)),
+                    NeighbourAddress::Inet6(v6) => ip = Some(IpAddr::from(v6)),
+                    _ => continue 'row,
                 },
-                NeighbourAttribute::LinkLocalAddress(items) => {
-                    mac = match items.len() {
-                        6 => items.first_chunk::<6>().map(|&e| MacAddr::from(e)),
-                        8 => items.first_chunk::<8>().map(|&e| MacAddr::from(e)),
-                        _ => continue 'big,
+                NeighbourAttribute::LinkLocalAddress(bytes) => {
+                    mac = match bytes.len() {
+                        6 => bytes.first_chunk::<6>().map(|&b| MacAddr::from(b)),
+                        8 => bytes.first_chunk::<8>().map(|&b| MacAddr::from(b)),
+                        _ => continue 'row,
                     }
                 }
-                _ => continue,
+                _ => {}
             }
         }
 
-        // exquisite
-        let dev = if let Some(cached) = ball.get(&neighbour_message_item.header.ifindex) {
-            Some(cached.clone())
-        } else {
-            // Query and cache
-            let name = handle
-                .link()
-                .get()
-                .match_index(neighbour_message_item.header.ifindex)
-                .execute()
-                .try_next()
-                .await?
-                .and_then(|a| {
-                    a.attributes.into_iter().find_map(|attr| match attr {
-                        LinkAttribute::IfName(name) => Some(name),
-                        _ => None,
-                    })
-                });
-
-            if let Some(ref n) = name {
-                ball.insert(neighbour_message_item.header.ifindex, n.clone());
+        // Resolve ifindex -> name (cached)
+        let dev = match ifname_cache.get(&msg.header.ifindex) {
+            Some(name) => Some(name.clone()),
+            None => {
+                let name = handle
+                    .link()
+                    .get()
+                    .match_index(msg.header.ifindex)
+                    .execute()
+                    .try_next()
+                    .await?
+                    .and_then(|link| {
+                        link.attributes.into_iter().find_map(|a| match a {
+                            LinkAttribute::IfName(n) => Some(n),
+                            _ => None,
+                        })
+                    });
+                if let Some(ref n) = name {
+                    ifname_cache.insert(msg.header.ifindex, n.clone());
+                }
+                name
             }
-            name
         };
 
         let (Some(ip), Some(dev)) = (ip, dev) else {
-            continue 'big;
+            continue 'row;
         };
 
-        {
-            // low block
-            if let Some(fip) = gip
-                && fip != ip
-            {
-                continue 'big;
-            }
-            if let Some(fdev) = gdev
-                && dev != fdev
-            {
-                continue 'big;
-            }
-            if !nudset.is_empty() && !nudset.contains(&state[0]) {
-                continue 'big;
-            };
+        // Apply filters (empty set = match all)
+        if !ip_set.is_empty() && !ip_set.contains(&ip) {
+            continue 'row;
+        }
+        if !dev_set.is_empty() && !dev_set.contains(dev.as_str()) {
+            continue 'row;
+        }
+        if !nud_set.is_empty() && !nud_set.contains(&state) {
+            continue 'row;
+        }
+        if !mac_set.is_empty() && !mac.is_some_and(|m| mac_set.contains(&m)) {
+            continue 'row;
         }
 
         result.push(NeighborItem {
             ip,
             dev: Some(dev),
             mac,
-            state,
+            state: vec![state],
         });
     }
-    Ok(result) // now i need another pass to filter out the uh.
+
+    Ok(result)
 }
 
 impl TryFrom<NeighbourState> for NUDState {
@@ -140,7 +137,7 @@ impl TryFrom<NeighbourState> for NUDState {
             NeighbourState::Permanent => Ok(Self::Permanent),
             NeighbourState::None => Ok(Self::None),
             NeighbourState::Other(e) => Ok(Self::Other(e)),
-            _ => Err(u16::MAX), // idk
+            _ => Err(u16::MAX),
         }
     }
 

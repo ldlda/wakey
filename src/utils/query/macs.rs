@@ -1,8 +1,8 @@
 use lda_ipjs::subcommands::neighbor;
 use macaddr::MacAddr;
 
-use crate::arpparse::{self, IpNeighLine, NUDState};
-use anyhow::{Context, Result, bail};
+use crate::arpparse::{IpNeighLine, NUDState};
+use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::net::IpAddr;
 
@@ -13,20 +13,7 @@ pub async fn get_ips(machine_name: &str) -> Result<impl Iterator<Item = IpAddr>>
         .map(|c| c.ip()))
 }
 
-// good now
-//
-// Current logic: When filtering by exactly 1 dev/mac, exclude entries missing that field.
-// This is because missing dev/mac usually means the entry is incomplete/transient.
-//
-// when there is only one MACs (getmac got some), the result will not have them fields.
-// so there are three cases:
-//
-// 1. dont got nothing: take all of them (macset.is_empty())
-// 2. exactly one: pre-filtered by ip, everything matches,
-// devset.len() != 1 returns false, but then it works????
-// OH THIS fuckass code i added it in the get_mac
-// 3. devset.len() > 1. if none then absolutely not match,
-// if some then check with the set; thats normal
+/// Query neighbor table with multi-filters. Empty slice = no filter.
 pub async fn get_macs(
     machine_names: &[impl AsRef<str>],
     ips: &[IpAddr],
@@ -34,140 +21,64 @@ pub async fn get_macs(
     state: &[NUDState],
     macs: &[MacAddr],
 ) -> Result<Vec<IpNeighLine>> {
-    let mut ip_set: HashSet<IpAddr> = ips.iter().map(|ip| ip.to_canonical()).collect();
-    let ip_m: HashSet<IpAddr> = if !machine_names.is_empty() {
-        futures::future::try_join_all(machine_names.iter().map(|c| get_ips(c.as_ref())))
+    // Resolve machine names to IPs
+    let resolved_ips: HashSet<IpAddr> = if !machine_names.is_empty() {
+        futures::future::try_join_all(machine_names.iter().map(|n| get_ips(n.as_ref())))
             .await?
             .into_iter()
             .flatten()
             .collect()
     } else {
-        Default::default()
+        HashSet::new()
     };
-    let ip_all = if ip_set.is_empty() && ip_m.is_empty() {
-        None
-    } else if ip_set.is_empty() {
-        Some(ip_m)
-    } else if ip_m.is_empty() {
-        Some(ip_set)
+
+    // Merge provided IPs with resolved IPs
+    let ip_filter: Vec<IpAddr> = if ips.is_empty() && resolved_ips.is_empty() {
+        vec![]
+    } else if ips.is_empty() {
+        resolved_ips.into_iter().collect()
+    } else if resolved_ips.is_empty() {
+        ips.iter().map(|ip| ip.to_canonical()).collect()
     } else {
-        Some({
-            ip_set.retain(|c| ip_m.contains(c)); // inline AHHH
-            ip_set
-        })
+        // Intersection: only IPs that appear in both
+        ips.iter()
+            .map(|ip| ip.to_canonical())
+            .filter(|ip| resolved_ips.contains(ip))
+            .collect()
     };
 
-    let opt_dev = if devs.len() > 1 {
-        None
-    } else {
-        devs.iter().next().map(AsRef::as_ref)
-    };
+    // Convert state filter
+    let nud_filter: Vec<neighbor::NUDState> = state.iter().copied().map(Into::into).collect();
 
-    let run_one = |to_ip: Option<IpAddr>| get_mac(to_ip, opt_dev, state);
+    // Convert devs to &str for nl::get
+    let dev_strs: Vec<&str> = devs.iter().map(AsRef::as_ref).collect();
 
-    let mut ip_filtered = if let Some(something) = ip_all {
-        if something.len() == 1 {
-            run_one(something.into_iter().next()).await?
-        } else {
-            run_one(None)
-                .await?
-                .into_iter()
-                .filter(|c| something.contains(&c.ip))
-                .collect()
-        }
-    } else {
-        run_one(None).await?
-    };
+    // Single rtnetlink call with all filters
+    let results: Vec<IpNeighLine> = neighbor::nl::get(&ip_filter, &dev_strs, &nud_filter, macs)
+        .await
+        .context("rtnetlink failed")?
+        .into_iter()
+        .map(Into::into)
+        .collect();
 
-    // Apply additional filters if any were provided
-    if !devs.is_empty() || !macs.is_empty() {
-        let devset: HashSet<_> = devs.iter().map(AsRef::as_ref).collect();
-        let macset: HashSet<_> = macs.iter().collect();
-
-        ip_filtered.retain(|entry| {
-            // Dev filter: if we're filtering by dev, entry must have a dev AND it must be in the set
-            let dev_ok =
-                devset.is_empty() || entry.dev.as_deref().is_some_and(|d| devset.contains(d));
-
-            // MAC filter: if we're filtering by MAC, entry must have a MAC AND it must be in the set
-            let mac_ok = macset.is_empty() || entry.mac.is_some_and(|m| macset.contains(&m));
-
-            dev_ok && mac_ok
-        })
-    };
-    Ok(ip_filtered)
+    Ok(results)
 }
 
-// /// the atomic get_macs. handle ONE thing only.
-// // this one sucks shit
-// pub async fn get_mac(
-//     ip: Option<IpAddr>,
-//     dev: Option<&str>,
-//     state: &[NUDState],
-// ) -> Result<Vec<IpNeighLine>> {
-//     use lda_ipjs::subcommands::neighbor as ipjs_neigh;
-//     let ipjs_states: Vec<ipjs_neigh::NUDState> = state.iter().copied().map(Into::into).collect();
-
-//     let items = ipjs_neigh::json::get(ip, dev, &ipjs_states)
-//         .await
-//         .context("Calling ip -j neigh failed")?;
-
-//     let lines = items.into_iter().map(Into::into).collect();
-
-//     Ok(lines)
-// }
-
-/// the atomic get_macs. handle ONE thing only.
-// 17 - 25 ms full
-pub async fn _get_mac(
-    ip: Option<IpAddr>,
-    dev: Option<&str>,
-    state: &[NUDState],
-) -> Result<Vec<IpNeighLine>> {
-    let mut args: Vec<String> = vec!["neigh".into(), "show".into()];
-    if let Some(ip) = ip {
-        args.push("to".into());
-        args.push(ip.to_string());
-    }
-    if let Some(d) = dev {
-        args.push("dev".into());
-        args.push(d.to_string());
-    }
-    for nud in state {
-        args.push("nud".into());
-        args.push(nud.as_ip_neigh_arg().into());
-    }
-    let cmd = "ip";
-    let mut u = tokio::process::Command::new(cmd);
-    u.args(args);
-    let out = u.output().await?;
-
-    if !out.status.success() {
-        bail!(String::from_utf8_lossy(&out.stderr).into_owned());
-    }
-
-    let lines = String::from_utf8_lossy(&out.stdout);
-    let parsed = lines.lines().flat_map(arpparse::parse_ip_neigh_line);
-    let rows: Vec<IpNeighLine> = if let Some(d) = dev {
-        parsed.map(IpNeighLine::_with_dev(d)).collect()
-    } else {
-        parsed.collect()
-    };
-    Ok(rows)
-}
-
-// 15 - 20 ms full
+/// Legacy single-filter wrapper. Use get_macs for multi-filter.
+#[allow(dead_code)]
 pub async fn get_mac(
     ip: Option<IpAddr>,
     dev: Option<&str>,
     state: &[NUDState],
 ) -> Result<Vec<IpNeighLine>> {
-    let state2: Vec<neighbor::NUDState> = state.iter().copied().map(Into::into).collect();
-    Ok(neighbor::nl::get(ip, dev, &state2)
+    let ips: Vec<IpAddr> = ip.into_iter().collect();
+    let devs: Vec<&str> = dev.into_iter().collect();
+    let nud: Vec<neighbor::NUDState> = state.iter().copied().map(Into::into).collect();
+
+    Ok(neighbor::nl::get(&ips, &devs, &nud, &[])
         .await
         .context("rtnetlink failed")?
         .into_iter()
         .map(Into::into)
         .collect())
-    // how did i just do that
 }
