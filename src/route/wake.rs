@@ -110,3 +110,4 @@ pub type WakeStatus = Status<WakeStatusLine>; */
 //     }): Query<DeviceQuery>,
 // ) -> impl IntoResponse {
 // }
+pub mod impls;

@@ -14,8 +14,9 @@ pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrOutput>> {
         link = link.match_name(dev.to_owned());
         if let Some(ind) = link.execute().try_next().await?.map(|a| a.header.index) {
             address = address.set_link_index_filter(ind);
-        }
+        };
+        address.execute().try_next().await?;
+    } else {
     };
-    address.execute().try_next().await?;
-    todo!()
+    todo!();
 }

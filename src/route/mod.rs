@@ -46,11 +46,9 @@ pub fn api_router() -> Router {
         .route("/ips/{name}", get(ip))
         .route(
             "/mac-cache",
-            get(|| async {
-                match load_mac_name_cache().await {
-                    Ok(h) => Json(h).into_response(),
-                    Err(e) => e.to_string().into_response(),
-                }
+            get(async || match load_mac_name_cache().await {
+                Ok(h) => Json(h).into_response(),
+                Err(e) => e.to_string().into_response(),
             }),
         )
         .layer(middleware::from_fn(add_performance_header))

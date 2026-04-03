@@ -2,19 +2,16 @@
 
 router shit
 
-## usage
+## whatever i did must be BEAUTIFUL
 
-- Build (Windows host OK):
-  - cargo build --release --target armv7-unknown-linux-musleabihf
-- Run on a Linux box/router:
-  - copy target/armv7-unknown-linux-musleabihf/release/wakey to the device
-  - chmod +x wakey && ./wakey
-- Install via release asset (OpenWrt):
-  - wget -O- `https://your.gitea/owner/repo/releases/download/vX.Y.Z/wakey-rootfs-vX.Y.Z-armv7-unknown-linux-musleabihf.tgz` | tar -xz -C /
-  - /etc/init.d/wakey enable && /etc/init.d/wakey start
+read [in vietnamese](https://ldlda.com/blogs/else/ssh-ax3000cv2-update-firmware-0-10-2)
 
-Optional updater (fetch latest automatically on OpenWrt):
+## now i NEED the split arch to be on
 
-```sh
-WAKEY_HOST=git.ldlda.com WAKEY_OWNER=lda WAKEY_REPO=wakey sh /etc/ldlda_help/update_wakey.sh
-```
+like RN rn rn so i can have web outside and the lil agent can be sitting here configuring itself (Parse/append to rc.local files? add to init.d? fuhh)
+
+I NEED IT
+
+I NEEED IT
+
+I NEEEEEED it.

@@ -1,4 +1,4 @@
-use super::{WakeStatus, WakeTarget, WakeTargetResult};
+use crate::utils::wake::{WakeStatus, WakeTarget, WakeTargetResult};
 use crate::route::wake::{
     WakeTarget as RouteWakeTarget, WakeTargetResult as RouteWakeResult,
     WakeTargetStatus as RouteWakeStatus,
