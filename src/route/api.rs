@@ -1,11 +1,12 @@
 use crate::route::error::ApiError;
 use crate::utils::query::parser::{QueryType, parse_query};
+use wakey_core::{DeviceFilters as Filters, DeviceQuery};
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{extract::Path, response::Redirect};
 
-use crate::route::status::{DeviceQuery, Filters, NamePath};
+use crate::route::status::NamePath;
 use crate::utils::query::get_ips;
 
 // Smart redirect: accept IP, MAC, dev, or NUD state and redirect to /api/status accordingly
@@ -42,7 +43,7 @@ pub async fn status_smart_redirect(
             },
             ..Default::default()
         },
-        QueryType::Unknown(n) => DeviceQuery {
+        QueryType::Name(n) => DeviceQuery {
             name: Some(n),
             ..Default::default()
         },
