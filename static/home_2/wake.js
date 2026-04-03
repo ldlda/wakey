@@ -33,7 +33,7 @@ export async function sendWake(name) {
 
     const j = await r.json();
 
-    if (!j.success) {
+    if (j.error) {
       elLog.textContent = `wake error: ${j.error}`;
       setPill("bad", "error");
       return;

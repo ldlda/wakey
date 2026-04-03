@@ -6,6 +6,8 @@ use futures::TryFutureExt;
 use macaddr::MacAddr;
 use tokio::net::UdpSocket;
 
+use crate::route::wake::WakeTarget as RouteWakeTarget;
+
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct WakeTarget {
     pub ip: IpAddr,
@@ -36,6 +38,25 @@ impl WakeTarget {
         WakeTargetResult::new(self, WakeStatus::NonexistentAddress)
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct Incomplete;
+
+impl TryFrom<RouteWakeTarget> for WakeTarget {
+    type Error = Incomplete;
+    fn try_from(value: RouteWakeTarget) -> Result<Self, Self::Error> {
+        if let RouteWakeTarget {
+            ip: Some(ip),
+            mac: Some(mac),
+        } = value
+        {
+            Ok(Self { ip, mac })
+        } else {
+            Err(Incomplete)
+        }
+    }
+}
+
 impl WakeTargetResult {
     const fn new(target: WakeTarget, status: WakeStatus) -> Self {
         Self { target, status }

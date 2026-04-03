@@ -4,8 +4,8 @@ use std::net::IpAddr;
 
 /* use crate::arpparse::IpNeighLine;
 use crate::route::api::Status; */
-use crate::utils::parse::mac;
 use crate::utils::wake::wake_one;
+use crate::{route::error::ApiError, utils::parse::mac};
 use axum::{extract::Json, http::StatusCode, response::IntoResponse};
 use futures::TryFutureExt;
 use macaddr::MacAddr;
@@ -13,12 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use tokio::net::UdpSocket;
 
-#[skip_serializing_none]
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct WakeResult {
-    pub success: bool,
-    pub result: Option<Vec<WakeTargetResult>>,
-    pub error: Option<String>,
+    pub result: Vec<WakeTargetResult>,
 }
 #[skip_serializing_none]
 #[derive(Debug, Serialize, Clone, Copy)]
@@ -50,24 +47,10 @@ pub struct WakeTarget {
 
 pub async fn wake_multi(Json(req): Json<Vec<WakeTarget>>) -> impl IntoResponse {
     match wake_multi_split(req).await {
-        Ok(results) => (
-            StatusCode::OK,
-            Json(WakeResult {
-                success: true,
-                result: Some(results),
-                ..Default::default()
-            }),
-        ),
+        Ok(result) => (StatusCode::OK, Json(WakeResult { result })).into_response(),
         Err(error) => {
-            let error = Some(format!("Error: {}", error));
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(WakeResult {
-                    success: false,
-                    error,
-                    ..Default::default()
-                }),
-            )
+            let error = format!("Error: {}", error);
+            ApiError::ise(error).into_response()
         }
     }
 }

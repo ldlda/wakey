@@ -4,23 +4,6 @@ use crate::route::wake::{
     WakeTargetStatus as RouteWakeStatus,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct Incomplete;
-
-impl TryFrom<RouteWakeTarget> for WakeTarget {
-    type Error = Incomplete;
-    fn try_from(value: RouteWakeTarget) -> Result<Self, Self::Error> {
-        if let RouteWakeTarget {
-            ip: Some(ip),
-            mac: Some(mac),
-        } = value
-        {
-            Ok(Self { ip, mac })
-        } else {
-            Err(Incomplete)
-        }
-    }
-}
 
 impl From<WakeTarget> for RouteWakeTarget {
     fn from(WakeTarget { ip, mac }: WakeTarget) -> Self {

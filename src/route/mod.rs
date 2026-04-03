@@ -12,6 +12,7 @@ use crate::route::api::status_redirect;
 use crate::route::api::status_smart_redirect;
 use crate::route::devs::devs_router;
 use crate::route::dhcp::get_dhcp_leases;
+use crate::route::error::ApiError;
 use crate::route::status::get_status_json;
 use crate::route::wake::wake_multi;
 
@@ -48,7 +49,7 @@ pub fn api_router() -> Router {
             "/mac-cache",
             get(async || match load_mac_name_cache().await {
                 Ok(h) => Json(h).into_response(),
-                Err(e) => e.to_string().into_response(),
+                Err(e) => ApiError::ise(e.to_string()).into_response(),
             }),
         )
         .layer(middleware::from_fn(add_performance_header))
