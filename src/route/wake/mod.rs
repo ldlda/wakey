@@ -8,7 +8,7 @@ use crate::route::error::ApiError;
 use axum::{extract::Json, http::StatusCode, response::IntoResponse};
 use futures::TryFutureExt;
 use tokio::net::UdpSocket;
-pub use wakey_core::{WakeResult, WakeStatus as WakeTargetStatus, WakeTarget, WakeTargetResult};
+pub use wakey_core::{WakeResult, WakeTarget, WakeTargetResult};
 
 pub async fn wake_multi(Json(req): Json<Vec<WakeTarget>>) -> impl IntoResponse {
     match wake_multi_split(req).await {
@@ -34,7 +34,7 @@ pub async fn wake_multi_split(
             WakeTargetResult::incomplete(c)
         } else {
             let t = c.try_into().expect("complete struct failed to try_into");
-            wake_one(&sock, t).await.into()
+            wake_one(&sock, t).await
         }
     });
     Ok(futures::future::join_all(iter).await)

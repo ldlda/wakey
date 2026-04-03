@@ -1,1 +1,1 @@
-pub use wakey_linux::devices::{devs_sorted, has_dev};
+pub use wakey_linux::devices::devs_sorted;

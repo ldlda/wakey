@@ -1,63 +1,3 @@
-/// Parses Chrome-style numeric IPv4 forms: hex (0x...), decimal, octal.
-pub fn parse_numeric_ipv4(s: &str) -> Option<std::net::IpAddr> {
-    let s = s.trim();
-    // hex
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))
-        && hex.chars().all(|c| c.is_ascii_hexdigit())
-        && let Ok(n) = u32::from_str_radix(hex, 16)
-    {
-        return Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(n)));
-    }
-    // decimal
-    if s.chars().all(|c| c.is_ascii_digit())
-        && let Ok(n) = s.parse::<u32>()
-    {
-        return Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(n)));
-    }
-    // octal (leading 0, all octal digits)
-    if s.len() > 1
-        && s.as_bytes()[0] == b'0'
-        && s.chars().all(|c| matches!(c, '0'..='7'))
-        && let Ok(n) = u32::from_str_radix(s, 8)
-    {
-        return Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(n)));
-    }
-    None
-}
-/// Extracts the host portion from a URL-like string, for smart input parsing.
-pub fn extract_host(input: &str) -> &str {
-    let mut s = input.trim();
-    // Strip scheme (e.g., http://, https://, ssh://) or network-path reference (//host)
-    if let Some(idx) = s.find("://") {
-        s = &s[idx + 3..];
-    } else if let Some(rest) = s.strip_prefix("//") {
-        s = rest;
-    }
-    // Strip potential userinfo (user@host)
-    if let Some((_, host)) = s.rsplit_once('@') {
-        s = host;
-    }
-    // If bracketed IPv6 like [::1]:8080/path -> extract inside brackets
-    if let Some(host) = s.strip_prefix('[') {
-        if let Some(end) = host.find(']') {
-            s = &host[..end];
-        }
-    } else {
-        // Trim path suffix if any
-        if let Some(pos) = s.find('/') {
-            s = &s[..pos];
-        }
-        // Drop trailing :port if present and numeric, but only if there's exactly one ':'
-        if let Some((host, port)) = s.rsplit_once(':')
-            && s.matches(':').count() == 1
-            && port.chars().all(|c| c.is_ascii_digit())
-        {
-            s = host;
-        }
-    }
-    s.trim()
-}
-
 /// key for yes: "1" | "true" | "yes" | "on" | "y"
 ///
 /// frfr
@@ -100,4 +40,3 @@ pub fn boolish_str(s: &str) -> bool {
             && t.parse::<u64>().map(|n| n != 0).unwrap_or(false))
 }
 
-pub mod mac;
