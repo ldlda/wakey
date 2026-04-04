@@ -1,7 +1,8 @@
 use serde::Serialize;
 use wakey_core::parse::mac;
 use wakey_core::{
-    DeviceFilters, DhcpLeaseWithState, NeighborEntry, Status, WakeResult, WakeTargetResult,
+    Device, DeviceFilters, DeviceInventory, DhcpLeaseWithState, NeighborEntry, Status, WakeResult,
+    WakeTargetResult,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -50,6 +51,23 @@ pub fn legacy_status_from_domain(status: Status<NeighborEntry>) -> LegacyStatusR
     }
 }
 
+pub fn legacy_status_from_inventory(
+    inventory: DeviceInventory,
+    name: Option<String>,
+    filters: DeviceFilters,
+) -> LegacyStatusResponse {
+    let table = inventory
+        .devices
+        .into_iter()
+        .flat_map(legacy_status_rows_from_device)
+        .collect();
+    LegacyStatusResponse {
+        name,
+        table,
+        filters,
+    }
+}
+
 pub fn legacy_status_row(row: NeighborEntry) -> LegacyStatusRow {
     LegacyStatusRow {
         ip: row.ip,
@@ -57,6 +75,36 @@ pub fn legacy_status_row(row: NeighborEntry) -> LegacyStatusRow {
         mac: row.mac,
         state: row.state,
     }
+}
+
+pub fn legacy_status_rows_from_device(device: Device) -> Vec<LegacyStatusRow> {
+    if !device.neighbors.is_empty() {
+        return device
+            .neighbors
+            .into_iter()
+            .map(legacy_status_row)
+            .collect::<Vec<_>>();
+    }
+
+    let fallback_mac = device.macs.first().copied();
+    let fallback_dev = device.interfaces.first().cloned();
+    let fallback_state = match device.presence {
+        wakey_core::Presence::Online => wakey_core::NeighborState::Reachable,
+        wakey_core::Presence::LikelyOnline => wakey_core::NeighborState::Stale,
+        wakey_core::Presence::Offline => wakey_core::NeighborState::Failed,
+        wakey_core::Presence::Unknown => wakey_core::NeighborState::None,
+    };
+
+    device
+        .ips
+        .into_iter()
+        .map(|ip| LegacyStatusRow {
+            ip,
+            dev: fallback_dev.clone(),
+            mac: fallback_mac,
+            state: fallback_state,
+        })
+        .collect()
 }
 
 pub fn legacy_leases_from_domain(leases: Vec<DhcpLeaseWithState>) -> Vec<LegacyLeaseRow> {
@@ -105,6 +153,25 @@ mod tests {
             filters: DeviceFilters::default(),
         };
         let legacy = legacy_status_from_domain(status);
+        assert_eq!(legacy.name.as_deref(), Some("pc"));
+        assert_eq!(legacy.table.len(), 1);
+        assert_eq!(legacy.table[0].state, NeighborState::Reachable);
+    }
+
+    #[test]
+    fn maps_inventory_to_legacy_status_shape() {
+        let inventory = DeviceInventory {
+            devices: vec![Device::from_parts(
+                vec![NeighborEntry {
+                    ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+                    dev: Some("br-lan".into()),
+                    mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
+                    state: NeighborState::Reachable,
+                }],
+                vec![],
+            )],
+        };
+        let legacy = legacy_status_from_inventory(inventory, Some("pc".into()), DeviceFilters::default());
         assert_eq!(legacy.name.as_deref(), Some("pc"));
         assert_eq!(legacy.table.len(), 1);
         assert_eq!(legacy.table[0].state, NeighborState::Reachable);

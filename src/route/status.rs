@@ -4,10 +4,14 @@ use axum_extra::extract::Query;
 pub use wakey_core::{DeviceQuery, NamePath};
 
 pub async fn get_status_json(Query(query): Query<DeviceQuery>) -> impl IntoResponse {
-    match crate::get_status(query).await {
-        Ok(status) => (
+    match crate::inventory(query.clone()).await {
+        Ok(inventory) => (
             StatusCode::OK,
-            Json(crate::compat::legacy_status_from_domain(status)),
+            Json(crate::compat::legacy_status_from_inventory(
+                inventory,
+                query.name,
+                query.filter,
+            )),
         )
             .into_response(),
         Err(error) => ApiError {

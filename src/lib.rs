@@ -71,7 +71,12 @@ pub fn query_to_device_query(query: Query) -> Result<DeviceQuery> {
 }
 
 pub async fn get_status(query: DeviceQuery) -> Result<StatusResponse> {
-    let table = wakey_linux::devices::query_status(&query).await?;
+    let inventory = inventory(query.clone()).await?;
+    let table = inventory
+        .devices
+        .iter()
+        .flat_map(device_to_status_rows)
+        .collect();
     Ok(Status {
         name: query.name,
         table,
@@ -123,13 +128,13 @@ pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
 }
 
 pub async fn inventory(query: DeviceQuery) -> Result<DeviceInventory> {
-    let status = get_status(query.clone()).await?;
+    let neighbors = wakey_linux::devices::query_status(&query).await?;
     let leases = get_leases(LeaseQuery {
         include_state: false,
     })
     .await?;
     Ok(DeviceInventory {
-        devices: merge_devices(status.table, leases, &query),
+        devices: merge_devices(neighbors, leases, &query),
     })
 }
 
@@ -219,6 +224,33 @@ const fn presence_rank(presence: Presence) -> u8 {
         Presence::Unknown => 1,
         Presence::Offline => 0,
     }
+}
+
+fn device_to_status_rows(device: &Device) -> Vec<NeighborEntry> {
+    if !device.neighbors.is_empty() {
+        return device.neighbors.clone();
+    }
+
+    let fallback_mac = device.macs.first().copied();
+    let fallback_dev = device.interfaces.first().cloned();
+    let fallback_state = match device.presence {
+        Presence::Online => wakey_core::NeighborState::Reachable,
+        Presence::LikelyOnline => wakey_core::NeighborState::Stale,
+        Presence::Offline => wakey_core::NeighborState::Failed,
+        Presence::Unknown => wakey_core::NeighborState::None,
+    };
+
+    device
+        .ips
+        .iter()
+        .copied()
+        .map(|ip| NeighborEntry {
+            ip,
+            dev: fallback_dev.clone(),
+            mac: fallback_mac,
+            state: fallback_state,
+        })
+        .collect()
 }
 
 pub fn http_app(static_root: std::path::PathBuf) -> Router {
