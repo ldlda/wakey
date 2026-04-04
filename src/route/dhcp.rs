@@ -12,7 +12,7 @@ pub async fn get_dhcp_leases(
 ) -> impl IntoResponse {
     let include_state = include_state.as_deref().map(boolish_str).unwrap_or(false);
 
-    match crate::get_leases(include_state).await {
+    match crate::get_leases(wakey_core::LeaseQuery { include_state }).await {
         Ok(leases) => (
             StatusCode::OK,
             Json(crate::compat::legacy_leases_from_domain(leases)),

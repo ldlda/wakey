@@ -102,4 +102,30 @@ pub mod mac {
                 .map_err(serde::de::Error::custom)
         }
     }
+
+    // Vec<DisplayFromStr> ?
+    pub mod vec_mac {
+        use macaddr::MacAddr;
+        use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+        pub fn serialize<S>(macs: &[MacAddr], serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let strings: Vec<String> = macs.iter().map(ToString::to_string).collect();
+            strings.serialize(serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<MacAddr>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let strings = Vec::<String>::deserialize(deserializer)?;
+            strings
+                .into_iter()
+                .map(|s| s.parse())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(serde::de::Error::custom)
+        }
+    }
 }

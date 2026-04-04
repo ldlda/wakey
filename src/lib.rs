@@ -11,49 +11,63 @@ use axum::Router;
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use wakey_core::{
-    DeviceFilters, DeviceQuery, DhcpLease, DhcpLeaseWithState, NeighborEntry, QueryInput, Status,
-    WakeResult, WakeTarget,
+    Device, DeviceFilters, DeviceInventory, DeviceQuery, DhcpLease, DhcpLeaseWithState, LeaseQuery,
+    NeighborEntry, Presence, Query, QueryInput, Status, WakeResult, WakeTarget,
 };
 
 pub type StatusResponse = Status<NeighborEntry>;
 
 pub async fn resolve_query(input: impl Into<String>) -> Result<DeviceQuery> {
+    query_to_device_query(resolve_selector(input).await?)
+}
+
+pub async fn resolve_selector(input: impl Into<String>) -> Result<Query> {
     Ok(
         match wakey_linux::devices::classify_query(input.into()).await {
-            QueryInput::Ip(ip_addr) => DeviceQuery {
-                filter: DeviceFilters {
-                    ips: vec![ip_addr],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            QueryInput::Mac(mac_addr) => DeviceQuery {
-                filter: DeviceFilters {
-                    macs: vec![mac_addr],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            QueryInput::Dev(dev) => DeviceQuery {
-                filter: DeviceFilters {
-                    devs: vec![dev],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            QueryInput::Nud(state) => DeviceQuery {
-                filter: DeviceFilters {
-                    nuds: vec![state],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            QueryInput::Name(name) => DeviceQuery {
-                name: Some(name),
-                ..Default::default()
-            },
+            QueryInput::Ip(ip_addr) => Query::Ip(ip_addr),
+            QueryInput::Mac(mac_addr) => Query::Mac(mac_addr),
+            QueryInput::Dev(dev) => Query::Interface(dev),
+            QueryInput::Nud(state) => Query::NeighborState(state),
+            QueryInput::Name(name) => Query::Text(name),
         },
     )
+}
+
+pub fn query_to_device_query(query: Query) -> Result<DeviceQuery> {
+    Ok(match query {
+        Query::Ip(ip_addr) => DeviceQuery {
+            filter: DeviceFilters {
+                ips: vec![ip_addr],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        Query::Mac(mac_addr) => DeviceQuery {
+            filter: DeviceFilters {
+                macs: vec![mac_addr],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        Query::Interface(dev) => DeviceQuery {
+            filter: DeviceFilters {
+                devs: vec![dev],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        Query::NeighborState(state) => DeviceQuery {
+            filter: DeviceFilters {
+                nuds: vec![state],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        Query::Text(name) => DeviceQuery {
+            name: Some(name),
+            ..Default::default()
+        },
+    })
 }
 
 pub async fn get_status(query: DeviceQuery) -> Result<StatusResponse> {
@@ -70,20 +84,14 @@ pub async fn get_status_for_input(input: impl Into<String>) -> Result<StatusResp
     get_status(query).await
 }
 
-pub async fn get_leases(include_state: bool) -> Result<Vec<DhcpLeaseWithState>> {
+pub async fn get_leases(query: LeaseQuery) -> Result<Vec<DhcpLeaseWithState>> {
     let leases = wakey_linux::dhcp::read_dhcp_leases_with_names()
         .await
         .context("failed to read DHCP leases")?;
-    if include_state {
+    if query.include_state {
         Ok(wakey_linux::dhcp::enrich_leases_with_nud_state(leases).await)
     } else {
-        Ok(leases
-            .into_iter()
-            .map(|lease_line| DhcpLeaseWithState {
-                lease_line,
-                nud_state: None,
-            })
-            .collect())
+        Ok(leases_without_state(leases))
     }
 }
 
@@ -95,15 +103,7 @@ pub async fn wake_targets(targets: Vec<WakeTarget>) -> Result<WakeResult> {
 }
 
 pub async fn wake_from_query(input: impl Into<String>) -> Result<WakeResult> {
-    let status = get_status_for_input(input).await?;
-    let targets = status
-        .table
-        .into_iter()
-        .map(|entry| WakeTarget {
-            ip: Some(entry.ip),
-            mac: entry.mac,
-        })
-        .collect();
+    let targets = resolve_wake_targets(input).await?;
     wake_targets(targets).await
 }
 
@@ -115,6 +115,110 @@ pub async fn get_ips(name: impl AsRef<str>) -> Result<Vec<std::net::IpAddr>> {
     Ok(wakey_linux::devices::get_ips(name.as_ref())
         .await?
         .collect())
+}
+
+pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
+    let query = resolve_query(input).await?;
+    inventory(query).await.map(|inventory| inventory.devices)
+}
+
+pub async fn inventory(query: DeviceQuery) -> Result<DeviceInventory> {
+    let status = get_status(query.clone()).await?;
+    let leases = get_leases(LeaseQuery {
+        include_state: false,
+    })
+    .await?;
+    Ok(DeviceInventory {
+        devices: merge_devices(status.table, leases, &query),
+    })
+}
+
+pub async fn resolve_wake_targets(input: impl Into<String>) -> Result<Vec<WakeTarget>> {
+    let devices = resolve_devices(input).await?;
+    Ok(devices
+        .into_iter()
+        .flat_map(|device| {
+            let mac = device.macs.first().copied();
+            device
+                .ips
+                .into_iter()
+                .map(move |ip| WakeTarget { ip: Some(ip), mac })
+        })
+        .collect())
+}
+
+fn merge_devices(
+    neighbors: Vec<NeighborEntry>,
+    leases: Vec<DhcpLeaseWithState>,
+    query: &DeviceQuery,
+) -> Vec<Device> {
+    use std::collections::BTreeMap;
+
+    let mut by_mac: BTreeMap<String, (Vec<NeighborEntry>, Vec<DhcpLease>)> = BTreeMap::new();
+
+    for row in neighbors {
+        let key = row
+            .mac
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| format!("ip:{}", row.ip));
+        by_mac.entry(key).or_default().0.push(row);
+    }
+    for lease in leases {
+        let key = lease.lease_line.mac.to_string();
+        by_mac.entry(key).or_default().1.push(lease.lease_line);
+    }
+
+    let mut devices: Vec<Device> = by_mac
+        .into_values()
+        .map(|(neighbors, leases)| Device::from_parts(neighbors, leases))
+        .collect();
+
+    if let Some(name) = &query.name {
+        devices.retain(|device| device.names.iter().any(|n| n == name));
+    }
+    if !query.filter.devs.is_empty() {
+        devices.retain(|device| {
+            device
+                .interfaces
+                .iter()
+                .any(|iface| query.filter.devs.contains(iface))
+        });
+    }
+    if !query.filter.ips.is_empty() {
+        devices.retain(|device| device.ips.iter().any(|ip| query.filter.ips.contains(ip)));
+    }
+    if !query.filter.macs.is_empty() {
+        devices.retain(|device| {
+            device
+                .macs
+                .iter()
+                .any(|mac| query.filter.macs.contains(mac))
+        });
+    }
+    if !query.filter.nuds.is_empty() {
+        devices.retain(|device| {
+            device
+                .neighbors
+                .iter()
+                .any(|neighbor| query.filter.nuds.contains(&neighbor.state))
+        });
+    }
+
+    devices.sort_by(|a, b| {
+        presence_rank(b.presence)
+            .cmp(&presence_rank(a.presence))
+            .then_with(|| a.names.first().cmp(&b.names.first()))
+    });
+    devices
+}
+
+const fn presence_rank(presence: Presence) -> u8 {
+    match presence {
+        Presence::Online => 3,
+        Presence::LikelyOnline => 2,
+        Presence::Unknown => 1,
+        Presence::Offline => 0,
+    }
 }
 
 pub fn http_app(static_root: std::path::PathBuf) -> Router {
@@ -182,6 +286,17 @@ mod tests {
         assert_eq!(query.filter.nuds, vec![NeighborState::Reachable]);
     }
 
+    #[tokio::test]
+    async fn resolve_selector_keeps_text_vs_structured() {
+        let selector = resolve_selector("reachable")
+            .await
+            .expect("resolve selector");
+        match selector {
+            Query::NeighborState(NeighborState::Reachable) => {}
+            _ => panic!("expected neighbor-state selector"),
+        }
+    }
+
     #[test]
     fn leases_without_state_clears_nud_state() {
         let leases = vec![DhcpLease {
@@ -193,6 +308,29 @@ mod tests {
         let out = leases_without_state(leases);
         assert_eq!(out.len(), 1);
         assert!(out[0].nud_state.is_none());
+    }
+
+    #[test]
+    fn merge_devices_combines_lease_and_neighbor() {
+        let neighbors = vec![NeighborEntry {
+            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+            dev: Some("br-lan".into()),
+            mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
+            state: NeighborState::Reachable,
+        }];
+        let leases = vec![DhcpLeaseWithState {
+            lease_line: DhcpLease {
+                expires_epoch: 1,
+                ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+                mac: "aa:bb:cc:dd:ee:ff".parse().expect("mac"),
+                name: Some("pc".into()),
+            },
+            nud_state: None,
+        }];
+        let devices = merge_devices(neighbors, leases, &DeviceQuery::default());
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].presence, Presence::Online);
+        assert_eq!(devices[0].names, vec!["pc".to_string()]);
     }
 
     #[tokio::test]

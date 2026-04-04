@@ -110,7 +110,10 @@ async fn main() -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&status)?);
         }
         Command::Leases(args) => {
-            let leases = wakey::get_leases(args.include_state).await?;
+            let leases = wakey::get_leases(wakey_core::LeaseQuery {
+                include_state: args.include_state,
+            })
+            .await?;
             println!("{}", serde_json::to_string_pretty(&leases)?);
         }
         Command::Wake(args) => {

@@ -2,6 +2,9 @@
 param(
     [string]$PASSWD
 )
+. "$(Split-Path -Parent $PSScriptRoot)/scripts/lib.ps1"
+
+$PASSWD = Get-DefaultPassword $PASSWD
 
 # idk what this does it works like that then thats how it is
 pscp.exe -l root -scp -pw $PASSWD -r 192.168.100.1:/etc/ldlda_help $PSScriptRoot
