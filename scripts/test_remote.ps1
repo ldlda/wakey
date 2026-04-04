@@ -9,7 +9,8 @@ param(
     [string]$password,
     [switch]$Verbose,
     [string]$RemoteTestPath = "/root/.bin/test",
-    [string]$RemoteHost = "root@192.168.100.1"
+    [string]$RemoteHost = "root@192.168.100.1",
+    [switch]$Ignored
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,10 +55,11 @@ foreach ($testBinary in $testBinaries) {
     Invoke-Scp -Local $testBinary.FullName -Dest "${RemoteHost}:$RemoteTestPath" -Pass $password -Quiet
     
     # Run on target
-    $testArgs = "$(if ($Verbose) {"--nocapture --show-output"})"
-    if ($TestName) {
-        $testArgs = "$TestName $testArgs"
-    }
+    $parts = @()
+    if ($TestName) { $parts += $TestName }
+    if ($Ignored) { $parts += "--ignored" }
+    if ($Verbose) { $parts += "--nocapture"; $parts += "--show-output" }
+    $testArgs = $parts -join " "
     
     Invoke-Ssh -Cmd "chmod +x $RemoteTestPath && $RemoteTestPath $testArgs" -Remote $RemoteHost -Pass $password
 }
