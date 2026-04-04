@@ -1,4 +1,5 @@
 pub mod address;
+pub mod link;
 pub mod neighbor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

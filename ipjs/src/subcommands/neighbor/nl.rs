@@ -9,11 +9,11 @@ use futures::TryStreamExt;
 use macaddr::MacAddr;
 use rtnetlink::packet_route::{
     AddressFamily,
-    link::LinkAttribute,
     neighbour::{NeighbourAddress, NeighbourAttribute, NeighbourState},
 };
 
 use super::{NUDState, NeighborItem};
+use crate::subcommands::link;
 
 /// Fetch neighbors via rtnetlink. Empty slice = no filter (match all).
 /// Non-empty slice = match ANY in the set.
@@ -35,8 +35,12 @@ pub async fn get(
     let nud_set: HashSet<&NUDState> = nuds.iter().collect();
     let mac_set: HashSet<MacAddr> = macs.iter().copied().collect();
 
-    // Cache ifindex -> name
-    let mut ifname_cache: HashMap<u32, String> = HashMap::new();
+    // Prefetch all links once; link lookups were the ugliest and most expensive part.
+    let ifname_cache: HashMap<u32, String> = link::nl::get(None)
+        .await?
+        .into_iter()
+        .map(|link| (link.ifindex, link.ifname))
+        .collect();
     let mut result = vec![];
 
     'row: while let Some(msg) = neighbor_data.try_next().await? {
@@ -72,28 +76,7 @@ pub async fn get(
         }
 
         // Resolve ifindex -> name (cached)
-        let dev = match ifname_cache.get(&msg.header.ifindex) {
-            Some(name) => Some(name.clone()),
-            None => {
-                let name = handle
-                    .link()
-                    .get()
-                    .match_index(msg.header.ifindex)
-                    .execute()
-                    .try_next()
-                    .await?
-                    .and_then(|link| {
-                        link.attributes.into_iter().find_map(|a| match a {
-                            LinkAttribute::IfName(n) => Some(n),
-                            _ => None,
-                        })
-                    });
-                if let Some(ref n) = name {
-                    ifname_cache.insert(msg.header.ifindex, n.clone());
-                }
-                name
-            }
-        };
+        let dev = ifname_cache.get(&msg.header.ifindex).cloned();
 
         let (Some(ip), Some(dev)) = (ip, dev) else {
             continue 'row;
