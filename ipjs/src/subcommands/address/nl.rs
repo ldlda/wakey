@@ -1,5 +1,5 @@
 //! i said i aint doing ts no more why am i still here
-
+#![cfg(unix)]
 use futures::TryStreamExt;
 
 use crate::subcommands::address::AddrOutput;

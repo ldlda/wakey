@@ -5,8 +5,10 @@
 //! lowk why its free but its indirection and its ass
 
 pub mod json;
+#[cfg(all(unix, feature = "experimental-nl"))]
 pub mod nl;
 
+pub use crate::subcommands::Backend;
 use crate::utils::serialize::mac::option_mac;
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -39,4 +41,19 @@ pub struct AddrInfo {
     pub scope: Option<String>,
     pub label: Option<String>,
     // many more exist; we only take what we need
+}
+
+pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrOutput>> {
+    get_with_backend(Backend::Json, dev).await
+}
+
+pub async fn get_with_backend(
+    backend: Backend,
+    dev: Option<&str>,
+) -> anyhow::Result<Vec<AddrOutput>> {
+    match backend {
+        Backend::Json => json::get(dev).await,
+        #[cfg(all(unix, feature = "experimental-nl"))]
+        Backend::Netlink => nl::get(dev).await,
+    }
 }

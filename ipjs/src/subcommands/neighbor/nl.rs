@@ -1,5 +1,5 @@
 //! rtnetlink-based neighbor table query. One syscall, filter in userspace.
-
+#![cfg(unix)]
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,

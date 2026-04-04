@@ -46,14 +46,59 @@ pub async fn get_neighbors(
     let nud_filter: Vec<neighbor::NUDState> = state.iter().copied().map(to_ipjs_state).collect();
     let dev_strs: Vec<&str> = devs.iter().map(AsRef::as_ref).collect();
 
-    let results = neighbor::nl::get(&ip_filter, &dev_strs, &nud_filter, macs)
-        .await
-        .context("rtnetlink failed")?
-        .into_iter()
-        .map(map_neighbor_item)
-        .collect();
+    #[cfg(unix)]
+    {
+        let results = neighbor::nl::get(&ip_filter, &dev_strs, &nud_filter, macs)
+            .await
+            .context("rtnetlink failed")?
+            .into_iter()
+            .map(map_neighbor_item)
+            .collect();
+        Ok(results)
+    }
 
-    Ok(results)
+    #[cfg(not(unix))]
+    {
+        let mut results = Vec::new();
+        if ip_filter.is_empty() {
+            let dev = dev_strs.first().copied();
+            results = neighbor::get_with_backend(neighbor::Backend::Json, None, dev, &nud_filter)
+                .await
+                .context("ip -j neigh failed")?
+                .into_iter()
+                .map(map_neighbor_item)
+                .collect();
+        } else {
+            for ip in &ip_filter {
+                let dev = dev_strs.first().copied();
+                let mut rows = neighbor::get_with_backend(
+                    neighbor::Backend::Json,
+                    Some(*ip),
+                    dev,
+                    &nud_filter,
+                )
+                .await
+                .with_context(|| format!("ip -j neigh failed for {ip}"))?
+                .into_iter()
+                .map(map_neighbor_item)
+                .collect::<Vec<_>>();
+                results.append(&mut rows);
+            }
+        }
+
+        if !dev_strs.is_empty() {
+            results.retain(|row| row.dev.as_deref().is_some_and(|d| dev_strs.contains(&d)));
+        }
+        if !macs.is_empty() {
+            let mac_set: HashSet<macaddr::MacAddr> = macs.iter().copied().collect();
+            results.retain(|row| row.mac.is_some_and(|m| mac_set.contains(&m)));
+        }
+        if !ip_filter.is_empty() {
+            let ip_set: HashSet<IpAddr> = ip_filter.iter().copied().collect();
+            results.retain(|row| ip_set.contains(&row.ip));
+        }
+        Ok(results)
+    }
 }
 
 pub async fn query_status(query: &DeviceQuery) -> Result<Vec<NeighborEntry>> {

@@ -5,8 +5,10 @@
 //! yes. this is a real call.
 
 pub mod json;
+#[cfg(all(unix, feature = "experimental-nl"))]
 pub mod nl;
 
+pub use crate::subcommands::Backend;
 use crate::utils::serialize::mac::option_mac;
 use std::net::IpAddr;
 
@@ -79,4 +81,29 @@ pub struct NeighborItem {
     pub mac: Option<MacAddr>,
     #[serde(default)]
     pub state: Vec<NUDState>,
+}
+
+pub async fn get(
+    ip: Option<IpAddr>,
+    dev: Option<&str>,
+    nud: &[NUDState],
+) -> anyhow::Result<Vec<NeighborItem>> {
+    get_with_backend(Backend::Json, ip, dev, nud).await
+}
+
+pub async fn get_with_backend(
+    backend: Backend,
+    ip: Option<IpAddr>,
+    dev: Option<&str>,
+    nud: &[NUDState],
+) -> anyhow::Result<Vec<NeighborItem>> {
+    match backend {
+        Backend::Json => json::get(ip, dev, nud).await,
+        #[cfg(all(unix, feature = "experimental-nl"))]
+        Backend::Netlink => {
+            let ips: Vec<IpAddr> = ip.into_iter().collect();
+            let devs: Vec<&str> = dev.into_iter().collect();
+            nl::get(&ips, &devs, nud, &[]).await
+        }
+    }
 }

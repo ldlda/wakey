@@ -13,7 +13,11 @@ pub async fn get_dhcp_leases(
     let include_state = include_state.as_deref().map(boolish_str).unwrap_or(false);
 
     match crate::get_leases(include_state).await {
-        Ok(leases) => (StatusCode::OK, Json(leases)).into_response(),
+        Ok(leases) => (
+            StatusCode::OK,
+            Json(crate::compat::legacy_leases_from_domain(leases)),
+        )
+            .into_response(),
         Err(e) => ApiError {
             error: e.to_string(),
             code: StatusCode::BAD_GATEWAY,

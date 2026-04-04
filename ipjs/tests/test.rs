@@ -2,16 +2,17 @@ use std::collections::HashSet;
 
 use lda_ipjs::subcommands::{address, neighbor};
 
+#[cfg(all(unix, feature = "experimental-nl"))]
 #[tokio::test] // ← Use tokio::test instead of manual #[tokio::main]
 async fn ball1() -> anyhow::Result<()> {
-    let result = neighbor::nl::get(&[], &[] as &[&str], &[], &[]).await?;
+    let result = neighbor::get_with_backend(neighbor::Backend::Netlink, None, None, &[]).await?;
     println!("netlink results: {:?}", result);
     Ok(()) // ← Don't force error, let it succeed
 }
 
 #[tokio::test]
 async fn ball2() -> anyhow::Result<()> {
-    let result = neighbor::json::get(None, None, &[]).await?;
+    let result = neighbor::get_with_backend(neighbor::Backend::Json, None, None, &[]).await?;
     println!("json results: {:?}", result);
     Ok(())
 }
@@ -91,30 +92,34 @@ impl TypeName for serde_json::Value {
 #[tokio::test]
 async fn ball_compare_backends() -> anyhow::Result<()> {
     println!("=== JSON Backend ===");
-    let json_result = neighbor::json::get(None, None, &[]).await?;
+    let json_result = neighbor::get_with_backend(neighbor::Backend::Json, None, None, &[]).await?;
     println!("Got {} entries from JSON", json_result.len());
 
-    println!("\n=== Netlink Backend ===");
-    let nl_result = neighbor::nl::get(&[], &[] as &[&str], &[], &[]).await?;
-    println!("Got {} entries from netlink", nl_result.len());
+    #[cfg(all(unix, feature = "experimental-nl"))]
+    {
+        println!("\n=== Netlink Backend ===");
+        let nl_result =
+            neighbor::get_with_backend(neighbor::Backend::Netlink, None, None, &[]).await?;
+        println!("Got {} entries from netlink", nl_result.len());
 
-    // Compare counts
-    if json_result.len() != nl_result.len() {
+        // Compare counts
+        if json_result.len() != nl_result.len() {
+            println!(
+                "\n⚠️ Count mismatch! JSON: {}, Netlink: {}",
+                json_result.len(),
+                nl_result.len()
+            );
+        } else {
+            println!("\n✅ Both backends returned same count");
+        }
+        let a: HashSet<neighbor::NeighborItem> = HashSet::from_iter(json_result);
+        let b: HashSet<neighbor::NeighborItem> = HashSet::from_iter(nl_result);
         println!(
-            "\n⚠️ Count mismatch! JSON: {}, Netlink: {}",
-            json_result.len(),
-            nl_result.len()
+            "istg {len1} == {len2} or else",
+            len1 = a.len(),
+            len2 = b.len()
         );
-    } else {
-        println!("\n✅ Both backends returned same count");
     }
-    let a: HashSet<neighbor::NeighborItem> = HashSet::from_iter(json_result);
-    let b: HashSet<neighbor::NeighborItem> = HashSet::from_iter(nl_result);
-    println!(
-        "istg {len1} == {len2} or else",
-        len1 = a.len(),
-        len2 = b.len()
-    );
 
     Ok(())
 }
@@ -126,7 +131,7 @@ async fn ball_compare_backends() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn ipjas() -> anyhow::Result<()> {
-    let cuh = address::json::get(None).await?;
+    let cuh = address::get_with_backend(address::Backend::Json, None).await?;
     println!("{cuh:#?}");
     Ok(())
 }

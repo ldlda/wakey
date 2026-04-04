@@ -1,4 +1,5 @@
 pub mod arpparse;
+pub mod compat;
 pub mod dhcpparse;
 pub mod route;
 pub mod utils;
@@ -17,40 +18,42 @@ use wakey_core::{
 pub type StatusResponse = Status<NeighborEntry>;
 
 pub async fn resolve_query(input: impl Into<String>) -> Result<DeviceQuery> {
-    Ok(match wakey_linux::devices::classify_query(input.into()).await {
-        QueryInput::Ip(ip_addr) => DeviceQuery {
-            filter: DeviceFilters {
-                ips: vec![ip_addr],
+    Ok(
+        match wakey_linux::devices::classify_query(input.into()).await {
+            QueryInput::Ip(ip_addr) => DeviceQuery {
+                filter: DeviceFilters {
+                    ips: vec![ip_addr],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
-            ..Default::default()
-        },
-        QueryInput::Mac(mac_addr) => DeviceQuery {
-            filter: DeviceFilters {
-                macs: vec![mac_addr],
+            QueryInput::Mac(mac_addr) => DeviceQuery {
+                filter: DeviceFilters {
+                    macs: vec![mac_addr],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
-            ..Default::default()
-        },
-        QueryInput::Dev(dev) => DeviceQuery {
-            filter: DeviceFilters {
-                devs: vec![dev],
+            QueryInput::Dev(dev) => DeviceQuery {
+                filter: DeviceFilters {
+                    devs: vec![dev],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
-            ..Default::default()
-        },
-        QueryInput::Nud(state) => DeviceQuery {
-            filter: DeviceFilters {
-                nuds: vec![state],
+            QueryInput::Nud(state) => DeviceQuery {
+                filter: DeviceFilters {
+                    nuds: vec![state],
+                    ..Default::default()
+                },
                 ..Default::default()
             },
-            ..Default::default()
+            QueryInput::Name(name) => DeviceQuery {
+                name: Some(name),
+                ..Default::default()
+            },
         },
-        QueryInput::Name(name) => DeviceQuery {
-            name: Some(name),
-            ..Default::default()
-        },
-    })
+    )
 }
 
 pub async fn get_status(query: DeviceQuery) -> Result<StatusResponse> {
@@ -117,16 +120,14 @@ pub async fn get_ips(name: impl AsRef<str>) -> Result<Vec<std::net::IpAddr>> {
 pub fn http_app(static_root: std::path::PathBuf) -> Router {
     Router::new()
         .nest("/api", route::api_router())
-        .fallback_service(
-            axum::routing::get_service(
-                ServeDir::new(static_root)
-                    .append_index_html_on_directories(true)
-                    .precompressed_br()
-                    .precompressed_deflate()
-                    .precompressed_gzip()
-                    .precompressed_zstd(),
-            ),
-        )
+        .fallback_service(axum::routing::get_service(
+            ServeDir::new(static_root)
+                .append_index_html_on_directories(true)
+                .precompressed_br()
+                .precompressed_deflate()
+                .precompressed_gzip()
+                .precompressed_zstd(),
+        ))
 }
 
 pub async fn serve_http(addr: SocketAddr, static_root: std::path::PathBuf) -> io::Result<()> {
@@ -161,7 +162,10 @@ mod tests {
     #[tokio::test]
     async fn resolve_query_parses_ip() {
         let query = resolve_query("192.168.1.10").await.expect("resolve query");
-        assert_eq!(query.filter.ips, vec![IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10))]);
+        assert_eq!(
+            query.filter.ips,
+            vec![IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10))]
+        );
     }
 
     #[tokio::test]
