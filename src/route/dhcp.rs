@@ -11,12 +11,10 @@ pub struct DhcpLeasesQueryRaw {
     include_state: Option<String>,
 }
 
-pub async fn get_dhcp_leases(Query(raw): Query<DhcpLeasesQueryRaw>) -> impl IntoResponse {
-    let include_state = raw
-        .include_state
-        .as_deref()
-        .map(boolish_str)
-        .unwrap_or(false);
+pub async fn get_dhcp_leases(
+    Query(DhcpLeasesQueryRaw { include_state }): Query<DhcpLeasesQueryRaw>,
+) -> impl IntoResponse {
+    let include_state = include_state.as_deref().map(boolish_str).unwrap_or(false);
 
     match read_dhcp_leases_with_names().await {
         Ok(leases_with_names) => {
