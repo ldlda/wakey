@@ -171,7 +171,8 @@ mod tests {
                 vec![],
             )],
         };
-        let legacy = legacy_status_from_inventory(inventory, Some("pc".into()), DeviceFilters::default());
+        let legacy =
+            legacy_status_from_inventory(inventory, Some("pc".into()), DeviceFilters::default());
         assert_eq!(legacy.name.as_deref(), Some("pc"));
         assert_eq!(legacy.table.len(), 1);
         assert_eq!(legacy.table[0].state, NeighborState::Reachable);

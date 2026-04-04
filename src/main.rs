@@ -1,7 +1,9 @@
 use std::net::{IpAddr, SocketAddr};
 
+use chrono::{DateTime, Local, Utc};
 use clap::{Args, Parser, Subcommand};
-use wakey_core::{DeviceFilters, DeviceQuery};
+use comfy_table::{Cell, ContentArrangement, Table, presets::UTF8_FULL};
+use wakey_core::{DeviceFilters, DeviceQuery, DhcpLeaseWithState, WakeResult};
 
 #[derive(Parser)]
 #[command(name = "wakey")]
@@ -32,11 +34,15 @@ struct HttpArgs {
 struct LeasesArgs {
     #[arg(long)]
     include_state: bool,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
 struct WakeArgs {
     query: String,
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -52,6 +58,8 @@ struct StatusArgs {
     nuds: Vec<wakey_core::NeighborState>,
     #[arg(long = "mac")]
     macs: Vec<macaddr::MacAddr>,
+    #[arg(long)]
+    json: bool,
 }
 
 fn status_args_to_query(args: StatusArgs) -> wakey_core::DeviceQuery {
@@ -79,6 +87,81 @@ fn status_args_to_query(args: StatusArgs) -> wakey_core::DeviceQuery {
     }
 }
 
+fn base_table() -> Table {
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic);
+    table
+}
+
+fn render_status_table(status: &wakey::StatusResponse) -> Table {
+    let mut table = base_table();
+    table.set_header(["IP", "MAC", "State", "IF"]);
+    for row in &status.table {
+        table.add_row([
+            Cell::new(row.ip),
+            Cell::new(row.mac.map(|m| m.to_string()).unwrap_or_default()),
+            Cell::new(format!("{:?}", row.state).to_lowercase()),
+            Cell::new(row.dev.clone().unwrap_or_default()),
+        ]);
+    }
+    table
+}
+
+fn render_leases_table(leases: &[DhcpLeaseWithState]) -> Table {
+    let mut table = base_table();
+    table.set_header(["IP", "MAC", "Name", "Expires", "NUD"]);
+    for lease in leases {
+        let expires = format_epoch_local(lease.lease_line.expires_epoch);
+        table.add_row([
+            Cell::new(lease.lease_line.ip),
+            Cell::new(lease.lease_line.mac),
+            Cell::new(lease.lease_line.name.clone().unwrap_or_default()),
+            Cell::new(expires),
+            Cell::new(
+                lease
+                    .nud_state
+                    .map(|s| format!("{:?}", s).to_lowercase())
+                    .unwrap_or_default(),
+            ),
+        ]);
+    }
+    table
+}
+
+fn render_wake_table(result: &WakeResult) -> Table {
+    let mut table = base_table();
+    table.set_header(["IP", "MAC", "Status"]);
+    for row in &result.result {
+        table.add_row([
+            Cell::new(row.target.ip.map(|ip| ip.to_string()).unwrap_or_default()),
+            Cell::new(row.target.mac.map(|m| m.to_string()).unwrap_or_default()),
+            Cell::new(format!("{:?}", row.status).to_lowercase()),
+        ]);
+    }
+    table
+}
+
+fn render_devs_table(devs: &[String]) -> Table {
+    let mut table = base_table();
+    table.set_header(["Interface"]);
+    for dev in devs {
+        table.add_row([Cell::new(dev)]);
+    }
+    table
+}
+
+fn format_epoch_local(epoch: u64) -> String {
+    match DateTime::<Utc>::from_timestamp(epoch as i64, 0) {
+        Some(dt) => dt
+            .with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string(),
+        None => epoch.to_string(),
+    }
+}
+
 #[cfg(not(target_os = "linux"))]
 fn main() -> anyhow::Result<()> {
     Err(anyhow::anyhow!(
@@ -96,6 +179,7 @@ async fn main() -> anyhow::Result<()> {
             wakey::serve_http_from_current_exe(addr).await?;
         }
         Command::Status(args) => {
+            let as_json = args.json;
             let query = status_args_to_query(args);
             let status = if query.name.is_some()
                 && query.filter.ips.is_empty()
@@ -107,22 +191,37 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 wakey::get_status(query).await?
             };
-            println!("{}", serde_json::to_string_pretty(&status)?);
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&status)?);
+            } else {
+                if let Some(name) = &status.name {
+                    println!("name: {name}");
+                }
+                println!("{}", render_status_table(&status));
+            }
         }
         Command::Leases(args) => {
             let leases = wakey::get_leases(wakey_core::LeaseQuery {
                 include_state: args.include_state,
             })
             .await?;
-            println!("{}", serde_json::to_string_pretty(&leases)?);
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&leases)?);
+            } else {
+                println!("{}", render_leases_table(&leases));
+            }
         }
         Command::Wake(args) => {
             let result = wakey::wake_from_query(args.query).await?;
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("{}", render_wake_table(&result));
+            }
         }
         Command::Devs => {
             let devs = wakey::list_interfaces().await?;
-            println!("{}", serde_json::to_string_pretty(&devs)?);
+            println!("{}", render_devs_table(&devs));
         }
     }
     Ok(())
