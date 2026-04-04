@@ -68,11 +68,11 @@ pub async fn wake_many(
         .await?;
     sock.set_broadcast(true)?;
 
-    let iter = targets.into_iter().map(async |target| {
-        match CompleteWakeTarget::try_from(target) {
+    let iter = targets
+        .into_iter()
+        .map(async |target| match CompleteWakeTarget::try_from(target) {
             Ok(target) => wake_one(&sock, target).await,
             Err(()) => WakeTargetResult::incomplete(target),
-        }
-    });
+        });
     Ok(futures::future::join_all(iter).await)
 }

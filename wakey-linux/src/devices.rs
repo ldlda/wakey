@@ -75,7 +75,9 @@ pub async fn list_devs() -> HashSet<String> {
                 if e.file_type()
                     .map(|ft| {
                         if ft.is_symlink() {
-                            std::fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false)
+                            std::fs::metadata(e.path())
+                                .map(|m| m.is_dir())
+                                .unwrap_or(false)
                         } else {
                             ft.is_dir()
                         }

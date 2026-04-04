@@ -221,7 +221,9 @@ pub fn parse_neighbor_line(s: &str) -> Result<NeighborEntry, NeighborParseError>
         }
     }
 
-    if state.is_none() && let Some(st) = last_tok {
+    if state.is_none()
+        && let Some(st) = last_tok
+    {
         state = Some(st.parse()?);
     }
 

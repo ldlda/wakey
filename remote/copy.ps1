@@ -5,6 +5,7 @@ param(
 
 # idk what this does it works like that then thats how it is
 pscp.exe -l root -scp -pw $PASSWD -r 192.168.100.1:/etc/ldlda_help $PSScriptRoot
+pscp.exe -l root -scp -pw $PASSWD  192.168.100.1:/etc/rc.local $PSScriptRoot
 
 $initDir = Join-Path $PSScriptRoot 'init.d'
 New-Item -ItemType Directory -Force -Path $initDir | Out-Null

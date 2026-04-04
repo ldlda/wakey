@@ -4,4 +4,3 @@ pub async fn wake_one(
 ) -> wakey_core::WakeTargetResult {
     wakey_linux::wake::wake_one(sock, t).await
 }
-

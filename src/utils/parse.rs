@@ -39,4 +39,3 @@ pub fn boolish_str(s: &str) -> bool {
         || (!matches!(t.as_str(), "0" | "false" | "no" | "off" | "n")
             && t.parse::<u64>().map(|n| n != 0).unwrap_or(false))
 }
-

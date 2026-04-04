@@ -6,7 +6,9 @@ pub fn parse_numeric_ipv4(s: &str) -> Option<std::net::IpAddr> {
     {
         return Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(n)));
     }
-    if s.chars().all(|c| c.is_ascii_digit()) && let Ok(n) = s.parse::<u32>() {
+    if s.chars().all(|c| c.is_ascii_digit())
+        && let Ok(n) = s.parse::<u32>()
+    {
         return Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(n)));
     }
     if s.len() > 1
@@ -95,7 +97,9 @@ pub mod mac {
             D: Deserializer<'de>,
         {
             let s = Option::<String>::deserialize(deserializer)?;
-            s.map(|x| x.parse()).transpose().map_err(serde::de::Error::custom)
+            s.map(|x| x.parse())
+                .transpose()
+                .map_err(serde::de::Error::custom)
         }
     }
 }

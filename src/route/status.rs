@@ -1,7 +1,7 @@
 use crate::route::error::ApiError;
+use crate::utils::query::get_macs;
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::Query;
-use crate::utils::query::get_macs;
 pub use wakey_core::{DeviceQuery, NamePath, Status};
 
 pub async fn get_status_json(

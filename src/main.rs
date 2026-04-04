@@ -40,7 +40,7 @@ async fn entry() -> io::Result<()> {
         .nest("/api", api_router())
         .fallback_service(get_service(static_dir));
 
-    let port = TcpListener::bind("0.0.0.0:12012").await?;
+    let port = TcpListener::bind("[::]:12012").await?;
     axum::serve(port, app.into_make_service()).await?;
     Ok(())
 }
