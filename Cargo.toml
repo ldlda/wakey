@@ -8,6 +8,7 @@ publish = ["gitea"]
 anyhow = "1"
 axum = { version = "0", features = ["macros"] }
 axum-extra = { version = "0", features = ["query"] }
+clap = { version = "4", features = ["derive"] }
 color-eyre = "0"
 futures = "0"
 macaddr = { version = "1", features = ["serde", "serde_std"] }

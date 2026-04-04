@@ -16,6 +16,8 @@ $ErrorActionPreference = "Stop"
 
 . "$PSScriptRoot/lib.ps1"
 
+$password = Get-DefaultPassword $password
+
 # Build tests and capture output
 Write-Host "Building tests for $Package..." -ForegroundColor Cyan
 

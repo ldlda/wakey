@@ -17,6 +17,8 @@ try { $PSStyle.OutputRendering = 'Host' } catch {}
 
 . "$PSScriptRoot/lib.ps1"
 
+$Pass = Get-DefaultPassword $Pass
+
 function Get-DeployScript {
     param($DeployPreferred, $DeployTmp, $RemoteTmp, $RemotePath, $RestartFlag)
     return @"

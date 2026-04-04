@@ -1,34 +1,11 @@
 use crate::route::error::ApiError;
-use crate::utils::query::get_macs;
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use axum_extra::extract::Query;
 pub use wakey_core::{DeviceQuery, NamePath, Status};
 
-pub async fn get_status_json(
-    Query(DeviceQuery {
-        name,
-        filter: filters,
-        ..
-    }): Query<DeviceQuery>,
-) -> impl IntoResponse {
-    match get_macs(
-        name.as_slice(),
-        &filters.ips,
-        &filters.devs,
-        &filters.nuds,
-        &filters.macs,
-    )
-    .await
-    {
-        Ok(table) => (
-            StatusCode::OK,
-            Json(Status {
-                name,
-                table,
-                filters,
-            }),
-        )
-            .into_response(),
+pub async fn get_status_json(Query(query): Query<DeviceQuery>) -> impl IntoResponse {
+    match crate::get_status(query).await {
+        Ok(status) => (StatusCode::OK, Json(status)).into_response(),
         Err(error) => ApiError {
             code: StatusCode::BAD_GATEWAY,
             error: error

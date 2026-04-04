@@ -1,65 +1,126 @@
-//! braindead version v0.1.x
-//!
-//! # whats next
-//!
-//! for version 2 i hope to have:
-//!
-//! 1. idk reworked frontend;
-//! 2. incorporate ip -j;
-//! 3. small 1-5 second caching;
+use std::net::{IpAddr, SocketAddr};
 
-use axum::Router;
-use tokio::net::TcpListener;
-mod arpparse;
-mod dhcpparse;
-mod route;
-mod utils;
-use std::{env, io};
+use clap::{Args, Parser, Subcommand};
+use wakey_core::{DeviceFilters, DeviceQuery};
 
-#[cfg(target_os = "linux")]
-#[tokio::main]
-async fn entry() -> io::Result<()> {
-    use crate::route::api_router;
-    use axum::routing::get_service;
-    use tower_http::services::ServeDir;
-    let exe = env::current_exe()?;
-    let root = exe
-        .parent()
-        .ok_or_else(|| io::Error::other("no parent dir"))?;
-    let static_dir = ServeDir::new(root.join("static"))
-        .append_index_html_on_directories(true)
-        .precompressed_br()
-        .precompressed_deflate()
-        .precompressed_gzip()
-        .precompressed_zstd();
-    let app = Router::new()
-        // .route("/home", get(home))
-        // .route("/", get(home_2))
-        // .merge(home_2_route())
-        // .route("/status", get(get_status_2))
-        .nest("/api", api_router())
-        .fallback_service(get_service(static_dir));
+#[derive(Parser)]
+#[command(name = "wakey")]
+#[command(version, about = "Wakey service CLI and HTTP adapter")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
 
-    let port = TcpListener::bind("[::]:12012").await?;
-    axum::serve(port, app.into_make_service()).await?;
-    Ok(())
+#[derive(Subcommand)]
+enum Command {
+    Http(HttpArgs),
+    Status(StatusArgs),
+    Leases(LeasesArgs),
+    Wake(WakeArgs),
+    Devs,
+}
+
+#[derive(Args)]
+struct HttpArgs {
+    #[arg(long, default_value = "::")]
+    host: IpAddr,
+    #[arg(long, default_value_t = 12012)]
+    port: u16,
+}
+
+#[derive(Args)]
+struct LeasesArgs {
+    #[arg(long)]
+    include_state: bool,
+}
+
+#[derive(Args)]
+struct WakeArgs {
+    query: String,
+}
+
+#[derive(Args)]
+struct StatusArgs {
+    query: Option<String>,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long = "ip")]
+    ips: Vec<std::net::IpAddr>,
+    #[arg(long = "dev")]
+    devs: Vec<String>,
+    #[arg(long = "nud")]
+    nuds: Vec<wakey_core::NeighborState>,
+    #[arg(long = "mac")]
+    macs: Vec<macaddr::MacAddr>,
+}
+
+fn status_args_to_query(args: StatusArgs) -> wakey_core::DeviceQuery {
+    if let Some(query) = args.query.as_ref()
+        && args.name.is_none()
+        && args.ips.is_empty()
+        && args.devs.is_empty()
+        && args.nuds.is_empty()
+        && args.macs.is_empty()
+    {
+        return DeviceQuery {
+            name: Some(query.clone()),
+            ..Default::default()
+        };
+    }
+
+    DeviceQuery {
+        name: args.name.or(args.query),
+        filter: DeviceFilters {
+            ips: args.ips,
+            devs: args.devs,
+            nuds: args.nuds,
+            macs: args.macs,
+        },
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
-fn main() -> color_eyre::Result<()> {
-    use std::net::ToSocketAddrs;
-    color_eyre::install()?;
-    // use crate::arpparse::NUDState;
-    // println!("{}", NUDState::Reachable.to_string().to_lowercase());
-    println!("{:?}", "svuhuvshdv:331".to_socket_addrs());
-    // Err(Os { code: 11001, kind: Uncategorized, message: "No such host is known." })
-    Err(color_eyre::eyre::eyre!(
+fn main() -> anyhow::Result<()> {
+    Err(anyhow::anyhow!(
         "OS not supported! run this on your ahh router!"
     ))
 }
 
 #[cfg(target_os = "linux")]
-fn main() -> color_eyre::Result<()> {
-    color_eyre::install()?;
-    Ok(entry()?)
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Http(args) => {
+            let addr = SocketAddr::new(args.host, args.port);
+            wakey::serve_http_from_current_exe(addr).await?;
+        }
+        Command::Status(args) => {
+            let query = status_args_to_query(args);
+            let status = if query.name.is_some()
+                && query.filter.ips.is_empty()
+                && query.filter.devs.is_empty()
+                && query.filter.nuds.is_empty()
+                && query.filter.macs.is_empty()
+            {
+                wakey::get_status_for_input(query.name.clone().unwrap_or_default()).await?
+            } else {
+                wakey::get_status(query).await?
+            };
+            println!("{}", serde_json::to_string_pretty(&status)?);
+        }
+        Command::Leases(args) => {
+            let leases = wakey::get_leases(args.include_state).await?;
+            println!("{}", serde_json::to_string_pretty(&leases)?);
+        }
+        Command::Wake(args) => {
+            let result = wakey::wake_from_query(args.query).await?;
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        Command::Devs => {
+            let devs = wakey::list_interfaces().await?;
+            println!("{}", serde_json::to_string_pretty(&devs)?);
+        }
+    }
+    Ok(())
 }

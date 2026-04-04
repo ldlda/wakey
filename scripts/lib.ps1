@@ -1,5 +1,20 @@
 # Shared functions for wakey scripts
 
+function Get-DefaultPassword {
+    param([string]$Password)
+
+    if ($Password) {
+        return $Password
+    }
+
+    $pwPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'ar_data/pw'
+    if (-not (Test-Path $pwPath)) {
+        throw "Password not provided and default file not found: $pwPath"
+    }
+
+    return (Get-Content -Raw $pwPath).Trim()
+}
+
 function Invoke-Ext {
     param($Exe, $Arguments, $Label)
     $displayArgs = $Arguments.Clone()
