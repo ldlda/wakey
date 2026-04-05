@@ -2,8 +2,8 @@ use std::net::{IpAddr, SocketAddr};
 
 use chrono::{DateTime, Local, Utc};
 use clap::{Args, Parser, Subcommand};
-use comfy_table::{Cell, ContentArrangement, Table, presets::UTF8_FULL};
-use wakey_core::{DeviceFilters, DeviceQuery, DhcpLeaseWithState, WakeResult};
+use comfy_table::{Cell, ContentArrangement, Table, presets};
+use wakey_core::{DeviceFilters, DeviceQuery, DhcpLeaseWithState, InterfaceSummary, WakeResult};
 
 #[derive(Parser)]
 #[command(name = "wakey")]
@@ -19,7 +19,7 @@ enum Command {
     Status(StatusArgs),
     Leases(LeasesArgs),
     Wake(WakeArgs),
-    Devs,
+    Devs(DevsArgs),
 }
 
 #[derive(Args)]
@@ -62,6 +62,12 @@ struct StatusArgs {
     json: bool,
 }
 
+#[derive(Args)]
+struct DevsArgs {
+    #[arg(long)]
+    json: bool,
+}
+
 fn status_args_to_query(args: StatusArgs) -> wakey_core::DeviceQuery {
     if let Some(query) = args.query.as_ref()
         && args.name.is_none()
@@ -90,7 +96,7 @@ fn status_args_to_query(args: StatusArgs) -> wakey_core::DeviceQuery {
 fn base_table() -> Table {
     let mut table = Table::new();
     table
-        .load_preset(UTF8_FULL)
+        .load_preset(presets::UTF8_FULL_CONDENSED)
         .set_content_arrangement(ContentArrangement::Dynamic);
     table
 }
@@ -143,11 +149,51 @@ fn render_wake_table(result: &WakeResult) -> Table {
     table
 }
 
-fn render_devs_table(devs: &[String]) -> Table {
+fn render_devs_table(devs: &[InterfaceSummary]) -> Table {
     let mut table = base_table();
-    table.set_header(["Interface"]);
+    table.set_header([
+        "Interface",
+        "State",
+        "MAC",
+        "Addresses",
+        "Broadcasts",
+        "Scope/Label",
+    ]);
     for dev in devs {
-        table.add_row([Cell::new(dev)]);
+        let addresses = dev
+            .addrs
+            .iter()
+            .filter_map(|addr| addr.cidr.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let broadcasts = dev
+            .addrs
+            .iter()
+            .filter_map(|addr| addr.broadcast)
+            .map(|addr| addr.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let scope_label = dev
+            .addrs
+            .iter()
+            .map(|addr| match (&addr.scope, &addr.label) {
+                (Some(scope), Some(label)) => format!("{scope} ({label})"),
+                (Some(scope), None) => scope.clone(),
+                (None, Some(label)) => label.clone(),
+                (None, None) => String::new(),
+            })
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        table.add_row([
+            Cell::new(&dev.ifname),
+            Cell::new(&dev.operstate),
+            Cell::new(dev.mac.map(|m| m.to_string()).unwrap_or_default()),
+            Cell::new(addresses),
+            Cell::new(broadcasts),
+            Cell::new(scope_label),
+        ]);
     }
     table
 }
@@ -219,9 +265,13 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", render_wake_table(&result));
             }
         }
-        Command::Devs => {
-            let devs = wakey::list_interfaces().await?;
-            println!("{}", render_devs_table(&devs));
+        Command::Devs(args) => {
+            let devs = wakey::get_interface_summaries().await?;
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&devs)?);
+            } else {
+                println!("{}", render_devs_table(&devs));
+            }
         }
     }
     Ok(())

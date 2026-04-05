@@ -11,8 +11,9 @@ use axum::Router;
 use tokio::net::TcpListener;
 use tower_http::services::ServeDir;
 use wakey_core::{
-    Device, DeviceFilters, DeviceInventory, DeviceQuery, DhcpLease, DhcpLeaseWithState, LeaseQuery,
-    NeighborEntry, Presence, Query, QueryInput, Status, WakeResult, WakeTarget,
+    Device, DeviceFilters, DeviceInventory, DeviceQuery, DhcpLease, DhcpLeaseWithState,
+    InterfaceSummary, LeaseQuery, NeighborEntry, Presence, Query, QueryInput, Status, WakeResult,
+    WakeTarget,
 };
 
 pub type StatusResponse = Status<NeighborEntry>;
@@ -114,6 +115,10 @@ pub async fn wake_from_query(input: impl Into<String>) -> Result<WakeResult> {
 
 pub async fn list_interfaces() -> Result<Vec<String>> {
     Ok(wakey_linux::devices::devs_sorted().await)
+}
+
+pub async fn get_interface_summaries() -> Result<Vec<InterfaceSummary>> {
+    wakey_linux::devices::list_interface_summaries().await
 }
 
 pub async fn get_ips(name: impl AsRef<str>) -> Result<Vec<std::net::IpAddr>> {
