@@ -1,8 +1,4 @@
-//! ```bash
-//! ip -j n s
-//! ```
-//!
-//! yes. this is a real call.
+//! Typed wrappers for `ip -j neigh show`.
 
 pub mod json;
 #[cfg(all(unix, feature = "experimental-nl"))]
@@ -16,18 +12,18 @@ use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
+/// Structured neighbor query input matching the common `ip neigh` flags.
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct NeighborInput {
-    /// supports only the last item (ignore), `to` keyword is optional
+    /// Destination address filter. The optional `to` keyword in CLI form is implicit here.
     pub to: Option<IpAddr>,
-    /// supports only one item (it complains if multiple)
-    pub dev: Option<String>, // im all for simplicity
-    /// takes multiple, has to have `nud` before bro or it will think you `to`
+    /// Interface-name filter.
+    pub dev: Option<String>,
+    /// Neighbor-state filters.
     pub nud: Vec<NUDState>,
 }
 
-// as input this must be lowercase. as output it is uppercase
-/// docs for items come from a random ahh man website idk
+/// Linux neighbor reachability states.
 #[derive(
     Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, Serialize, Deserialize, Default,
 )]
@@ -70,7 +66,7 @@ pub enum NUDState {
     Other(u16),
 }
 
-/// everything i see
+/// One neighbor row from `ip -j neigh show`.
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct NeighborItem {
     #[serde(rename(deserialize = "dst"))]
@@ -83,6 +79,7 @@ pub struct NeighborItem {
     pub state: Vec<NUDState>,
 }
 
+/// Fetch neighbor rows using the default backend.
 pub async fn get(
     ip: Option<IpAddr>,
     dev: Option<&str>,
@@ -91,6 +88,7 @@ pub async fn get(
     get_with_backend(Backend::Json, ip, dev, nud).await
 }
 
+/// Fetch neighbor rows using an explicit backend.
 pub async fn get_with_backend(
     backend: Backend,
     ip: Option<IpAddr>,

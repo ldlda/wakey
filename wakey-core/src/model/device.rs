@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use crate::model::{DhcpLease, NeighborEntry, NeighborState};
 use crate::parse::mac;
 
+/// Product-level presence derived from raw neighbor state.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Presence {
@@ -31,12 +32,17 @@ impl From<NeighborState> for Presence {
     }
 }
 
+/// MAC-first identifier for a device aggregate.
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize)]
 pub struct DeviceId {
     #[serde(with = "mac")]
     pub mac: MacAddr,
 }
 
+/// Merged view of one discovered network identity.
+///
+/// This aggregates facts from DHCP leases and neighbor-table rows into a more
+/// useful application-level shape.
 #[skip_serializing_none]
 #[derive(Debug, Clone, Serialize)]
 pub struct Device {
@@ -52,6 +58,7 @@ pub struct Device {
 }
 
 impl Device {
+    /// Merge raw neighbor and DHCP facts into one device aggregate.
     pub fn from_parts(neighbors: Vec<NeighborEntry>, leases: Vec<DhcpLease>) -> Self {
         use std::collections::BTreeSet;
 
@@ -117,6 +124,7 @@ impl From<u8> for Presence {
     }
 }
 
+/// Collection of merged discovered devices.
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct DeviceInventory {
     pub devices: Vec<Device>,

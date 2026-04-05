@@ -1,8 +1,7 @@
-//! ts
+//! Typed wrappers for `ip -j address show`.
 //!
-//! deals with both ip a (addroutput) and ip l (commonoutput)
-//!
-//! lowk why its free but its indirection and its ass
+//! This module is intentionally close to the Linux output shape while still
+//! tightening a few fields into more useful Rust types.
 
 pub mod json;
 #[cfg(all(unix, feature = "experimental-nl"))]
@@ -16,22 +15,21 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use crate::subcommands::link::OperState;
 
-/// i dont include what i dont know about (almost all ts)
+/// One interface row from `ip -j address show`.
 #[derive(Serialize, Debug, Deserialize)]
 pub struct AddrOutput {
     pub ifindex: u32,
     pub ifname: String,
-    /// i imagine UP or DOWN, unknown
+    /// Interface operational state.
     pub operstate: OperState,
-    // 6 has a serde and the enum doesnt? why. (serializing ts is ass although... im not given an array. they string formatted ts)
     #[serde(with = "option_mac", default)]
     pub address: Option<MacAddr>,
-    #[serde(default)] // i wish we have intellisense for this... fuck you metaprogramming
+    /// Per-address entries attached to this interface.
+    #[serde(default)]
     pub addr_info: Vec<AddrInfo>,
 }
 
-// i be copying
-// Raw JSON shape from ip -j -4 address show
+/// One address entry nested under an interface row.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AddrInfo {
     pub family: Option<AddressFamily>,
@@ -43,9 +41,9 @@ pub struct AddrInfo {
 
     pub scope: Option<String>,
     pub label: Option<String>,
-    // many more exist; we only take what we need
 }
 
+/// Address family used by `ip address` output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressFamily {
     Inet,
@@ -90,6 +88,10 @@ impl<'de> Deserialize<'de> for AddressFamily {
     }
 }
 
+/// Raw parsed local address plus prefix length.
+///
+/// This is still a source-shaped type; callers that need a guaranteed usable
+/// CIDR should validate that both fields are present.
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct InterfaceCidr {
     pub local: Option<IpAddr>,
@@ -103,37 +105,45 @@ impl InterfaceCidr {
 }
 
 impl AddrInfo {
+    /// Return the parsed local IP address when present.
     pub fn local_addr(&self) -> Option<IpAddr> {
         self.cidr.local
     }
 
+    /// Return the parsed prefix length when present.
     pub fn prefixlen(&self) -> Option<u8> {
         self.cidr.prefixlen
     }
 
+    /// Return whether this row is IPv4.
     pub fn is_ipv4(&self) -> bool {
         matches!(self.family, Some(AddressFamily::Inet))
     }
 
+    /// Return whether this row is IPv6.
     pub fn is_ipv6(&self) -> bool {
         matches!(self.family, Some(AddressFamily::Inet6))
     }
 }
 
 impl AddrOutput {
+    /// Iterate IPv4 address entries.
     pub fn ipv4_addrs(&self) -> impl Iterator<Item = &AddrInfo> {
         self.addr_info.iter().filter(|info| info.is_ipv4())
     }
 
+    /// Iterate IPv6 address entries.
     pub fn ipv6_addrs(&self) -> impl Iterator<Item = &AddrInfo> {
         self.addr_info.iter().filter(|info| info.is_ipv6())
     }
 }
 
+/// Fetch address data using the default backend.
 pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<AddrOutput>> {
     get_with_backend(Backend::Json, dev).await
 }
 
+/// Fetch address data using an explicit backend.
 pub async fn get_with_backend(
     backend: Backend,
     dev: Option<&str>,

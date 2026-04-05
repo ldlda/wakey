@@ -4,6 +4,10 @@ use wakey_core::{NeighborState, QueryInput, parse};
 
 use crate::devices::interfaces::has_dev;
 
+/// Classify one free-form input string into the most specific query variant.
+///
+/// The current precedence is:
+/// IP address, MAC address, neighbor state, interface name, then plain text.
 pub async fn classify_query(q: String) -> QueryInput {
     let s = parse::extract_host(&q);
     if let Some(ip) = parse::parse_numeric_ipv4(s).or_else(|| s.parse::<IpAddr>().ok()) {

@@ -6,6 +6,7 @@ use strum::{Display, EnumString};
 
 use crate::parse::mac;
 
+/// One neighbor-table row, typically derived from `ip neigh` or netlink.
 #[skip_serializing_none]
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize)]
 pub struct NeighborEntry {
@@ -16,6 +17,7 @@ pub struct NeighborEntry {
     pub state: NeighborState,
 }
 
+/// Linux neighbor reachability state.
 #[derive(
     Debug, PartialEq, Eq, EnumString, Display, Clone, Copy, Hash, Serialize, Deserialize, Default,
 )]
@@ -36,6 +38,7 @@ pub enum NeighborState {
 }
 
 impl NeighborState {
+    /// Lowercase CLI argument form used by `ip neigh`.
     pub const fn as_ip_neigh_arg(self) -> &'static str {
         match self {
             NeighborState::Permanent => "permanent",
@@ -50,6 +53,7 @@ impl NeighborState {
         }
     }
 
+    /// Ordering rank used when choosing the “best” state among multiple rows.
     pub const fn rank(self) -> u8 {
         match self {
             NeighborState::Permanent | NeighborState::Reachable => 5,
@@ -74,6 +78,7 @@ impl Ord for NeighborState {
     }
 }
 
+/// Errors returned when parsing a text `ip neigh` line.
 #[derive(Debug, Display, thiserror::Error)]
 pub enum NeighborParseError {
     IpWhere,
@@ -83,6 +88,7 @@ pub enum NeighborParseError {
     StateParseError(#[from] strum::ParseError),
 }
 
+/// Parse one textual `ip neigh` line into a typed neighbor row.
 pub fn parse_neighbor_line(s: &str) -> Result<NeighborEntry, NeighborParseError> {
     let mut it = s.split_whitespace();
     let ip: IpAddr = it.next().ok_or(NeighborParseError::IpWhere)?.parse()?;

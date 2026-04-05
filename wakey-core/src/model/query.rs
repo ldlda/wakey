@@ -5,6 +5,10 @@ use std::net::IpAddr;
 
 use crate::model::NeighborState;
 
+/// Legacy-compatible query shape used by HTTP and service adapters.
+///
+/// `name` carries free-form text selection, while `filter` carries explicit
+/// machine-readable filters such as IPs, MACs, interfaces, and neighbor states.
 #[derive(Debug, Default, Clone, Hash, Deserialize, Serialize)]
 pub struct DeviceQuery {
     pub name: Option<String>,
@@ -12,6 +16,7 @@ pub struct DeviceQuery {
     pub filter: DeviceFilters,
 }
 
+/// Explicit device filters for source- and service-level queries.
 #[serde_as]
 #[derive(Debug, Default, Clone, Hash, Serialize, Deserialize)]
 pub struct DeviceFilters {
@@ -29,11 +34,13 @@ pub struct DeviceFilters {
     pub macs: Vec<MacAddr>,
 }
 
+/// Path helper for routes that receive a single `{name}` segment.
 #[derive(Debug, Default, Clone, Hash, Deserialize)]
 pub struct NamePath {
     pub name: String,
 }
 
+/// Low-level classified input used by Linux query classification.
 #[derive(Debug)]
 pub enum QueryInput {
     Ip(IpAddr),
@@ -43,6 +50,7 @@ pub enum QueryInput {
     Name(String),
 }
 
+/// Higher-level typed selector used by the service layer.
 #[derive(Debug, Clone)]
 pub enum Query {
     Text(String),

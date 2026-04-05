@@ -5,6 +5,7 @@ use macaddr::MacAddr;
 use tokio::net::UdpSocket;
 use wakey_core::{WakeStatus, WakeTarget, WakeTargetResult};
 
+/// Wake target with the minimum fields needed to send a magic packet.
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct CompleteWakeTarget {
     pub ip: IpAddr,
@@ -27,6 +28,7 @@ impl TryFrom<WakeTarget> for CompleteWakeTarget {
     }
 }
 
+/// Send one Wake-on-LAN magic packet to a complete target.
 pub async fn wake_one(sock: &UdpSocket, t: CompleteWakeTarget) -> WakeTargetResult {
     let mac = t.mac;
     let mb = mac.as_bytes();
@@ -60,6 +62,10 @@ pub async fn wake_one(sock: &UdpSocket, t: CompleteWakeTarget) -> WakeTargetResu
     }
 }
 
+/// Send Wake-on-LAN packets for many targets using one UDP socket.
+///
+/// Incomplete targets are not rejected with an error; they are returned as
+/// `WakeStatus::Incomplete` result rows.
 pub async fn wake_many(
     targets: impl IntoIterator<Item = WakeTarget>,
 ) -> io::Result<Vec<WakeTargetResult>> {

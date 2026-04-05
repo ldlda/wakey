@@ -6,11 +6,17 @@ use wakey_core::{
 use crate::service::leases::get_leases;
 use crate::service::query::resolve_query;
 
+/// Resolve free-form input and return merged devices rather than raw source rows.
 pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
     let query = resolve_query(input).await?;
     inventory(query).await.map(|inventory| inventory.devices)
 }
 
+/// Build a merged device inventory from neighbor-table and DHCP-lease sources.
+///
+/// This is the current center of gravity for the service layer. Higher-level
+/// status and wake flows should prefer deriving from inventory rather than
+/// directly from raw Linux source rows.
 pub async fn inventory(query: DeviceQuery) -> Result<DeviceInventory> {
     let neighbors = wakey_linux::devices::query_status(&query).await?;
     let leases = get_leases(wakey_core::LeaseQuery {
@@ -22,6 +28,10 @@ pub async fn inventory(query: DeviceQuery) -> Result<DeviceInventory> {
     })
 }
 
+/// Merge raw neighbor entries and DHCP leases into device aggregates.
+///
+/// Identity is currently MAC-first, with an IP-based fallback when a neighbor
+/// row does not include a MAC address.
 pub fn merge_devices(
     neighbors: Vec<NeighborEntry>,
     leases: Vec<DhcpLeaseWithState>,

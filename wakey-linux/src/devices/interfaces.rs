@@ -3,6 +3,10 @@ use lda_ipjs::subcommands::address;
 use std::collections::HashSet;
 use wakey_core::{InterfaceAddr, InterfaceSummary};
 
+/// Discover interface names from Linux without requiring `ip`.
+///
+/// This is the lowest-common-denominator interface listing path and is used for
+/// quick existence checks and legacy string-only callers.
 pub async fn list_devs() -> HashSet<String> {
     fn get_dev() -> HashSet<String> {
         let mut devs: HashSet<String> = HashSet::new();
@@ -50,6 +54,15 @@ pub async fn devs_sorted() -> Vec<String> {
     v
 }
 
+/// Build condensed interface summaries from Linux address data.
+///
+/// On Unix this prefers the `ipjs` netlink-backed address path; elsewhere it
+/// falls back to the JSON command path. The result is not a full `ip address show`
+/// dump. It is a smaller projection containing the parts `wakey` currently uses:
+/// interface name/index, operstate, MAC, bound addresses, and IPv4 broadcast
+/// addresses for Wake-on-LAN delivery.
+///
+/// Loopback is intentionally excluded.
 pub async fn list_interface_summaries() -> Result<Vec<InterfaceSummary>> {
     #[cfg(unix)]
     let rows = address::nl::get(None)
@@ -91,6 +104,7 @@ pub async fn list_interface_summaries() -> Result<Vec<InterfaceSummary>> {
     Ok(out)
 }
 
+/// Return whether a named interface exists according to [`list_devs`].
 pub async fn has_dev(name: &str) -> bool {
     list_devs().await.contains(name)
 }

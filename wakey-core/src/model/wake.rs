@@ -5,6 +5,9 @@ use std::net::IpAddr;
 
 use crate::parse::mac;
 
+/// Concrete Wake-on-LAN destination fields.
+///
+/// A fully usable target needs both an IP address and a MAC address.
 #[skip_serializing_none]
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct WakeTarget {
@@ -15,6 +18,7 @@ pub struct WakeTarget {
 }
 
 impl WakeTarget {
+    /// Return whether this target has both fields needed to send WoL.
     pub const fn is_complete(&self) -> bool {
         matches!(
             self,
@@ -26,11 +30,13 @@ impl WakeTarget {
     }
 }
 
+/// Result of waking one or more targets.
 #[derive(Debug, Serialize, Clone)]
 pub struct WakeResult {
     pub result: Vec<WakeTargetResult>,
 }
 
+/// Per-target wake result row.
 #[skip_serializing_none]
 #[derive(Debug, Serialize, Clone, Copy)]
 pub struct WakeTargetResult {
@@ -39,6 +45,7 @@ pub struct WakeTargetResult {
     pub status: WakeStatus,
 }
 
+/// Outcome of trying to wake one target.
 #[derive(Debug, Serialize, Clone, Copy, Hash, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum WakeStatus {
@@ -49,6 +56,7 @@ pub enum WakeStatus {
 }
 
 impl WakeTargetResult {
+    /// Construct an incomplete result for a target missing required fields.
     pub const fn incomplete(target: WakeTarget) -> Self {
         Self {
             target,

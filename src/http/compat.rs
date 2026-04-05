@@ -5,6 +5,7 @@ use wakey_core::{
     WakeTargetResult,
 };
 
+/// Legacy status row shape expected by the old `/static` frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct LegacyStatusRow {
     pub ip: std::net::IpAddr,
@@ -14,6 +15,7 @@ pub struct LegacyStatusRow {
     pub state: wakey_core::NeighborState,
 }
 
+/// Legacy status response shape expected by the old `/static` frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct LegacyStatusResponse {
     pub name: Option<String>,
@@ -21,6 +23,7 @@ pub struct LegacyStatusResponse {
     pub filters: DeviceFilters,
 }
 
+/// Legacy DHCP lease row shape expected by the old `/static` frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct LegacyLeaseRow {
     pub expires_epoch: u64,
@@ -31,11 +34,13 @@ pub struct LegacyLeaseRow {
     pub nud_state: Option<wakey_core::NeighborState>,
 }
 
+/// Legacy wake response wrapper expected by the old `/static` frontend.
 #[derive(Debug, Clone, Serialize)]
 pub struct LegacyWakeResult {
     pub result: Vec<LegacyWakeResultRow>,
 }
 
+/// Legacy per-target wake row shape.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct LegacyWakeResultRow {
     #[serde(flatten)]
@@ -43,6 +48,7 @@ pub struct LegacyWakeResultRow {
     pub status: wakey_core::WakeStatus,
 }
 
+/// Map legacy-style status rows into the old response shape.
 pub fn legacy_status_from_domain(status: Status<NeighborEntry>) -> LegacyStatusResponse {
     LegacyStatusResponse {
         name: status.name,
@@ -51,6 +57,7 @@ pub fn legacy_status_from_domain(status: Status<NeighborEntry>) -> LegacyStatusR
     }
 }
 
+/// Project a device inventory into the legacy status response shape.
 pub fn legacy_status_from_inventory(
     inventory: DeviceInventory,
     name: Option<String>,
@@ -68,6 +75,7 @@ pub fn legacy_status_from_inventory(
     }
 }
 
+/// Convert one neighbor row to the legacy status row shape.
 pub fn legacy_status_row(row: NeighborEntry) -> LegacyStatusRow {
     LegacyStatusRow {
         ip: row.ip,
@@ -77,6 +85,7 @@ pub fn legacy_status_row(row: NeighborEntry) -> LegacyStatusRow {
     }
 }
 
+/// Project one merged device back into legacy status rows.
 pub fn legacy_status_rows_from_device(device: Device) -> Vec<LegacyStatusRow> {
     if !device.neighbors.is_empty() {
         return device
@@ -107,10 +116,12 @@ pub fn legacy_status_rows_from_device(device: Device) -> Vec<LegacyStatusRow> {
         .collect()
 }
 
+/// Convert lease rows into the legacy frontend shape.
 pub fn legacy_leases_from_domain(leases: Vec<DhcpLeaseWithState>) -> Vec<LegacyLeaseRow> {
     leases.into_iter().map(legacy_lease_row).collect()
 }
 
+/// Convert one lease row into the legacy frontend shape.
 pub fn legacy_lease_row(lease: DhcpLeaseWithState) -> LegacyLeaseRow {
     LegacyLeaseRow {
         expires_epoch: lease.lease_line.expires_epoch,
@@ -121,12 +132,14 @@ pub fn legacy_lease_row(lease: DhcpLeaseWithState) -> LegacyLeaseRow {
     }
 }
 
+/// Convert wake results into the legacy frontend shape.
 pub fn legacy_wake_from_domain(result: WakeResult) -> LegacyWakeResult {
     LegacyWakeResult {
         result: result.result.into_iter().map(legacy_wake_row).collect(),
     }
 }
 
+/// Convert one wake result row into the legacy frontend shape.
 pub fn legacy_wake_row(row: WakeTargetResult) -> LegacyWakeResultRow {
     LegacyWakeResultRow {
         target: row.target,

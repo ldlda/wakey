@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use wakey_core::{DeviceQuery, NeighborEntry, NeighborState};
 
+/// Resolve a hostname through the local resolver and return all reported IPs.
 pub async fn get_ips(machine_name: &str) -> Result<impl Iterator<Item = IpAddr>> {
     Ok(tokio::net::lookup_host((machine_name, 0))
         .await
@@ -12,6 +13,11 @@ pub async fn get_ips(machine_name: &str) -> Result<impl Iterator<Item = IpAddr>>
         .map(|c| c.ip()))
 }
 
+/// Query Linux neighbor data and project it into `wakey-core` neighbor rows.
+///
+/// `machine_names` are resolved first and intersected with any explicit `ips`
+/// filter. On Unix this prefers the netlink-backed `ipjs` path; elsewhere it
+/// falls back to the JSON command backend.
 pub async fn get_neighbors(
     machine_names: &[impl AsRef<str>],
     ips: &[IpAddr],
@@ -100,6 +106,7 @@ pub async fn get_neighbors(
     }
 }
 
+/// Convenience wrapper around [`get_neighbors`] using the legacy `DeviceQuery`.
 pub async fn query_status(query: &DeviceQuery) -> Result<Vec<NeighborEntry>> {
     get_neighbors(
         query.name.as_slice(),

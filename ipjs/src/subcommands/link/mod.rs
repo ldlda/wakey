@@ -11,6 +11,7 @@ use macaddr::MacAddr;
 use rtnetlink::packet_route::link::State as NetlinkOperState;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+/// One interface row from `ip -j link show`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkOutput {
     pub ifindex: u32,
@@ -21,6 +22,7 @@ pub struct LinkOutput {
     pub address: Option<MacAddr>,
 }
 
+/// Operational state of a Linux network interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperState {
     Up,
@@ -100,10 +102,12 @@ impl From<NetlinkOperState> for OperState {
     }
 }
 
+/// Fetch link rows using the default backend.
 pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<LinkOutput>> {
     get_with_backend(Backend::Json, dev).await
 }
 
+/// Fetch link rows using an explicit backend.
 pub async fn get_with_backend(
     backend: Backend,
     dev: Option<&str>,
