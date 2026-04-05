@@ -1,7 +1,7 @@
 [package]
 name = "lda-ipjs"
 description = "ip -j show schemas"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 publish = ["gitea"]
 

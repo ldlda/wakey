@@ -1,6 +1,7 @@
 #![cfg(unix)]
 
 use futures::TryStreamExt;
+use rtnetlink::Handle;
 use rtnetlink::packet_route::link::LinkAttribute;
 
 use super::LinkOutput;
@@ -9,6 +10,13 @@ pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<LinkOutput>> {
     let (conn, handle, _) = rtnetlink::new_connection()?;
     tokio::spawn(conn);
 
+    get_with_handle(&handle, dev).await
+}
+
+pub async fn get_with_handle(
+    handle: &Handle,
+    dev: Option<&str>,
+) -> anyhow::Result<Vec<LinkOutput>> {
     let mut req = handle.link().get();
     if let Some(dev) = dev {
         req = req.match_name(dev.to_owned());
@@ -32,7 +40,7 @@ pub async fn get(dev: Option<&str>) -> anyhow::Result<Vec<LinkOutput>> {
                         _ => None,
                     }
                 }
-                LinkAttribute::OperState(state) => operstate = Some(format!("{state:?}")),
+                LinkAttribute::OperState(state) => operstate = Some(state.into()),
                 _ => {}
             }
         }

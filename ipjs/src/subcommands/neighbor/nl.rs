@@ -7,6 +7,7 @@ use std::{
 
 use futures::TryStreamExt;
 use macaddr::MacAddr;
+use rtnetlink::Handle;
 use rtnetlink::packet_route::{
     AddressFamily,
     neighbour::{NeighbourAddress, NeighbourAttribute, NeighbourState},
@@ -27,6 +28,16 @@ pub async fn get(
     let (conn, handle, _) = rtnetlink::new_connection()?;
     tokio::spawn(conn);
 
+    get_with_handle(&handle, ips, devs, nuds, macs).await
+}
+
+pub async fn get_with_handle(
+    handle: &Handle,
+    ips: &[IpAddr],
+    devs: &[impl AsRef<str>],
+    nuds: &[NUDState],
+    macs: &[MacAddr],
+) -> anyhow::Result<Vec<NeighborItem>> {
     let mut neighbor_data = handle.neighbours().get().execute();
 
     // Build filter sets (empty = match all)
@@ -36,7 +47,7 @@ pub async fn get(
     let mac_set: HashSet<MacAddr> = macs.iter().copied().collect();
 
     // Prefetch all links once; link lookups were the ugliest and most expensive part.
-    let ifname_cache: HashMap<u32, String> = link::nl::get(None)
+    let ifname_cache: HashMap<u32, String> = link::nl::get_with_handle(handle, None)
         .await?
         .into_iter()
         .map(|link| (link.ifindex, link.ifname))
