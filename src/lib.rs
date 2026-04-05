@@ -113,12 +113,43 @@ pub async fn wake_from_query(input: impl Into<String>) -> Result<WakeResult> {
     wake_targets(targets).await
 }
 
+pub async fn broadcast_wake_targets(mac: macaddr::MacAddr) -> Result<Vec<WakeTarget>> {
+    Ok(get_interface_summaries()
+        .await?
+        .into_iter()
+        .flat_map(|iface| iface.addrs.into_iter())
+        .filter_map(|addr| addr.broadcast)
+        .map(|ip| WakeTarget {
+            ip: Some(std::net::IpAddr::V4(ip)),
+            mac: Some(mac),
+        })
+        .collect())
+}
+
+pub async fn wake_explicit(mac: macaddr::MacAddr, ip: Option<std::net::IpAddr>) -> Result<WakeResult> {
+    let targets = match ip {
+        Some(ip) => vec![WakeTarget {
+            ip: Some(ip),
+            mac: Some(mac),
+        }],
+        None => broadcast_wake_targets(mac).await?,
+    };
+    wake_targets(targets).await
+}
+
 pub async fn list_interfaces() -> Result<Vec<String>> {
     Ok(wakey_linux::devices::devs_sorted().await)
 }
 
 pub async fn get_interface_summaries() -> Result<Vec<InterfaceSummary>> {
     wakey_linux::devices::list_interface_summaries().await
+}
+
+pub async fn get_interface_summary(name: &str) -> Result<Option<InterfaceSummary>> {
+    Ok(get_interface_summaries()
+        .await?
+        .into_iter()
+        .find(|iface| iface.ifname == name))
 }
 
 pub async fn get_ips(name: impl AsRef<str>) -> Result<Vec<std::net::IpAddr>> {

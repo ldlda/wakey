@@ -40,7 +40,11 @@ struct LeasesArgs {
 
 #[derive(Args)]
 struct WakeArgs {
-    query: String,
+    query: Option<String>,
+    #[arg(long)]
+    mac: Option<macaddr::MacAddr>,
+    #[arg(long)]
+    ip: Option<IpAddr>,
     #[arg(long)]
     json: bool,
 }
@@ -64,6 +68,9 @@ struct StatusArgs {
 
 #[derive(Args)]
 struct DevsArgs {
+    dev: Option<String>,
+    #[arg(long)]
+    up: bool,
     #[arg(long)]
     json: bool,
 }
@@ -149,6 +156,36 @@ fn render_wake_table(result: &WakeResult) -> Table {
     table
 }
 
+fn validate_wake_args(args: &WakeArgs) -> anyhow::Result<()> {
+    let has_query = args.query.is_some();
+    let has_mac = args.mac.is_some();
+    let has_ip = args.ip.is_some();
+
+    if has_ip && !has_mac {
+        anyhow::bail!("`wakey wake --ip` needs `--mac`");
+    }
+
+    if has_query && (has_mac || has_ip) {
+        anyhow::bail!("query mode and explicit `--mac/--ip` mode are mutually exclusive");
+    }
+
+    if !has_query && !has_mac {
+        anyhow::bail!("provide either a query or `--mac`");
+    }
+
+    Ok(())
+}
+
+async fn run_wake(args: WakeArgs) -> anyhow::Result<WakeResult> {
+    validate_wake_args(&args)?;
+
+    match (args.query, args.mac, args.ip) {
+        (Some(query), None, None) => wakey::wake_from_query(query).await,
+        (None, Some(mac), ip) => wakey::wake_explicit(mac, ip).await,
+        _ => unreachable!("wake args validated before dispatch"),
+    }
+}
+
 fn render_devs_table(devs: &[InterfaceSummary]) -> Table {
     let mut table = base_table();
     table.set_header([
@@ -196,6 +233,16 @@ fn render_devs_table(devs: &[InterfaceSummary]) -> Table {
         ]);
     }
     table
+}
+
+fn filter_interface_summaries(mut devs: Vec<InterfaceSummary>, args: &DevsArgs) -> Vec<InterfaceSummary> {
+    if args.up {
+        devs.retain(|dev| dev.operstate == "up");
+    }
+    if let Some(name) = &args.dev {
+        devs.retain(|dev| &dev.ifname == name);
+    }
+    devs
 }
 
 fn format_epoch_local(epoch: u64) -> String {
@@ -258,15 +305,24 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Command::Wake(args) => {
-            let result = wakey::wake_from_query(args.query).await?;
-            if args.json {
+            let as_json = args.json;
+            let result = run_wake(args).await?;
+            if as_json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
                 println!("{}", render_wake_table(&result));
             }
         }
         Command::Devs(args) => {
-            let devs = wakey::get_interface_summaries().await?;
+            let devs = if let Some(name) = &args.dev {
+                wakey::get_interface_summary(name)
+                    .await?
+                    .into_iter()
+                    .collect()
+            } else {
+                wakey::get_interface_summaries().await?
+            };
+            let devs = filter_interface_summaries(devs, &args);
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&devs)?);
             } else {
@@ -275,4 +331,57 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WakeArgs;
+
+    #[test]
+    fn wake_rejects_ip_without_mac() {
+        let err = super::validate_wake_args(&WakeArgs {
+            query: None,
+            mac: None,
+            ip: Some("192.168.1.10".parse().expect("ip")),
+            json: false,
+        })
+        .expect_err("ip-only wake should be rejected");
+
+        assert!(err.to_string().contains("--ip"));
+    }
+
+    #[test]
+    fn wake_rejects_mixed_query_and_explicit_mode() {
+        let err = super::validate_wake_args(&WakeArgs {
+            query: Some("pc".into()),
+            mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
+            ip: None,
+            json: false,
+        })
+        .expect_err("mixed wake mode should be rejected");
+
+        assert!(err.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn wake_accepts_query_mode() {
+        super::validate_wake_args(&WakeArgs {
+            query: Some("pc".into()),
+            mac: None,
+            ip: None,
+            json: false,
+        })
+        .expect("query mode should be accepted");
+    }
+
+    #[test]
+    fn wake_accepts_manual_mac_mode() {
+        super::validate_wake_args(&WakeArgs {
+            query: None,
+            mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
+            ip: None,
+            json: false,
+        })
+        .expect("manual mac mode should be accepted");
+    }
 }
