@@ -235,7 +235,10 @@ fn render_devs_table(devs: &[InterfaceSummary]) -> Table {
     table
 }
 
-fn filter_interface_summaries(mut devs: Vec<InterfaceSummary>, args: &DevsArgs) -> Vec<InterfaceSummary> {
+fn filter_interface_summaries(
+    mut devs: Vec<InterfaceSummary>,
+    args: &DevsArgs,
+) -> Vec<InterfaceSummary> {
     if args.up {
         devs.retain(|dev| dev.operstate == "up");
     }

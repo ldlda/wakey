@@ -5,16 +5,15 @@ pub mod error;
 pub mod status;
 pub mod wake;
 
-// use crate::assets;
-use crate::dhcpparse::load_mac_name_cache;
-use crate::route::api::ip;
-use crate::route::api::status_redirect;
-use crate::route::api::status_smart_redirect;
-use crate::route::devs::devs_router;
-use crate::route::dhcp::get_dhcp_leases;
-use crate::route::error::ApiError;
-use crate::route::status::get_status_json;
-use crate::route::wake::wake_multi;
+use crate::http::route::api::ip;
+use crate::http::route::api::status_redirect;
+use crate::http::route::api::status_smart_redirect;
+use crate::http::route::devs::devs_router;
+use crate::http::route::dhcp::get_dhcp_leases;
+use crate::http::route::error::ApiError;
+use crate::http::route::status::get_status_json;
+use crate::http::route::wake::wake_multi;
+use crate::legacy::dhcpparse::load_mac_name_cache;
 
 use axum::Json;
 use axum::Router;

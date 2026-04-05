@@ -1,4 +1,4 @@
-use crate::{route::error::ApiError, utils::parse::boolish_str};
+use crate::{http::route::error::ApiError, utils::parse::boolish_str};
 use axum::{Json, extract::Query, http::StatusCode, response::IntoResponse};
 
 // DHCP lease endpoints
@@ -12,10 +12,10 @@ pub async fn get_dhcp_leases(
 ) -> impl IntoResponse {
     let include_state = include_state.as_deref().map(boolish_str).unwrap_or(false);
 
-    match crate::get_leases(wakey_core::LeaseQuery { include_state }).await {
+    match crate::service::get_leases(wakey_core::LeaseQuery { include_state }).await {
         Ok(leases) => (
             StatusCode::OK,
-            Json(crate::compat::legacy_leases_from_domain(leases)),
+            Json(crate::http::compat::legacy_leases_from_domain(leases)),
         )
             .into_response(),
         Err(e) => ApiError {

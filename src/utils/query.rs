@@ -20,7 +20,7 @@ pub mod macs {
     use anyhow::Result;
     use std::net::IpAddr;
 
-    use crate::arpparse::{IpNeighLine, NUDState};
+    use crate::legacy::arpparse::{IpNeighLine, NUDState};
 
     pub async fn get_ips(machine_name: &str) -> Result<impl Iterator<Item = IpAddr>> {
         wakey_linux::devices::get_ips(machine_name).await

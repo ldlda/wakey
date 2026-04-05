@@ -7,7 +7,7 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{arpparse::NUDState, utils::query::get_mac};
+use crate::{legacy::arpparse::NUDState, utils::query::get_mac};
 
 pub async fn _ping_ip<T: ToSocketAddrs>(addr: T) -> bool {
     timeout(Duration::from_secs(1), TcpStream::connect(addr))
