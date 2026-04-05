@@ -15,6 +15,22 @@ function Get-DefaultPassword {
     return (Get-Content -Raw $pwPath).Trim()
 }
 
+function Normalize-LineEndings {
+    param([string]$Text)
+    if ($null -eq $Text) {
+        return $null
+    }
+    return ($Text -replace "`r`n", "`n" -replace "`r", "")
+}
+
+function Quote-ShArg {
+    param([AllowNull()][string]$Value)
+    if ($null -eq $Value) {
+        return "''"
+    }
+    return "'" + ($Value -replace "'", ("'" + '"' + "'" + '"' + "'")) + "'"
+}
+
 function Invoke-Ext {
     param($Exe, $Arguments, $Label)
     $displayArgs = $Arguments.Clone()
@@ -27,8 +43,8 @@ function Invoke-Ext {
 
     $out = & $Exe @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Error ("{0} failed ({1}):`n{2}" -f $Label, $LASTEXITCODE, ($out -join "`n"))
-        throw ("{0} failed ({1})" -f $Label, $LASTEXITCODE)
+        Write-Error ("{0} exited with code {1}:`n{2}" -f $Label, $LASTEXITCODE, ($out -join "`n"))
+        throw ("{0} exited with code {1}" -f $Label, $LASTEXITCODE)
     }
     return $out
 }
@@ -55,7 +71,7 @@ function Invoke-Scp {
 
 function Invoke-Ssh {
     param($Cmd, $User, $Remote, $Pass, [switch]$Quiet)
-    $Cmd = $Cmd -replace "`r`n", "`n" -replace "`r", ""
+    $Cmd = Normalize-LineEndings $Cmd
     if ($plink = Get-Command plink.exe -ErrorAction SilentlyContinue) {
         $arguments = @('-batch', '-ssh')
         if ($Pass) { $arguments += @('-pw', $Pass) }
