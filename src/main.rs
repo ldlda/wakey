@@ -1,9 +1,9 @@
+mod cli_table;
+
 use std::net::{IpAddr, SocketAddr};
 
-use chrono::{DateTime, Local, Utc};
 use clap::{Args, Parser, Subcommand};
-use comfy_table::{Cell, ContentArrangement, Table, presets};
-use wakey_core::{DeviceFilters, DeviceQuery, DhcpLeaseWithState, InterfaceSummary, WakeResult};
+use wakey_core::{DeviceFilters, DeviceQuery, InterfaceSummary, WakeResult};
 
 #[derive(Parser)]
 #[command(name = "wakey")]
@@ -100,62 +100,6 @@ fn status_args_to_query(args: StatusArgs) -> wakey_core::DeviceQuery {
     }
 }
 
-fn base_table() -> Table {
-    let mut table = Table::new();
-    table
-        .load_preset(presets::UTF8_FULL_CONDENSED)
-        .set_content_arrangement(ContentArrangement::Dynamic);
-    table
-}
-
-fn render_status_table(status: &wakey::StatusResponse) -> Table {
-    let mut table = base_table();
-    table.set_header(["IP", "MAC", "State", "IF"]);
-    for row in &status.table {
-        table.add_row([
-            Cell::new(row.ip),
-            Cell::new(row.mac.map(|m| m.to_string()).unwrap_or_default()),
-            Cell::new(format!("{:?}", row.state).to_lowercase()),
-            Cell::new(row.dev.clone().unwrap_or_default()),
-        ]);
-    }
-    table
-}
-
-fn render_leases_table(leases: &[DhcpLeaseWithState]) -> Table {
-    let mut table = base_table();
-    table.set_header(["IP", "MAC", "Name", "Expires", "NUD"]);
-    for lease in leases {
-        let expires = format_epoch_local(lease.lease_line.expires_epoch);
-        table.add_row([
-            Cell::new(lease.lease_line.ip),
-            Cell::new(lease.lease_line.mac),
-            Cell::new(lease.lease_line.name.clone().unwrap_or_default()),
-            Cell::new(expires),
-            Cell::new(
-                lease
-                    .nud_state
-                    .map(|s| format!("{:?}", s).to_lowercase())
-                    .unwrap_or_default(),
-            ),
-        ]);
-    }
-    table
-}
-
-fn render_wake_table(result: &WakeResult) -> Table {
-    let mut table = base_table();
-    table.set_header(["IP", "MAC", "Status"]);
-    for row in &result.result {
-        table.add_row([
-            Cell::new(row.target.ip.map(|ip| ip.to_string()).unwrap_or_default()),
-            Cell::new(row.target.mac.map(|m| m.to_string()).unwrap_or_default()),
-            Cell::new(format!("{:?}", row.status).to_lowercase()),
-        ]);
-    }
-    table
-}
-
 fn validate_wake_args(args: &WakeArgs) -> anyhow::Result<()> {
     let has_query = args.query.is_some();
     let has_mac = args.mac.is_some();
@@ -186,55 +130,6 @@ async fn run_wake(args: WakeArgs) -> anyhow::Result<WakeResult> {
     }
 }
 
-fn render_devs_table(devs: &[InterfaceSummary]) -> Table {
-    let mut table = base_table();
-    table.set_header([
-        "Interface",
-        "State",
-        "MAC",
-        "Addresses",
-        "Broadcasts",
-        "Scope/Label",
-    ]);
-    for dev in devs {
-        let addresses = dev
-            .addrs
-            .iter()
-            .filter_map(|addr| addr.cidr.as_deref())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let broadcasts = dev
-            .addrs
-            .iter()
-            .filter_map(|addr| addr.broadcast)
-            .map(|addr| addr.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let scope_label = dev
-            .addrs
-            .iter()
-            .map(|addr| match (&addr.scope, &addr.label) {
-                (Some(scope), Some(label)) => format!("{scope} ({label})"),
-                (Some(scope), None) => scope.clone(),
-                (None, Some(label)) => label.clone(),
-                (None, None) => String::new(),
-            })
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        table.add_row([
-            Cell::new(&dev.ifname),
-            Cell::new(&dev.operstate),
-            Cell::new(dev.mac.map(|m| m.to_string()).unwrap_or_default()),
-            Cell::new(addresses),
-            Cell::new(broadcasts),
-            Cell::new(scope_label),
-        ]);
-    }
-    table
-}
-
 fn filter_interface_summaries(
     mut devs: Vec<InterfaceSummary>,
     args: &DevsArgs,
@@ -246,16 +141,6 @@ fn filter_interface_summaries(
         devs.retain(|dev| &dev.ifname == name);
     }
     devs
-}
-
-fn format_epoch_local(epoch: u64) -> String {
-    match DateTime::<Utc>::from_timestamp(epoch as i64, 0) {
-        Some(dt) => dt
-            .with_timezone(&Local)
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string(),
-        None => epoch.to_string(),
-    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -293,7 +178,7 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(name) = &status.name {
                     println!("name: {name}");
                 }
-                println!("{}", render_status_table(&status));
+                println!("{}", cli_table::render_status_table(&status));
             }
         }
         Command::Leases(args) => {
@@ -304,7 +189,7 @@ async fn main() -> anyhow::Result<()> {
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&leases)?);
             } else {
-                println!("{}", render_leases_table(&leases));
+                println!("{}", cli_table::render_leases_table(&leases));
             }
         }
         Command::Wake(args) => {
@@ -313,7 +198,7 @@ async fn main() -> anyhow::Result<()> {
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
-                println!("{}", render_wake_table(&result));
+                println!("{}", cli_table::render_wake_table(&result));
             }
         }
         Command::Devs(args) => {
@@ -329,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&devs)?);
             } else {
-                println!("{}", render_devs_table(&devs));
+                println!("{}", cli_table::render_devs_table(&devs));
             }
         }
     }
