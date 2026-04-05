@@ -7,10 +7,7 @@ pub mod leases {
 
 pub mod parser {
     pub use wakey_core::QueryInput as QueryType;
-
-    pub async fn parse_query(q: String) -> QueryType {
-        wakey_linux::devices::classify_query(q).await
-    }
+    pub use wakey_linux::devices::classify_query as parse_query;
 }
 
 pub use leases::*;
