@@ -11,6 +11,7 @@ pub use crate::subcommands::Backend;
 use crate::utils::serialize::mac::option_mac;
 use macaddr::MacAddr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr};
 
 use crate::subcommands::link::OperState;
@@ -99,8 +100,35 @@ pub struct InterfaceCidr {
 }
 
 impl InterfaceCidr {
+    /// Return whether both parts needed for a usable CIDR are present.
     pub fn is_complete(&self) -> bool {
         self.local.is_some() && self.prefixlen.is_some()
+    }
+
+    /// Return a validated complete CIDR when both fields are present.
+    pub fn complete(&self) -> Option<CompleteInterfaceCidr> {
+        Some(CompleteInterfaceCidr {
+            local: self.local?,
+            prefixlen: self.prefixlen?,
+        })
+    }
+
+    /// Format the CIDR as `addr/prefixlen` when both fields are present.
+    pub fn to_cidr_string(&self) -> Option<String> {
+        self.complete().map(|cidr| cidr.to_string())
+    }
+}
+
+/// Validated interface CIDR with both local address and prefix length present.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompleteInterfaceCidr {
+    pub local: IpAddr,
+    pub prefixlen: u8,
+}
+
+impl fmt::Display for CompleteInterfaceCidr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.local, self.prefixlen)
     }
 }
 
@@ -159,7 +187,7 @@ pub async fn get_with_backend(
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use super::{AddrInfo, AddrOutput, AddressFamily};
+    use super::{AddrInfo, AddrOutput, AddressFamily, InterfaceCidr};
     use crate::subcommands::link::OperState;
 
     #[test]
@@ -184,6 +212,10 @@ mod tests {
         assert_eq!(info.prefixlen(), Some(24));
         assert_eq!(info.broadcast, Some(Ipv4Addr::new(192, 168, 1, 255)));
         assert!(info.cidr.is_complete());
+        assert_eq!(
+            info.cidr.to_cidr_string().as_deref(),
+            Some("192.168.1.1/24")
+        );
     }
 
     #[test]
@@ -194,5 +226,16 @@ mod tests {
         .expect("addr_output json should deserialize");
 
         assert_eq!(output.operstate, OperState::Up);
+    }
+
+    #[test]
+    fn interface_cidr_complete_formats() {
+        let cidr = InterfaceCidr {
+            local: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+            prefixlen: Some(16),
+        };
+
+        let complete = cidr.complete().expect("cidr should be complete");
+        assert_eq!(complete.to_string(), "10.0.0.1/16");
     }
 }

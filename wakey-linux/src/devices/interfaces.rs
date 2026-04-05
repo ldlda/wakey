@@ -87,11 +87,7 @@ pub async fn list_interface_summaries() -> Result<Vec<InterfaceSummary>> {
                 .into_iter()
                 .map(|info| InterfaceAddr {
                     family: info.family.map(|family| family.as_str().to_string()),
-                    cidr: info
-                        .cidr
-                        .local
-                        .zip(info.cidr.prefixlen)
-                        .map(|(addr, prefixlen)| format!("{addr}/{prefixlen}")),
+                    cidr: info.cidr.to_cidr_string(),
                     broadcast: info.broadcast,
                     scope: info.scope,
                     label: info.label,
