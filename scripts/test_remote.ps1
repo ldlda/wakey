@@ -44,11 +44,40 @@ function Get-WorkspacePackages {
 function Get-TestBinaryPaths {
     param([string[]]$CargoOutput)
 
-    @(
-        $CargoOutput |
-        Select-String -Pattern "Executable.*\((.+)\)" |
-        ForEach-Object { $_.Matches.Groups[1].Value }
-    )
+    $paths = New-Object System.Collections.Generic.List[string]
+
+    foreach ($line in $CargoOutput) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        try {
+            $msg = $line | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            continue
+        }
+
+        if ($msg.reason -ne "compiler-artifact") {
+            continue
+        }
+
+        if (-not $msg.executable) {
+            continue
+        }
+
+        $isTestProfile = $false
+        if ($null -ne $msg.profile -and $null -ne $msg.profile.test) {
+            $isTestProfile = [bool]$msg.profile.test
+        }
+        if (-not $isTestProfile) {
+            continue
+        }
+
+        $paths.Add([string]$msg.executable)
+    }
+
+    @($paths)
 }
 
 function Build-RemoteExecCommand {
@@ -115,12 +144,12 @@ foreach ($packageName in $packages) {
     Write-Host "Building tests for $packageName..." -ForegroundColor Cyan
 
     # Stream cargo output and convert to text
-    $cargoOutput = cargo test --no-run -p $packageName --target armv7-unknown-linux-musleabihf $(if ($BuildProfile -eq "release") { "-r" }) 2>&1 |
+    $cargoOutput = cargo test --no-run -p $packageName --target armv7-unknown-linux-musleabihf --message-format json $(if ($BuildProfile -eq "release") { "-r" }) 2>&1 |
     ForEach-Object {
         $line = if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.ToString() } else { $_ }
-        if ($Verbose) {
-            Write-Host $line
-        }
+        # if ($Verbose) {
+        #     Write-Host $line # this thing fills QUICK im not printing any
+        # }
         $line
     }
 
@@ -158,13 +187,13 @@ foreach ($packageName in $packages) {
     Ensure-RemoteParentDir -RemoteDirPath $remoteRunDir -RemoteHost $RemoteHost -Password $password
 
     try {
+        $remoteUploadDir = (Normalize-PosixPath $remoteRunDir).TrimEnd('/') + '/'
+        Invoke-Scp -Local ($testBinaries | ForEach-Object { $_.FullName }) -Dest "${RemoteHost}:$remoteUploadDir" -Pass $password -Quiet
+
         foreach ($testBinary in $testBinaries) {
             Write-Host "`nTesting: $packageName / $($testBinary.Name)" -ForegroundColor Cyan
 
             $remoteBinaryPath = New-RemoteBinaryPath -RemoteRunDir $remoteRunDir -TestBinary $testBinary
-
-            # Copy and make executable
-            Invoke-Scp -Local $testBinary.FullName -Dest "${RemoteHost}:$remoteBinaryPath" -Pass $password -Quiet
 
             # Build test args
             $parts = @()
@@ -192,7 +221,7 @@ foreach ($packageName in $packages) {
     }
     finally {
         try {
-            Invoke-Ssh -Cmd ("rm -r " + (Quote-ShArg $remoteRunDir)) -Remote $RemoteHost -Pass $password -Quiet
+            Invoke-Ssh -Cmd ("rm -rf " + (Quote-ShArg $remoteRunDir)) -Remote $RemoteHost -Pass $password -Quiet
         }
         catch {
             Write-Warning "Failed to remove remote test dir: $remoteRunDir"

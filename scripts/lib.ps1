@@ -91,14 +91,16 @@ function Invoke-Scp {
         if ($Recurse) { $arguments += '-r' }
         if ($HostKey) { $arguments += @('-batch', '-hostkey', $HostKey) }
         if ($Pass) { $arguments += @('-pw', $Pass) }
-        $arguments += @($Local, $Dest)
+        $arguments += @($Local)
+        $arguments += $Dest
         Invoke-Ext -Exe $pscp.Path -Arguments $arguments -Label 'scp'
     }
     else {
         $arguments = @('-O')
         if ($Quiet) { $arguments += '-q' }
         if ($Recurse) { $arguments += '-r' }
-        $arguments += @($Local, $Dest)
+        $arguments += @($Local)
+        $arguments += $Dest
         Invoke-Ext -Exe 'scp' -Arguments $arguments -Label 'scp'
     }
 }
