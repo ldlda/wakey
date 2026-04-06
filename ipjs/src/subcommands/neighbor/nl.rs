@@ -38,8 +38,6 @@ pub async fn get_with_handle(
     nuds: &[NUDState],
     macs: &[MacAddr],
 ) -> anyhow::Result<Vec<NeighborItem>> {
-    let mut neighbor_data = handle.neighbours().get().execute();
-
     // Build filter sets (empty = match all)
     let ip_set: HashSet<IpAddr> = ips.iter().copied().collect();
     let dev_set: HashSet<&str> = devs.iter().map(AsRef::as_ref).collect();
@@ -52,6 +50,8 @@ pub async fn get_with_handle(
         .into_iter()
         .map(|link| (link.ifindex, link.ifname))
         .collect();
+
+    let mut neighbor_data = handle.neighbours().get().execute();
     let mut result = vec![];
 
     'row: while let Some(msg) = neighbor_data.try_next().await? {

@@ -7,7 +7,8 @@ use wakey_core::{DeviceFilters, DeviceQuery, InterfaceSummary, WakeResult};
 
 #[derive(Parser)]
 #[command(name = "wakey")]
-#[command(version, about = "Wakey service CLI and HTTP adapter")]
+#[command(version, about = "CLI and temporary HTTP adapter for Wakey")]
+#[command(long_about = "Wakey can run as a local/operator CLI or serve the legacy HTTP/static interface during the migration to a service-first architecture.")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -15,62 +16,88 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Serve the temporary legacy HTTP/static app.
     Http(HttpArgs),
+    /// Show device status rows from neighbor/device data.
     Status(StatusArgs),
+    /// Show DHCP leases, optionally enriched with current neighbor state.
     Leases(LeasesArgs),
+    /// Send Wake-on-LAN packets from a query or explicit MAC/IP pair.
     Wake(WakeArgs),
+    /// Show condensed network interface summaries.
     Devs(DevsArgs),
 }
 
 #[derive(Args)]
 struct HttpArgs {
+    /// Host address to bind the HTTP server to.
     #[arg(long, default_value = "::")]
     host: IpAddr,
+    /// TCP port to bind the HTTP server to.
     #[arg(long, default_value_t = 12012)]
     port: u16,
 }
 
 #[derive(Args)]
 struct LeasesArgs {
+    /// Include best-known current neighbor state for each lease IP.
     #[arg(long)]
     include_state: bool,
+    /// Print machine-readable JSON instead of a table.
     #[arg(long)]
     json: bool,
 }
 
 #[derive(Args)]
+#[command(after_long_help = "Examples:\n  wakey wake bedroom-pc\n  wakey wake --mac aa:bb:cc:dd:ee:ff\n  wakey wake --mac aa:bb:cc:dd:ee:ff --ip 192.168.1.255\n\nRules:\n  - query mode and explicit --mac/--ip mode are mutually exclusive\n  - --ip requires --mac\n  - --mac without --ip fans out to interface broadcast targets")]
 struct WakeArgs {
+    /// Free-form device query, for example a hostname, IP, MAC, interface, or NUD state.
     query: Option<String>,
+    /// Explicit MAC address for manual wake mode.
     #[arg(long)]
     mac: Option<macaddr::MacAddr>,
+    /// Explicit destination IP or broadcast address for manual wake mode.
     #[arg(long)]
     ip: Option<IpAddr>,
+    /// Print machine-readable JSON instead of a table.
     #[arg(long)]
     json: bool,
 }
 
 #[derive(Args)]
+#[command(after_long_help = "Examples:\n  wakey status bedroom-pc\n  wakey status --mac aa:bb:cc:dd:ee:ff\n  wakey status --dev br-lan --nud reachable\n\nIf only the positional query is provided, it is treated as free-form input and resolved through the smart selector path.")]
 struct StatusArgs {
+    /// Free-form device query.
     query: Option<String>,
+    /// Explicit name/text filter.
     #[arg(long)]
     name: Option<String>,
+    /// Explicit IP filters.
     #[arg(long = "ip")]
     ips: Vec<std::net::IpAddr>,
+    /// Explicit interface-name filters.
     #[arg(long = "dev")]
     devs: Vec<String>,
+    /// Explicit neighbor-state filters.
     #[arg(long = "nud")]
     nuds: Vec<wakey_core::NeighborState>,
+    /// Explicit MAC-address filters.
     #[arg(long = "mac")]
     macs: Vec<macaddr::MacAddr>,
+    /// Print machine-readable JSON instead of a table.
     #[arg(long)]
     json: bool,
 }
 
 #[derive(Args)]
+#[command(after_long_help = "Examples:\n  wakey devs\n  wakey devs br-lan\n  wakey devs --up\n  wakey devs --json")]
 struct DevsArgs {
+    /// Optional interface name to show.
     dev: Option<String>,
+    /// Show only interfaces whose operstate is `up`.
     #[arg(long)]
     up: bool,
+    /// Print machine-readable JSON instead of a table.
     #[arg(long)]
     json: bool,
 }
