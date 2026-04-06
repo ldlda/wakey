@@ -1,12 +1,16 @@
 [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidDefaultValueSwitchParameter', "", 
     Justification = 'Default true is intentional for fast dev loop')]
 param(
+    [ValidateSet("cargo", "cross")]
+    [string]$Cargo = "cargo",
     [string]$Pass,
     [string]$HostName = "192.168.100.1",
     [string]$User = "root",
     [string]$RemotePath = "/root/.bin/wakey",
+    [string]$AgentRemotePath = "/root/.bin/wakey-agent",
     [string]$Target = "armv7-unknown-linux-musleabihf",
     [string]$BinName = "wakey",
+    [string]$AgentBinName = "wakey-agent",
     [string]$HostKey,
     [switch]$Restart = $true,
     [switch]$Quiet = $true
@@ -37,21 +41,26 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 
 try {
-    Write-Host "[build] cargo build --release --target $Target" -ForegroundColor Cyan
-    cargo build --release --target $Target
-    if ($LASTEXITCODE -ne 0) { throw "cargo build failed ($LASTEXITCODE)" }
+    Write-Host "[build] $Cargo build --release --target $Target -p wakey -p wakey-agent" -ForegroundColor Cyan
+    . "$Cargo" build --release --target $Target -p wakey -p wakey-agent
+    if ($LASTEXITCODE -ne 0) { throw "$Cargo build failed ($LASTEXITCODE)" }
 
     $localBin = Join-Path $repoRoot "target/$Target/release/$BinName"
+    $localAgentBin = Join-Path $repoRoot "target/$Target/release/$AgentBinName"
     if (-not (Test-Path $localBin)) { throw "binary not found: $localBin" }
+    if (-not (Test-Path $localAgentBin)) { throw "binary not found: $localAgentBin" }
 
     $remoteTmp = "$RemotePath.tmp"
+    $agentRemoteTmp = "$AgentRemotePath.tmp"
     $destTmp = "$User@${HostName}:$remoteTmp"
+    $agentDestTmp = "$User@${HostName}:$agentRemoteTmp"
     $localDeploy = Join-Path $repoRoot 'scripts/remote_deploy_wakey.sh'
     $deployTmp = '/var/tmp/remote_deploy_wakey.sh'
     $deployPreferred = '/root/.bin/remote_deploy_wakey.sh'
 
-    # Push main binary
+    # Push binaries
     Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Quiet:$Quiet
+    Invoke-Scp -Local $localAgentBin -Dest $agentDestTmp -Pass $Pass -HostKey $HostKey -Quiet:$Quiet
 
     # Push static assets
     $localStatic = Join-Path $repoRoot "static"
@@ -74,7 +83,10 @@ try {
 
     # Build and run remote deploy command
     $restartFlag = $(if ($Restart) { '1' } else { '0' })
-    $script = Get-DeployScript $deployPreferred $deployTmp $remoteTmp $RemotePath $restartFlag
+    $script = @"
+$(Get-DeployScript $deployPreferred $deployTmp $remoteTmp $RemotePath 0)
+$(Get-DeployScript $deployPreferred $deployTmp $agentRemoteTmp $AgentRemotePath $restartFlag)
+"@
     $remoteCmd = "sh -lc '$($script -replace "`r",'')'"
     if ($Quiet) { $remoteCmd += " >/dev/null 2>&1" }
 

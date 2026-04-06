@@ -4,13 +4,13 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
 
 ## Quick start (recommended)
 
-1. Start your Gitea runner on this Windows PC (if not already running):
+1. Start your Fedora/WSL Gitea runner (recommended release path):
 
    ```powershell
-   ./scripts/act_runner.ps1
+   ./scripts/act_runner_wsl.ps1 -Action start -Attach
    ```
 
-   If first-time, it prints the exact register command. Run it once, check labels include `windows:host,self-hosted`, then rerun the script.
+   If first-time, use the runbook in [`WSL_RUNNER.md`](./WSL_RUNNER.md) to update and register the Fedora runner first.
 
 2. Publish, tag, and push (recommended):
 
@@ -18,7 +18,7 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
    ./scripts/publish.ps1 -Tag
    ```
 
-   This will bump the version (if you specify one), build, ensure the runner is started, tag, and push. To also publish to the registry, add `-Publish`.
+   This will bump the version (if you specify one), build locally, tag, push, and start the Fedora/WSL runner in `--once` mode by default. To also publish to the registry, add `-Publish`.
 
 3. Install on the router
 
@@ -38,6 +38,8 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
 ## Scripts overview
 
 - `act_runner.ps1` — Start/seed the local Gitea runner. Use `-Attach` to see logs, `-ForceConfigure` to register non-interactively.
+- `act_runner_wsl.ps1` — Windows PowerShell wrapper that controls the Fedora/WSL runner.
+- `act_runner_fedora.sh` — Linux/Fedora helper used inside WSL for update/register/start/stop/status.
 - `dev_push.ps1` — Fast dev loop: build + upload to router. Usage:
   - `./scripts/dev_push.ps1 -Pass <password> [-HostName <ip>] [-RemotePath </root/.bin/wakey>] [-Restart] [-Quiet]`
   - Uploads to `<RemotePath>.tmp` then atomically moves into place; `-Restart` restarts the service; `-Quiet` silences MOTD.
@@ -92,9 +94,15 @@ Implementation notes:
 ## CI (Gitea)
 
 - Defined in `.gitea/workflows/release.yml`.
-- Runs on your `self-hosted, windows` runner.
-- Steps: cross build → package rootfs → upload artifact (v3) → publish a release and attach tgz.
+- Release job now targets your Fedora/WSL runner labels: `self-hosted`, `linux`, `fedora`, `wsl`, `release`.
+- Steps: Linux-native build of `wakey` + `wakey-agent` → package rootfs → upload artifact (v3) → publish a release and attach tgz.
 - Requires `secrets.GITEA_TOKEN` in the repo to publish the release.
+
+## Runner migration
+
+- Fedora/WSL is now the intended release-builder path.
+- The Windows runner can stay registered in parallel during migration and fallback.
+- The detailed operator runbook is in [`WSL_RUNNER.md`](./WSL_RUNNER.md).
 
 ## Local build/install (manual path)
 
@@ -121,4 +129,4 @@ Or you can use the script:
 ./scripts/dev_push.ps1 -Pass <password>
 ```
 
-That’s it. Keep the flow: start runner → tag push → install.
+That’s it. Keep the flow: start Fedora/WSL runner → tag push → install.

@@ -1,6 +1,7 @@
 # Build a rootfs tarball suitable for `wget -O- ... | tar -xz -C /` on OpenWrt.
 # It lays out files as absolute-root paths inside the archive:
 #   root/.bin/wakey
+#   root/.bin/wakey-agent
 #   etc/init.d/wakey
 # Usage: ./scripts/package_rootfs.ps1 -Version 0.1.0 -Target armv7-unknown-linux-musleabihf -OutDir dist
 param(
@@ -17,7 +18,9 @@ $dist = Join-Path $root $OutDir
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
 $binName = if ($Target -like "*-windows-*") { "wakey.exe" } else { "wakey" }
+$agentBinName = if ($Target -like "*-windows-*") { "wakey-agent.exe" } else { "wakey-agent" }
 $binSrc = Join-Path $root "target/$Target/release/$binName"
+$agentBinSrc = Join-Path $root "target/$Target/release/$agentBinName"
 
 $staging = Join-Path $dist ("rootfs-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
@@ -34,6 +37,12 @@ if (-not $NoBin) {
     }
     else {
         throw "Missing binary: $binSrc (build it first or pass -NoBin)"
+    }
+    if (Test-Path $agentBinSrc) {
+        Copy-Item $agentBinSrc (Join-Path $rootDir "wakey-agent") -Force
+    }
+    else {
+        throw "Missing binary: $agentBinSrc (build it first or pass -NoBin)"
     }
 }
 # Normalize kill script line endings and copy

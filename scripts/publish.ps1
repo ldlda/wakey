@@ -10,7 +10,10 @@ param(
     [string]$Version,
     [switch]$Tag,
     [switch]$Publish,
-    [string]$Registry
+    [string]$Registry,
+    [ValidateSet('wsl', 'windows', 'none')]
+    [string]$RunnerMode = 'wsl',
+    [string]$WslDistro = $(if ($env:WAKEY_WSL_DISTRO) { $env:WAKEY_WSL_DISTRO } else { 'FedoraLinux' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -60,13 +63,29 @@ if ($Tag -and $Version) {
     git push -f origin "v$Version"
     Write-Host "Pushed tag: v$Version"
 
-    # Run act_runner in --once mode to process the release job
-    $actRunnerScript = Join-Path $PSScriptRoot 'act_runner.ps1'
-    if (Test-Path $actRunnerScript) {
-        Write-Host "Starting act_runner (once mode) to process release job..."
-        & $actRunnerScript -Once
-    }
-    else {
-        Write-Warning "act_runner.ps1 not found at $actRunnerScript. Skipping runner."
+    switch ($RunnerMode) {
+        'wsl' {
+            $runnerScript = Join-Path $PSScriptRoot 'act_runner_wsl.ps1'
+            if (Test-Path $runnerScript) {
+                Write-Host "Starting Fedora/WSL act_runner (once mode) to process release job..."
+                & $runnerScript -Distro $WslDistro -Action start -Once
+            }
+            else {
+                Write-Warning "act_runner_wsl.ps1 not found at $runnerScript. Skipping runner."
+            }
+        }
+        'windows' {
+            $runnerScript = Join-Path $PSScriptRoot 'act_runner.ps1'
+            if (Test-Path $runnerScript) {
+                Write-Host "Starting Windows act_runner (once mode) to process release job..."
+                & $runnerScript -Once
+            }
+            else {
+                Write-Warning "act_runner.ps1 not found at $runnerScript. Skipping runner."
+            }
+        }
+        'none' {
+            Write-Host "RunnerMode=none; not starting a local runner helper."
+        }
     }
 }

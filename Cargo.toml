@@ -41,7 +41,7 @@ very-smart-parsing = [
 ] # this is the a-bit-redundant parse thing that copilot made
 
 [workspace]
-members = ["ipjs", "wakey-core", "wakey-linux"]
+members = ["ipjs", "wakey-agent", "wakey-core", "wakey-linux"]
 
 [dependencies.lda-ipjs]
 path = "ipjs"
