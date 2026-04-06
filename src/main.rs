@@ -8,7 +8,9 @@ use wakey_core::{DeviceFilters, DeviceQuery, InterfaceSummary, WakeResult};
 #[derive(Parser)]
 #[command(name = "wakey")]
 #[command(version, about = "CLI and temporary HTTP adapter for Wakey")]
-#[command(long_about = "Wakey can run as a local/operator CLI or serve the legacy HTTP/static interface during the migration to a service-first architecture.")]
+#[command(
+    long_about = "Wakey can run as a local/operator CLI or serve the legacy HTTP/static interface during the migration to a service-first architecture."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -49,7 +51,15 @@ struct LeasesArgs {
 }
 
 #[derive(Args)]
-#[command(after_long_help = "Examples:\n  wakey wake bedroom-pc\n  wakey wake --mac aa:bb:cc:dd:ee:ff\n  wakey wake --mac aa:bb:cc:dd:ee:ff --ip 192.168.1.255\n\nRules:\n  - query mode and explicit --mac/--ip mode are mutually exclusive\n  - --ip requires --mac\n  - --mac without --ip fans out to interface broadcast targets")]
+#[command(after_long_help = "Examples:
+  wakey wake bedroom-pc
+  wakey wake --mac aa:bb:cc:dd:ee:ff
+  wakey wake --mac aa:bb:cc:dd:ee:ff --ip 192.168.1.255
+
+Rules:
+  - query mode and explicit --mac/--ip mode are mutually exclusive
+  - --ip requires --mac
+  - --mac without --ip fans out to interface broadcast targets")]
 struct WakeArgs {
     /// Free-form device query, for example a hostname, IP, MAC, interface, or NUD state.
     query: Option<String>,
@@ -65,7 +75,12 @@ struct WakeArgs {
 }
 
 #[derive(Args)]
-#[command(after_long_help = "Examples:\n  wakey status bedroom-pc\n  wakey status --mac aa:bb:cc:dd:ee:ff\n  wakey status --dev br-lan --nud reachable\n\nIf only the positional query is provided, it is treated as free-form input and resolved through the smart selector path.")]
+#[command(after_long_help = "Examples:
+  wakey status bedroom-pc
+  wakey status --mac aa:bb:cc:dd:ee:ff
+  wakey status --dev br-lan --nud reachable
+
+If only the positional query is provided, it is treated as free-form input and resolved through the smart selector path.")]
 struct StatusArgs {
     /// Free-form device query.
     query: Option<String>,
@@ -90,7 +105,11 @@ struct StatusArgs {
 }
 
 #[derive(Args)]
-#[command(after_long_help = "Examples:\n  wakey devs\n  wakey devs br-lan\n  wakey devs --up\n  wakey devs --json")]
+#[command(after_long_help = "Examples:
+  wakey devs
+  wakey devs br-lan
+  wakey devs --up
+  wakey devs --json")]
 struct DevsArgs {
     /// Optional interface name to show.
     dev: Option<String>,

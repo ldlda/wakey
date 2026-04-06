@@ -31,6 +31,40 @@ function Quote-ShArg {
     return "'" + ($Value -replace "'", ("'" + '"' + "'" + '"' + "'")) + "'"
 }
 
+function Normalize-PosixPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $Path
+    }
+
+    $normalized = $Path -replace '\\', '/'
+    if ($normalized.Length -gt 1) {
+        $normalized = $normalized -replace '/+', '/'
+    }
+    return $normalized
+}
+
+function Join-PosixPath {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+
+    $leftNorm = Normalize-PosixPath $Left
+    $rightNorm = Normalize-PosixPath $Right
+
+    if ([string]::IsNullOrWhiteSpace($leftNorm)) {
+        return $rightNorm
+    }
+    if ([string]::IsNullOrWhiteSpace($rightNorm)) {
+        return $leftNorm
+    }
+
+    $leftTrim = $leftNorm.TrimEnd('/')
+    $rightTrim = $rightNorm.TrimStart('/')
+    return "$leftTrim/$rightTrim"
+}
+
 function Invoke-Ext {
     param($Exe, $Arguments, $Label)
     $displayArgs = $Arguments.Clone()

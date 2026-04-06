@@ -4,14 +4,15 @@
 param(
     [string]$Package = "lda-ipjs",
     [switch]$AllPackages,
+    [string]$BinaryFilter = "",
     [string]$Filter = "",
     [switch]$Exact,
     [switch]$List,
     [ValidateSet("debug", "release")]
-    [string]$BuildProfile = "debug",
+    [string]$BuildProfile = "release",
     [string]$password,
     [switch]$Verbose,
-    [string]$RemoteTestPath = "/root/.bin/test",
+    [string]$RemoteTestPath = "/tmp/tmp/wakey-test",
     [string]$RemoteHost = "root@192.168.100.1",
     [switch]$Ignored,
     [switch]$IncludeIgnored,
@@ -62,6 +63,51 @@ function Build-RemoteExecCommand {
     "chmod +x $quotedPath && $exec"
 }
 
+function New-RemoteRunDir {
+    param(
+        [string]$BasePath,
+        [string]$PackageName
+    )
+
+    $baseNorm = Normalize-PosixPath $BasePath
+    $leaf = [IO.Path]::GetFileName($baseNorm)
+    $parent = Normalize-PosixPath ([IO.Path]::GetDirectoryName($baseNorm))
+    if ([string]::IsNullOrWhiteSpace($parent)) {
+        $parent = "/tmp"
+    }
+    if ([string]::IsNullOrWhiteSpace($leaf)) {
+        $leaf = "wakey-test"
+    }
+
+    $random = [System.Guid]::NewGuid().ToString("N").Substring(0, 10)
+    $safePackage = ($PackageName -replace '[^A-Za-z0-9._-]', '_')
+    return (Join-PosixPath $parent "$leaf-$safePackage-$random")
+}
+
+function New-RemoteBinaryPath {
+    param(
+        [string]$RemoteRunDir,
+        [System.IO.FileInfo]$TestBinary
+    )
+
+    $safeName = ($TestBinary.Name -replace '[^A-Za-z0-9._-]', '_')
+    Join-PosixPath $RemoteRunDir $safeName
+}
+
+function Ensure-RemoteParentDir {
+    param(
+        [string]$RemoteDirPath,
+        [string]$RemoteHost,
+        [string]$Password
+    )
+
+    $dir = Normalize-PosixPath $RemoteDirPath
+    if ([string]::IsNullOrWhiteSpace($dir)) {
+        return
+    }
+    Invoke-Ssh -Cmd ("mkdir -p " + (Quote-ShArg $dir)) -Remote $RemoteHost -Pass $Password -Quiet
+}
+
 $packages = if ($AllPackages) { Get-WorkspacePackages } else { @($Package) }
 $failures = New-Object System.Collections.Generic.List[string]
 
@@ -87,19 +133,38 @@ foreach ($packageName in $packages) {
     $testBinaryPaths = Get-TestBinaryPaths $cargoOutput
     $testBinaries = @($testBinaryPaths | Get-Item)
 
+    if ($BinaryFilter) {
+        $testBinaries = @(
+            $testBinaries |
+            Where-Object {
+                $_.Name -like "*$BinaryFilter*" -or $_.BaseName -like "*$BinaryFilter*"
+            }
+        )
+    }
+
     if ($testBinaries.Count -eq 0) {
-        Write-Host "Skipping ${packageName}: no test executables" -ForegroundColor DarkYellow
+        $reason = if ($BinaryFilter) {
+            "no test executables matched binary filter '$BinaryFilter'"
+        } else {
+            "no test executables"
+        }
+        Write-Host "Skipping ${packageName}: $reason" -ForegroundColor DarkYellow
         continue
     }
 
     Write-Host "Found $($testBinaries.Count) test $($testBinaries.Count -eq 1 ? "binary" : "binaries") for $packageName" -ForegroundColor Green
 
-    foreach ($testBinary in $testBinaries) {
-        Write-Host "`nTesting: $packageName / $($testBinary.Name)" -ForegroundColor Cyan
+    $remoteRunDir = New-RemoteRunDir -BasePath $RemoteTestPath -PackageName $packageName
+    Ensure-RemoteParentDir -RemoteDirPath $remoteRunDir -RemoteHost $RemoteHost -Password $password
 
-        try {
+    try {
+        foreach ($testBinary in $testBinaries) {
+            Write-Host "`nTesting: $packageName / $($testBinary.Name)" -ForegroundColor Cyan
+
+            $remoteBinaryPath = New-RemoteBinaryPath -RemoteRunDir $remoteRunDir -TestBinary $testBinary
+
             # Copy and make executable
-            Invoke-Scp -Local $testBinary.FullName -Dest "${RemoteHost}:$RemoteTestPath" -Pass $password -Quiet
+            Invoke-Scp -Local $testBinary.FullName -Dest "${RemoteHost}:$remoteBinaryPath" -Pass $password -Quiet
 
             # Build test args
             $parts = @()
@@ -111,16 +176,26 @@ foreach ($packageName in $packages) {
             if ($ShowOutput -or $Verbose) { $parts += "--show-output" }
             if ($NoCapture -or $Verbose) { $parts += "--nocapture" }
             if ($Threads -gt 0) { $parts += "--test-threads"; $parts += $Threads }
-            $remoteCmd = Build-RemoteExecCommand -RemotePath $RemoteTestPath -Arguments $parts
+            $remoteCmd = Build-RemoteExecCommand -RemotePath $remoteBinaryPath -Arguments $parts
 
             # Run test binary (with chmod to ensure executable)
-            Invoke-Ssh -Cmd $remoteCmd -Remote $RemoteHost -Pass $password
+            try {
+                Invoke-Ssh -Cmd $remoteCmd -Remote $RemoteHost -Pass $password
+            }
+            catch {
+                $failures.Add("$packageName / $($testBinary.Name)")
+                Write-Warning "Test binary failed: $packageName / $($testBinary.Name)"
+                Write-Warning $_.Exception.Message
+                continue
+            }
+        }
+    }
+    finally {
+        try {
+            Invoke-Ssh -Cmd ("rm -r " + (Quote-ShArg $remoteRunDir)) -Remote $RemoteHost -Pass $password -Quiet
         }
         catch {
-            $failures.Add("$packageName / $($testBinary.Name)")
-            Write-Warning "Test binary failed: $packageName / $($testBinary.Name)"
-            Write-Warning $_.Exception.Message
-            continue
+            Write-Warning "Failed to remove remote test dir: $remoteRunDir"
         }
     }
 }
