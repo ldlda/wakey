@@ -43,6 +43,51 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
   - Uploads to `<RemotePath>.tmp` then atomically moves into place; `-Restart` restarts the service; `-Quiet` silences MOTD.
 - `package_rootfs.ps1` — Produces `dist/wakey-rootfs-<version>-<target>.tgz` with `/root/.bin/wakey` and `/etc/init.d/*`.
 - `publish.ps1` — Optional version bump + build + tag (and `cargo publish` only if you pass `-Publish`).
+- `test_remote.ps1` — Build ARM Linux test binaries locally, upload them to the router, and run them there.
+
+## Remote test runner
+
+`test_remote.ps1` is the main way to run Linux/router-specific tests that do not
+make sense on Windows.
+
+Basic examples:
+
+```powershell
+./scripts/test_remote.ps1 -Package wakey
+./scripts/test_remote.ps1 -Package wakey -BinaryFilter integration_live_services -Ignored -NoCapture
+./scripts/test_remote.ps1 -Package wakey -BinaryFilter integration_live_services -Filter status_real_router_default_query_succeeds -Ignored -NoCapture
+./scripts/test_remote.ps1 -AllPackages
+```
+
+Important semantics:
+
+- `-BinaryFilter`
+  - selects which compiled Rust test executable(s) to run
+- `-Filter`
+  - filters test functions inside a selected Rust test binary
+- `-Ignored`
+  - runs `#[ignore]` tests
+- `-IncludeIgnored`
+  - includes ignored tests in addition to normal ones
+- `-List`
+  - lists tests inside the remote binary instead of executing them
+
+Useful flags:
+
+- `-BuildProfile debug|release`
+- `-Exact`
+- `-NoCapture`
+- `-ShowOutput`
+- `-Threads <n>`
+- `-RemoteHost root@<router-ip>`
+- `-RemoteTestPath /tmp/tmp/wakey-test`
+
+Implementation notes:
+
+- test executables are discovered via Cargo JSON messages, not regexing human output
+- binaries are batch-uploaded per package run
+- each package run gets a unique remote temp directory for safer concurrent use
+- packages with no test executables are skipped instead of treated as failures
 
 ## CI (Gitea)
 
