@@ -69,8 +69,8 @@ Path control (binary and config are independent):
 
 ```powershell
 ./scripts/act_runner_wsl.ps1 -Action status `
-	-RunnerBin /home/lda/gitea-runner/act_runner `
-	-ConfigPath /mnt/c/Users/Admin/Documents/realshit/wakey/ar_data/wsl_runner/config.yaml
+ -RunnerBin /home/lda/gitea-runner/act_runner `
+ -ConfigPath /mnt/c/Users/Admin/Documents/realshit/wakey/ar_data/wsl_runner/config.yaml
 ```
 
 If your distro name is not `FedoraLinux-43`, set it explicitly:
