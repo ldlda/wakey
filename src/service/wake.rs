@@ -122,7 +122,10 @@ mod tests {
         let err = broadcast_wake_targets_from_interfaces(&interfaces, mac)
             .expect_err("should error without broadcast-capable interfaces");
 
-        assert!(err.to_string().contains("no broadcast-capable interfaces found"));
+        assert!(
+            err.to_string()
+                .contains("no broadcast-capable interfaces found")
+        );
     }
 
     #[test]

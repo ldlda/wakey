@@ -72,7 +72,9 @@ async fn broadcast_wake_targets_real_router_resolve_from_interfaces() -> anyhow:
         "all broadcast targets should preserve the requested MAC"
     );
     assert!(
-        targets.iter().all(|target| matches!(target.ip, Some(IpAddr::V4(_)))),
+        targets
+            .iter()
+            .all(|target| matches!(target.ip, Some(IpAddr::V4(_)))),
         "broadcast targets should be IPv4 broadcast destinations"
     );
 

@@ -64,6 +64,29 @@ The long-term direction is:
 - keep HTTP as an adapter, not the architecture
 - eventually move toward an agent + control-plane model
 
+## Future direction
+
+The likely next large step is splitting the current temporary HTTP/web hosting
+role away from the main `wakey` binary.
+
+The intended shape is roughly:
+
+- `wakey`
+  - stable service layer and operator CLI
+- `wakey-agent`
+  - router-side daemon exposing a network API over the service layer
+- control-center app
+  - remote UI or control plane that talks to one or more agents
+
+That future agent layer will likely need:
+
+- explicit registration/authentication
+- a stable remote API
+- a small deployment/bootstrap story on the router
+
+The current CLI and compatibility HTTP adapter are being kept small on purpose
+so that split can happen later without moving the real product logic again.
+
 ## CLI
 
 `wakey` is usable as a local/operator CLI.

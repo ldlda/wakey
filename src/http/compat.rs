@@ -1,3 +1,9 @@
+//! Compatibility types and mappers for the legacy HTTP/static client.
+//!
+//! These types intentionally preserve old JSON shapes expected by `/static`
+//! while the core and service layers evolve underneath them. They do not define
+//! the long-term domain model of the project.
+
 use serde::Serialize;
 use wakey_core::parse::mac;
 use wakey_core::{
@@ -49,6 +55,8 @@ pub struct LegacyWakeResultRow {
 }
 
 /// Map legacy-style status rows into the old response shape.
+///
+/// This helper exists for compatibility with the original frontend contract.
 pub fn legacy_status_from_domain(status: Status<NeighborEntry>) -> LegacyStatusResponse {
     LegacyStatusResponse {
         name: status.name,

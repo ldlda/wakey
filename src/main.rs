@@ -2,7 +2,8 @@ mod cli_table;
 
 use std::net::{IpAddr, SocketAddr};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
+use tracing::{debug, info};
 use wakey_core::{DeviceFilters, DeviceQuery, InterfaceSummary, WakeResult};
 
 #[derive(Parser)]
@@ -12,6 +13,10 @@ use wakey_core::{DeviceFilters, DeviceQuery, InterfaceSummary, WakeResult};
     long_about = "Wakey can run as a local/operator CLI or serve the legacy HTTP/static interface during the migration to a service-first architecture."
 )]
 struct Cli {
+    /// Increase log verbosity. Use `-v` for debug and `-vv` for trace.
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -200,14 +205,17 @@ fn main() -> anyhow::Result<()> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    init_tracing(cli.verbose);
     match cli.command {
         Command::Http(args) => {
             let addr = SocketAddr::new(args.host, args.port);
+            info!(%addr, "dispatching http command");
             wakey::serve_http_from_current_exe(addr).await?;
         }
         Command::Status(args) => {
             let as_json = args.json;
             let query = status_args_to_query(args);
+            debug!(?query, json = as_json, "dispatching status command");
             let status = if query.name.is_some()
                 && query.filter.ips.is_empty()
                 && query.filter.devs.is_empty()
@@ -228,6 +236,11 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Command::Leases(args) => {
+            debug!(
+                include_state = args.include_state,
+                json = args.json,
+                "dispatching leases command"
+            );
             let leases = wakey::get_leases(wakey_core::LeaseQuery {
                 include_state: args.include_state,
             })
@@ -240,6 +253,13 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Wake(args) => {
             let as_json = args.json;
+            debug!(
+                has_query = args.query.is_some(),
+                has_mac = args.mac.is_some(),
+                has_ip = args.ip.is_some(),
+                json = as_json,
+                "dispatching wake command"
+            );
             let result = run_wake(args).await?;
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
@@ -248,6 +268,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Command::Devs(args) => {
+            debug!(dev = ?args.dev, up = args.up, json = args.json, "dispatching devs command");
             let devs = if let Some(name) = &args.dev {
                 wakey::get_interface_summary(name)
                     .await?
@@ -267,9 +288,32 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn init_tracing(verbose: u8) {
+    use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+
+    let filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(default_filter_for_verbosity(verbose)))
+        .expect("static tracing filter should parse");
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer())
+        .init();
+}
+
+#[cfg(target_os = "linux")]
+fn default_filter_for_verbosity(verbose: u8) -> &'static str {
+    match verbose {
+        0 => "wakey=info,tower_http=info",
+        1 => "wakey=debug,tower_http=debug",
+        _ => "wakey=trace,tower_http=trace",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::WakeArgs;
+    use super::{WakeArgs, default_filter_for_verbosity};
 
     #[test]
     fn wake_rejects_ip_without_mac() {
@@ -317,5 +361,25 @@ mod tests {
             json: false,
         })
         .expect("manual mac mode should be accepted");
+    }
+
+    #[test]
+    fn verbosity_maps_to_expected_default_filters() {
+        assert_eq!(
+            default_filter_for_verbosity(0),
+            "wakey=info,tower_http=info"
+        );
+        assert_eq!(
+            default_filter_for_verbosity(1),
+            "wakey=debug,tower_http=debug"
+        );
+        assert_eq!(
+            default_filter_for_verbosity(2),
+            "wakey=trace,tower_http=trace"
+        );
+        assert_eq!(
+            default_filter_for_verbosity(9),
+            "wakey=trace,tower_http=trace"
+        );
     }
 }
