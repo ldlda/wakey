@@ -1,4 +1,5 @@
 use anyhow::Result;
+use tracing::{debug, instrument};
 use wakey_core::{Device, DeviceQuery, NeighborEntry, Presence, Status};
 
 use crate::service::inventory::inventory;
@@ -11,13 +12,15 @@ pub type StatusResponse = Status<NeighborEntry>;
 ///
 /// This keeps the old status response shape alive while the underlying model is
 /// increasingly device-centered.
+#[instrument(skip_all, fields(name = ?query.name))]
 pub async fn get_status(query: DeviceQuery) -> Result<StatusResponse> {
     let inventory = inventory(query.clone()).await?;
-    let table = inventory
+    let table: Vec<NeighborEntry> = inventory
         .devices
         .iter()
         .flat_map(device_to_status_rows)
         .collect();
+    debug!(rows = table.len(), devices = inventory.devices.len(), "built status response");
     Ok(Status {
         name: query.name,
         table,
@@ -26,6 +29,7 @@ pub async fn get_status(query: DeviceQuery) -> Result<StatusResponse> {
 }
 
 /// Convenience wrapper around [`get_status`] for free-form user input.
+#[instrument(skip_all)]
 pub async fn get_status_for_input(input: impl Into<String>) -> Result<StatusResponse> {
     let query = resolve_query(input).await?;
     get_status(query).await

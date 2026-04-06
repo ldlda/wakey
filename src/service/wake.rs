@@ -1,20 +1,24 @@
 use anyhow::{Context, Result};
 use macaddr::MacAddr;
 use std::net::IpAddr;
+use tracing::{debug, instrument};
 use wakey_core::{InterfaceSummary, WakeResult, WakeTarget};
 
 use crate::service::interfaces::get_interface_summaries;
 use crate::service::inventory::resolve_devices;
 
 /// Send Wake-on-LAN packets for already-concrete wake targets.
+#[instrument(skip_all, fields(targets = targets.len()))]
 pub async fn wake_targets(targets: Vec<WakeTarget>) -> Result<WakeResult> {
     let result = wakey_linux::wake::wake_many(targets)
         .await
         .context("failed to send wake packets")?;
+    debug!(results = result.len(), "wake packets sent");
     Ok(WakeResult { result })
 }
 
 /// Resolve free-form input into wake targets and send the packets.
+#[instrument(skip_all)]
 pub async fn wake_from_query(input: impl Into<String>) -> Result<WakeResult> {
     let targets = resolve_wake_targets(input).await?;
     wake_targets(targets).await
@@ -23,12 +27,14 @@ pub async fn wake_from_query(input: impl Into<String>) -> Result<WakeResult> {
 /// Build broadcast wake targets for every broadcast-capable interface.
 ///
 /// This is used by explicit manual wake mode when only a MAC address is supplied.
+#[instrument(skip_all)]
 pub async fn broadcast_wake_targets(mac: MacAddr) -> Result<Vec<WakeTarget>> {
     let interfaces = get_interface_summaries().await?;
     broadcast_wake_targets_from_interfaces(&interfaces, mac)
 }
 
 /// Wake a device explicitly by MAC, optionally targeting a specific IP/broadcast.
+#[instrument(skip_all, fields(has_ip = ip.is_some()))]
 pub async fn wake_explicit(mac: MacAddr, ip: Option<IpAddr>) -> Result<WakeResult> {
     let targets = match ip {
         Some(ip) => explicit_wake_targets_for_ip(mac, ip),
@@ -41,9 +47,10 @@ pub async fn wake_explicit(mac: MacAddr, ip: Option<IpAddr>) -> Result<WakeResul
 ///
 /// The current resolution strategy fans out one wake target per resolved device IP,
 /// using the first known MAC address for that device.
+#[instrument(skip_all)]
 pub async fn resolve_wake_targets(input: impl Into<String>) -> Result<Vec<WakeTarget>> {
     let devices = resolve_devices(input).await?;
-    Ok(devices
+    let targets: Vec<WakeTarget> = devices
         .into_iter()
         .flat_map(|device| {
             let mac = device.macs.first().copied();
@@ -52,7 +59,9 @@ pub async fn resolve_wake_targets(input: impl Into<String>) -> Result<Vec<WakeTa
                 .into_iter()
                 .map(move |ip| WakeTarget { ip: Some(ip), mac })
         })
-        .collect())
+        .collect();
+    debug!(targets = targets.len(), "resolved wake targets");
+    Ok(targets)
 }
 
 fn explicit_wake_targets_for_ip(mac: MacAddr, ip: IpAddr) -> Vec<WakeTarget> {
@@ -80,6 +89,7 @@ fn broadcast_wake_targets_from_interfaces(
         anyhow::bail!("no broadcast-capable interfaces found");
     }
 
+    debug!(targets = targets.len(), interfaces = interfaces.len(), "built broadcast wake targets");
     Ok(targets)
 }
 

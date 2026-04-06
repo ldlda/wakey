@@ -1,4 +1,5 @@
 use anyhow::Result;
+use tracing::{debug, instrument};
 use wakey_core::InterfaceSummary;
 
 /// Return interface names only.
@@ -9,16 +10,22 @@ pub async fn list_interfaces() -> Result<Vec<String>> {
 }
 
 /// Return condensed interface summaries useful for CLI and wake routing.
+#[instrument(skip_all)]
 pub async fn get_interface_summaries() -> Result<Vec<InterfaceSummary>> {
-    wakey_linux::devices::list_interface_summaries().await
+    let summaries = wakey_linux::devices::list_interface_summaries().await?;
+    debug!(count = summaries.len(), "loaded interface summaries");
+    Ok(summaries)
 }
 
 /// Return one named interface summary when present.
+#[instrument(skip_all, fields(ifname = name))]
 pub async fn get_interface_summary(name: &str) -> Result<Option<InterfaceSummary>> {
-    Ok(get_interface_summaries()
+    let summary = get_interface_summaries()
         .await?
         .into_iter()
-        .find(|iface| iface.ifname == name))
+        .find(|iface| iface.ifname == name);
+    debug!(found = summary.is_some(), "resolved interface summary");
+    Ok(summary)
 }
 
 /// Resolve a hostname through the local resolver and collect all returned IPs.
