@@ -46,10 +46,11 @@ jobs:
           name: wakey-rootfs
           path: dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz
 
-      - name: Publish Release to Gitea (API)
+      - name: Publish Release to Gitea
         if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        env:
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-        run: |
-          ./scripts/ci_gitea_release.ps1 -Tag "$env:GITHUB_REF_NAME" -AssetPattern "dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz"
+        uses: actions/gitea-release-action@v1
+        with:
+          token: ${{ secrets.GITEA_TOKEN }}
+          files: |
+            dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz
+          tag_name: ${{ github.ref_name }}

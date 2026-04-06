@@ -31,7 +31,20 @@ EOF
 }
 
 ensure_dirs() {
-        mkdir -p "$RUNNER_HOME" "$(dirname "$RUNNER_BIN")"
+    mkdir -p "$RUNNER_HOME" "$(dirname "$RUNNER_BIN")"
+}
+
+ensure_runner_bin() {
+    if [[ ! -x "$RUNNER_BIN" ]]; then
+        echo "Runner binary not found or not executable at $RUNNER_BIN" >&2
+        exit 2
+    fi
+}
+
+runner_pids() {
+    ps -eo pid=,args= | awk -v bin="$RUNNER_BIN" -v config="$CONFIG_PATH" '
+        $2 == bin && $3 == "daemon" && $4 == "--config" && $5 == config { print $1 }
+    '
 }
 
 update_runner() {
@@ -62,6 +75,7 @@ PY
 
 register_runner() {
     ensure_dirs
+    ensure_runner_bin
 
     if [[ -z "$SERVER_URL" || -z "$TOKEN" ]]; then
         echo "register requires SERVER_URL and TOKEN (or --server-url/--token)" >&2
@@ -79,6 +93,7 @@ register_runner() {
 start_runner() {
     local mode="${1:-daemon}"
     ensure_dirs
+    ensure_runner_bin
 
     if [[ ! -f "$CONFIG_PATH" ]]; then
         echo "Runner config not found at $CONFIG_PATH" >&2
@@ -104,14 +119,21 @@ start_runner() {
 }
 
 stop_runner() {
-    pkill -f "$RUNNER_BIN" || true
+    local pids
+    pids="$(runner_pids)"
+    if [[ -z "$pids" ]]; then
+        return 0
+    fi
+    kill $pids
 }
 
 status_runner() {
-    if pgrep -f "$RUNNER_BIN" >/dev/null; then
+    ensure_runner_bin
+
+    if [[ -n "$(runner_pids)" ]]; then
         echo "act_runner is running"
     else
-        echo "act_runner is not running"
+        echo "act_runner is off"
     fi
 }
 

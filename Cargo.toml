@@ -1,6 +1,6 @@
 [package]
 name = "wakey"
-version = "0.1.7"
+version = "0.2.0-a1"
 edition = "2024"
 publish = ["gitea"]
 
@@ -28,17 +28,10 @@ tower-http = { version = "0", features = ["fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 urlencoding = "2"
-wakey-core = { path = "wakey-core" }
-wakey-linux = { path = "wakey-linux" }
 
 [profile.release]
 opt-level = "z"
 strip = true
-
-[features]
-default = ["very-smart-parsing"]
-very-smart-parsing = [
-] # this is the a-bit-redundant parse thing that copilot made
 
 [workspace]
 members = ["ipjs", "wakey-agent", "wakey-core", "wakey-linux"]
@@ -46,4 +39,14 @@ members = ["ipjs", "wakey-agent", "wakey-core", "wakey-linux"]
 [dependencies.lda-ipjs]
 path = "ipjs"
 registry = "gitea"
-version = "*"
+version = "0"
+
+[dependencies.wakey-core]
+path = "wakey-core"
+registry = "gitea"
+version = "0"
+
+[dependencies.wakey-linux]
+path = "wakey-linux"
+registry = "gitea"
+version = "0"

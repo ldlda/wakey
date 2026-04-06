@@ -13,7 +13,7 @@ param(
     [string]$Registry,
     [ValidateSet('wsl', 'windows', 'none')]
     [string]$RunnerMode = 'wsl',
-    [string]$WslDistro = $(if ($env:WAKEY_WSL_DISTRO) { $env:WAKEY_WSL_DISTRO } else { 'FedoraLinux' })
+    [string]$WslDistro = $(if ($env:WAKEY_WSL_DISTRO) { $env:WAKEY_WSL_DISTRO } else { 'FedoraLinux-43' })
 )
 
 $ErrorActionPreference = 'Stop'
