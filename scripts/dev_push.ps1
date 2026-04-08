@@ -5,6 +5,7 @@ param(
     [string]$Cargo = "cargo",
     [string]$Pass,
     [string]$HostName = "192.168.100.1",
+    [int]$Port = 2222,
     [string]$User = "root",
     [string]$RemotePath = "/root/.bin/wakey",
     [string]$AgentRemotePath = "/root/.bin/wakey-agent",
@@ -22,6 +23,11 @@ try { $PSStyle.OutputRendering = 'Host' } catch {}
 . "$PSScriptRoot/lib.ps1"
 
 $Pass = Get-DefaultPassword $Pass
+
+# Backward compatibility: allow HostName in the form host:port.
+$hostPort = Split-HostPort -Host $HostName -DefaultPort $Port
+$HostName = $hostPort.Host
+$Port = $hostPort.Port
 
 function Get-DeployScript {
     param($DeployPreferred, $DeployTmp, $RemoteTmp, $RemotePath, $RestartFlag)
@@ -59,8 +65,8 @@ try {
     $deployPreferred = '/root/.bin/remote_deploy_wakey.sh'
 
     # Push binaries
-    Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Quiet:$Quiet
-    Invoke-Scp -Local $localAgentBin -Dest $agentDestTmp -Pass $Pass -HostKey $HostKey -Quiet:$Quiet
+    Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet
+    Invoke-Scp -Local $localAgentBin -Dest $agentDestTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet
 
     # Push static assets
     $localStatic = Join-Path $repoRoot "static"
@@ -69,16 +75,16 @@ try {
         # So we push 'static' directory to /root/.bin/
         $remoteDir = (Split-Path $RemotePath -Parent) -replace '\\', '/'
         # Ensure remote dir exists (ssh mkdir -p)
-        Invoke-Ssh -Cmd "mkdir -p $remoteDir" -User $User -Remote $HostName -Pass $Pass -Quiet:$Quiet
+        Invoke-Ssh -Cmd "mkdir -p $remoteDir" -User $User -Remote $HostName -Pass $Pass -Port $Port -Quiet:$Quiet
         
         # SCP -r static user@host:/root/.bin/
         # Note: pscp/scp behavior: if dest is a dir, it copies the source dir INTO it.
-        Invoke-Scp -Local $localStatic -Dest "$User@${HostName}:$remoteDir/" -Pass $Pass -HostKey $HostKey -Quiet:$Quiet -Recurse
+        Invoke-Scp -Local $localStatic -Dest "$User@${HostName}:$remoteDir/" -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -Recurse
     }
 
     # Push deploy helper if exists
     if (Test-Path $localDeploy) {
-        Invoke-Scp -Local $localDeploy -Dest "$User@${HostName}:$deployTmp" -Pass $Pass -HostKey $HostKey -Quiet:$Quiet
+        Invoke-Scp -Local $localDeploy -Dest "$User@${HostName}:$deployTmp" -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet
     }
 
     # Build and run remote deploy command
@@ -90,7 +96,7 @@ $(Get-DeployScript $deployPreferred $deployTmp $agentRemoteTmp $AgentRemotePath 
     $remoteCmd = "sh -lc '$($script -replace "`r",'')'"
     if ($Quiet) { $remoteCmd += " >/dev/null 2>&1" }
 
-    Invoke-Ssh -Cmd $remoteCmd -User $User -Remote $HostName -Pass $Pass -Quiet:$Quiet
+    Invoke-Ssh -Cmd $remoteCmd -User $User -Remote $HostName -Pass $Pass -Port $Port -Quiet:$Quiet
 
     Write-Host "done ✔" -ForegroundColor Green
 }

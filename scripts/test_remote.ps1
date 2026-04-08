@@ -14,6 +14,7 @@ param(
     [switch]$Verbose,
     [string]$RemoteTestPath = "/tmp/tmp/wakey-test",
     [string]$RemoteHost = "root@192.168.100.1",
+    [int]$RemotePort = 2222,
     [switch]$Ignored,
     [switch]$IncludeIgnored,
     [switch]$NoCapture,
@@ -26,6 +27,11 @@ $ErrorActionPreference = "Stop"
 . "$PSScriptRoot/lib.ps1"
 
 $password = Get-DefaultPassword $password
+
+$sshRemote = $RemoteHost
+$hostPort = Split-HostPort -Host $sshRemote -DefaultPort $RemotePort
+$sshRemote = $hostPort.Host
+$RemotePort = $hostPort.Port
 
 function Get-WorkspacePackages {
     $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
@@ -127,14 +133,15 @@ function Ensure-RemoteParentDir {
     param(
         [string]$RemoteDirPath,
         [string]$RemoteHost,
-        [string]$Password
+        [string]$Password,
+        [int]$Port
     )
 
     $dir = Normalize-PosixPath $RemoteDirPath
     if ([string]::IsNullOrWhiteSpace($dir)) {
         return
     }
-    Invoke-Ssh -Cmd ("mkdir -p " + (Quote-ShArg $dir)) -Remote $RemoteHost -Pass $Password -Quiet
+    Invoke-Ssh -Cmd ("mkdir -p " + (Quote-ShArg $dir)) -Remote $RemoteHost -Pass $Password -Port $Port -Quiet
 }
 
 $packages = if ($AllPackages) { Get-WorkspacePackages } else { @($Package) }
@@ -184,11 +191,21 @@ foreach ($packageName in $packages) {
     Write-Host "Found $($testBinaries.Count) test $($testBinaries.Count -eq 1 ? "binary" : "binaries") for $packageName" -ForegroundColor Green
 
     $remoteRunDir = New-RemoteRunDir -BasePath $RemoteTestPath -PackageName $packageName
-    Ensure-RemoteParentDir -RemoteDirPath $remoteRunDir -RemoteHost $RemoteHost -Password $password
+    Ensure-RemoteParentDir -RemoteDirPath $remoteRunDir -RemoteHost $sshRemote -Password $password -Port $RemotePort
 
     try {
         $remoteUploadDir = (Normalize-PosixPath $remoteRunDir).TrimEnd('/') + '/'
-        Invoke-Scp -Local ($testBinaries | ForEach-Object { $_.FullName }) -Dest "${RemoteHost}:$remoteUploadDir" -Pass $password -Quiet
+        
+        # Convert local file paths to WSL paths if running in WSL
+        $localFilePaths = @($testBinaries | ForEach-Object {
+            if (Test-IsWsl) {
+                ConvertTo-WslPath $_.FullName
+            } else {
+                $_.FullName
+            }
+        })
+        
+        Invoke-Scp -Local $localFilePaths -Dest "${sshRemote}:$remoteUploadDir" -Pass $password -Port $RemotePort -Quiet
 
         foreach ($testBinary in $testBinaries) {
             Write-Host "`nTesting: $packageName / $($testBinary.Name)" -ForegroundColor Cyan
@@ -209,7 +226,7 @@ foreach ($packageName in $packages) {
 
             # Run test binary (with chmod to ensure executable)
             try {
-                Invoke-Ssh -Cmd $remoteCmd -Remote $RemoteHost -Pass $password
+                Invoke-Ssh -Cmd $remoteCmd -Remote $sshRemote -Pass $password -Port $RemotePort
             }
             catch {
                 $failures.Add("$packageName / $($testBinary.Name)")
@@ -221,7 +238,7 @@ foreach ($packageName in $packages) {
     }
     finally {
         try {
-            Invoke-Ssh -Cmd ("rm -rf " + (Quote-ShArg $remoteRunDir)) -Remote $RemoteHost -Pass $password -Quiet
+            Invoke-Ssh -Cmd ("rm -rf " + (Quote-ShArg $remoteRunDir)) -Remote $sshRemote -Pass $password -Port $RemotePort -Quiet
         }
         catch {
             Write-Warning "Failed to remove remote test dir: $remoteRunDir"
