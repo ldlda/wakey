@@ -5,6 +5,15 @@ linker = "rust-lld"
 target = "armv7-unknown-linux-musleabihf"
 
 [alias]
-ldabr = "b -r --target=target.armv7-unknown-linux-musleabihf"
+cl = "c --target=armv7-unknown-linux-musleabihf"
+bl = "b --target=armv7-unknown-linux-musleabihf"
+tl = "t --target=armv7-unknown-linux-musleabihf"
+
+cw = "c --target=x86_64-pc-windows-msvc"
+bw = "b --target=x86_64-pc-windows-msvc"
+tw = "t --target=x86_64-pc-windows-msvc"
+
+# idk below
+ldabr = "b -r --target=armv7-unknown-linux-musleabihf"
 t = "test -- --nocapture --test-threads=1"
 tdebug = "test -- --nocapture --test-threads=1 --show-output"

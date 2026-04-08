@@ -6,6 +6,7 @@ use futures::TryStreamExt;
 use rtnetlink::Handle;
 use rtnetlink::packet_route::{AddressFamily, address::AddressAttribute};
 
+use crate::subcommands::link::LinkOutput;
 use crate::subcommands::{
     address::{AddrInfo, AddrOutput, AddressFamily as IpAddressFamily, InterfaceCidr},
     link,
@@ -23,7 +24,7 @@ pub async fn get_with_handle(
     dev: Option<&str>,
 ) -> anyhow::Result<Vec<AddrOutput>> {
     let links = link::nl::get_with_handle(handle, dev).await?;
-    let link_by_index: BTreeMap<u32, crate::subcommands::link::LinkOutput> =
+    let link_by_index: BTreeMap<u32, LinkOutput> =
         links.into_iter().map(|link| (link.ifindex, link)).collect();
 
     let mut address = handle.address().get();
@@ -56,10 +57,10 @@ pub async fn get_with_handle(
             _ => None,
         };
 
+        let prefixlen = Some(msg.header.prefix_len);
+        let scope = Some(format!("{:?}", msg.header.scope).to_lowercase());
         let mut local = None;
-        let mut prefixlen = Some(msg.header.prefix_len);
         let mut broadcast = None;
-        let mut scope = Some(format!("{:?}", msg.header.scope).to_lowercase());
         let mut label = None;
 
         for attr in msg.attributes {
@@ -86,10 +87,10 @@ pub async fn get_with_handle(
                 family,
                 cidr: InterfaceCidr {
                     local,
-                    prefixlen: prefixlen.take(),
+                    prefixlen,
                 },
                 broadcast,
-                scope: scope.take(),
+                scope,
                 label,
             });
     }
