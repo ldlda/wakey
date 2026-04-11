@@ -1,3 +1,4 @@
+#!/usr/bin/env pwsh
 # this does one thing
 param(
     [string]$PASSWD
@@ -9,6 +10,7 @@ $PASSWD = Get-DefaultPassword $PASSWD
 # idk what this does it works like that then thats how it is
 pscp.exe -l root -scp -pw $PASSWD -r 192.168.100.1:/etc/ldlda_help $PSScriptRoot
 pscp.exe -l root -scp -pw $PASSWD  192.168.100.1:/etc/rc.local $PSScriptRoot
+pscp.exe -l root -scp -pw $PASSWD -r 192.168.100.1:/etc/wakey-agent $PSScriptRoot
 
 Remove-Item -Recurse (Join-Path $PSScriptRoot "root")
 pscp.exe -l root -scp -pw $PASSWD  -r 192.168.100.1:/root $PSScriptRoot
