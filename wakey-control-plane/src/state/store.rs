@@ -2,37 +2,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IssuedAgent {
-    pub agent_id: String,
-    pub agent_token: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IssuedEnrollToken {
-    pub enroll_token: String,
-    pub expires_at_unix: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnrollTokenInfo {
-    pub enroll_token: String,
-    pub expires_at_unix: u64,
-    pub expired: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateStats {
-    pub db_path: PathBuf,
-    pub schema_version: u32,
-    pub agent_count: usize,
-    pub enroll_token_count: usize,
-    pub expired_enroll_token_count: usize,
-}
+use crate::state::types::{EnrollTokenInfo, IssuedAgent, IssuedEnrollToken, StateStats};
 
 pub struct Store {
     db_path: PathBuf,
@@ -162,14 +135,19 @@ impl Store {
             if !include_expired && expired {
                 continue;
             }
-            let enroll_token = String::from_utf8(token.to_vec()).context("invalid utf-8 enroll token in db")?;
+            let enroll_token =
+                String::from_utf8(token.to_vec()).context("invalid utf-8 enroll token in db")?;
             out.push(EnrollTokenInfo {
                 enroll_token,
                 expires_at_unix,
                 expired,
             });
         }
-        out.sort_by(|a, b| a.expires_at_unix.cmp(&b.expires_at_unix).then(a.enroll_token.cmp(&b.enroll_token)));
+        out.sort_by(|a, b| {
+            a.expires_at_unix
+                .cmp(&b.expires_at_unix)
+                .then(a.enroll_token.cmp(&b.enroll_token))
+        });
         Ok(out)
     }
 
@@ -191,7 +169,8 @@ impl Store {
         let mut expired_enroll_token_count = 0usize;
         for item in self.enroll_tokens.iter() {
             let (_, value) = item.context("failed iterating enroll token tree")?;
-            let expires_at = decode_expiry(value.as_ref()).context("failed decoding token expiry during stats")?;
+            let expires_at =
+                decode_expiry(value.as_ref()).context("failed decoding token expiry during stats")?;
             enroll_token_count = enroll_token_count.saturating_add(1);
             if expires_at <= now {
                 expired_enroll_token_count = expired_enroll_token_count.saturating_add(1);
@@ -255,7 +234,8 @@ impl Store {
         let mut removed = 0u64;
         for item in self.enroll_tokens.iter() {
             let (token, value) = item.context("failed iterating enroll token tree")?;
-            let expires_at = decode_expiry(value.as_ref()).context("failed decoding token expiry during gc")?;
+            let expires_at =
+                decode_expiry(value.as_ref()).context("failed decoding token expiry during gc")?;
             if expires_at <= now {
                 self.enroll_tokens
                     .remove(token)
@@ -271,9 +251,14 @@ impl Store {
     }
 
     fn ensure_schema_version(&self) -> Result<()> {
-        match self.meta.get(SCHEMA_VERSION_KEY).context("failed reading schema version")? {
+        match self
+            .meta
+            .get(SCHEMA_VERSION_KEY)
+            .context("failed reading schema version")?
+        {
             Some(raw) => {
-                let schema = decode_schema(raw.as_ref()).context("failed decoding schema version")?;
+                let schema =
+                    decode_schema(raw.as_ref()).context("failed decoding schema version")?;
                 if schema != SCHEMA_VERSION {
                     anyhow::bail!(
                         "unsupported db schema version {}; expected {}",
