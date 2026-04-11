@@ -72,6 +72,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
             axum::routing::delete(api::revoke_enroll_token),
         )
         .route("/api/v1/control/state-stats", get(api::state_stats))
+        .route("/api/v1/control/audit/events", get(api::list_audit_events))
         .route("/api/v1/agent/ws", get(ws::agent_ws))
         .route("/api/v1/control/agents", get(api::list_agents))
         .route(

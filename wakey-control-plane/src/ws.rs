@@ -10,6 +10,7 @@ use uuid::Uuid;
 use wakey_agent::protocol::{ErrorPayload, RequestId, ServerMessage};
 
 use crate::runtime::{AgentReply, AppState};
+use crate::state::AuditEventInput;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -103,6 +104,23 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
     if let Some(agent_id) = authed_agent_id {
         info!(agent_id = %agent_id, "agent disconnected");
         state.sessions.write().await.remove(&agent_id);
+        if let Err(err) = state
+            .store
+            .append_audit_event(AuditEventInput {
+                actor_type: "agent".into(),
+                actor_id: Some(agent_id.clone()),
+                agent_id: Some(agent_id),
+                request_id: None,
+                event_type: "agent_ws_disconnect".into(),
+                outcome: "ok".into(),
+                latency_ms: None,
+                message: "agent websocket disconnected".into(),
+                metadata: serde_json::json!({}),
+            })
+            .await
+        {
+            warn!(error = %err, "failed to append audit event for ws disconnect");
+        }
     }
 
     writer.abort();
@@ -132,6 +150,23 @@ async fn process_agent_text(
                 .await
             {
                 warn!(agent_id = %agent_id, "agent auth rejected");
+                if let Err(err) = state
+                    .store
+                    .append_audit_event(AuditEventInput {
+                        actor_type: "agent".into(),
+                        actor_id: Some(agent_id.clone()),
+                        agent_id: Some(agent_id),
+                        request_id: None,
+                        event_type: "agent_ws_auth".into(),
+                        outcome: "rejected".into(),
+                        latency_ms: None,
+                        message: "agent auth rejected".into(),
+                        metadata: serde_json::json!({}),
+                    })
+                    .await
+                {
+                    warn!(error = %err, "failed to append audit event for auth rejection");
+                }
                 anyhow::bail!("agent auth rejected");
             }
             state
@@ -141,6 +176,23 @@ async fn process_agent_text(
                 .insert(agent_id.clone(), tx.clone());
             *authed_agent_id = Some(agent_id.clone());
             info!(agent_id = %agent_id, "agent authenticated");
+            if let Err(err) = state
+                .store
+                .append_audit_event(AuditEventInput {
+                    actor_type: "agent".into(),
+                    actor_id: Some(agent_id.clone()),
+                    agent_id: Some(agent_id),
+                    request_id: None,
+                    event_type: "agent_ws_auth".into(),
+                    outcome: "ok".into(),
+                    latency_ms: None,
+                    message: "agent websocket authenticated".into(),
+                    metadata: serde_json::json!({}),
+                })
+                .await
+            {
+                warn!(error = %err, "failed to append audit event for auth success");
+            }
         }
         IncomingClientMessage::Heartbeat { agent_id } => {
             if authed_agent_id.as_deref() != Some(agent_id.as_str()) {

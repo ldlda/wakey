@@ -190,9 +190,25 @@ Control-plane admin API includes token management endpoints:
 - `POST /api/v1/control/enroll-token?ttl_seconds=<n>`
 - `GET /api/v1/control/enroll-tokens?include_expired=true|false`
 - `DELETE /api/v1/control/enroll-tokens/{token}`
+- `GET /api/v1/control/audit/events?agent_id=<id>&event_type=<type>&limit=<n>`
 
 If commands still appear silent, verify both processes are running with `-v`
 and that `RUST_LOG` is not overriding to a stricter level.
+
+## Edge Exposure (Caddy + Cloudflare Access)
+
+Control-plane is intended to run behind a reverse proxy with TLS termination.
+Use Cloudflare Access to protect `/ui/*` and `/api/v1/control/*`, while keeping
+agent enrollment and websocket endpoints reachable.
+
+An example Caddy config is provided at:
+
+- `deploy/Caddyfile.control-plane.example`
+
+Expected exposure model:
+
+- Public: `/healthz`, `/api/v1/agents/enroll`, `/api/v1/agent/ws`
+- Private (Cloudflare Access): `/ui/*`, `/api/v1/control/*`
 
 ## CLI
 

@@ -7,6 +7,7 @@ use tracing::{info, warn};
 
 use crate::api::json_error;
 use crate::runtime::AppState;
+use crate::state::AuditEventInput;
 
 #[derive(Debug, Deserialize)]
 pub struct EnrollRequest {
@@ -69,6 +70,23 @@ pub async fn enroll(
     match state.store.enroll(&req.enroll_token).await {
         Ok(issued) => {
             info!(agent_id = %issued.agent_id, "agent enrollment accepted");
+            if let Err(err) = state
+                .store
+                .append_audit_event(AuditEventInput {
+                    actor_type: "agent".into(),
+                    actor_id: Some(issued.agent_id.clone()),
+                    agent_id: Some(issued.agent_id.clone()),
+                    request_id: None,
+                    event_type: "agent_enroll".into(),
+                    outcome: "ok".into(),
+                    latency_ms: None,
+                    message: "agent enrollment accepted".into(),
+                    metadata: serde_json::json!({}),
+                })
+                .await
+            {
+                warn!(error = %err, "failed to append audit event for enroll success");
+            }
             Ok((
                 StatusCode::OK,
                 Json(EnrollResponse {
@@ -80,6 +98,23 @@ pub async fn enroll(
         }
         Err(err) => {
             warn!(error = %err, "agent enrollment rejected");
+            if let Err(audit_err) = state
+                .store
+                .append_audit_event(AuditEventInput {
+                    actor_type: "agent".into(),
+                    actor_id: None,
+                    agent_id: None,
+                    request_id: None,
+                    event_type: "agent_enroll".into(),
+                    outcome: "rejected".into(),
+                    latency_ms: None,
+                    message: err.to_string(),
+                    metadata: serde_json::json!({}),
+                })
+                .await
+            {
+                warn!(error = %audit_err, "failed to append audit event for enroll rejection");
+            }
             Err(json_error(
                 StatusCode::UNAUTHORIZED,
                 "enrollment_rejected",
@@ -106,6 +141,26 @@ pub async fn issue_enroll_token(
                 expires_at_unix = issued.expires_at_unix,
                 "issued enroll token"
             );
+            if let Err(err) = state
+                .store
+                .append_audit_event(AuditEventInput {
+                    actor_type: "admin_api".into(),
+                    actor_id: None,
+                    agent_id: None,
+                    request_id: None,
+                    event_type: "enroll_token_issue".into(),
+                    outcome: "ok".into(),
+                    latency_ms: None,
+                    message: "issued enroll token".into(),
+                    metadata: serde_json::json!({
+                        "ttl_seconds": ttl.as_secs(),
+                        "expires_at_unix": issued.expires_at_unix,
+                    }),
+                })
+                .await
+            {
+                warn!(error = %err, "failed to append audit event for token issuance");
+            }
             Ok((
                 StatusCode::OK,
                 Json(IssueEnrollTokenResponse {
@@ -132,6 +187,26 @@ pub async fn list_enroll_tokens(
     let include_expired = query.include_expired.unwrap_or(false);
     match state.store.list_enroll_tokens(include_expired).await {
         Ok(tokens) => {
+            if let Err(err) = state
+                .store
+                .append_audit_event(AuditEventInput {
+                    actor_type: "admin_api".into(),
+                    actor_id: None,
+                    agent_id: None,
+                    request_id: None,
+                    event_type: "enroll_token_list".into(),
+                    outcome: "ok".into(),
+                    latency_ms: None,
+                    message: "listed enroll tokens".into(),
+                    metadata: serde_json::json!({
+                        "include_expired": include_expired,
+                        "count": tokens.len(),
+                    }),
+                })
+                .await
+            {
+                warn!(error = %err, "failed to append audit event for token listing");
+            }
             let body = tokens
                 .into_iter()
                 .map(|t| EnrollTokenStatus {
@@ -158,10 +233,33 @@ pub async fn revoke_enroll_token(
     AxumPath(token): AxumPath<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
     match state.store.revoke_enroll_token(&token).await {
-        Ok(revoked) => Ok((
-            StatusCode::OK,
-            Json(RevokeEnrollTokenResponse { token, revoked }),
-        )),
+        Ok(revoked) => {
+            if let Err(err) = state
+                .store
+                .append_audit_event(AuditEventInput {
+                    actor_type: "admin_api".into(),
+                    actor_id: None,
+                    agent_id: None,
+                    request_id: None,
+                    event_type: "enroll_token_revoke".into(),
+                    outcome: if revoked { "ok".into() } else { "not_found".into() },
+                    latency_ms: None,
+                    message: if revoked {
+                        "revoked enroll token".into()
+                    } else {
+                        "enroll token not found".into()
+                    },
+                    metadata: serde_json::json!({ "token": token }),
+                })
+                .await
+            {
+                warn!(error = %err, "failed to append audit event for token revoke");
+            }
+            Ok((
+                StatusCode::OK,
+                Json(RevokeEnrollTokenResponse { token, revoked }),
+            ))
+        }
         Err(err) => {
             warn!(error = %err, "failed to revoke enroll token");
             Err(json_error(

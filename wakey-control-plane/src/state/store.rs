@@ -5,13 +5,17 @@ use anyhow::{Context, Result};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::state::types::{EnrollTokenInfo, IssuedAgent, IssuedEnrollToken, StateStats};
+use crate::state::types::{
+    AuditEvent, AuditEventFilter, AuditEventInput, EnrollTokenInfo, IssuedAgent, IssuedEnrollToken,
+    StateStats,
+};
 
 pub struct Store {
     db_path: PathBuf,
     meta: sled::Tree,
     enroll_tokens: sled::Tree,
     agents: sled::Tree,
+    audit_events: sled::Tree,
 }
 
 const SCHEMA_VERSION_KEY: &[u8] = b"schema_version";
@@ -32,12 +36,16 @@ impl Store {
             .open_tree("enroll_tokens")
             .context("failed to open enroll_tokens tree")?;
         let agents_tree = db.open_tree("agents").context("failed to open agents tree")?;
+        let audit_events_tree = db
+            .open_tree("audit_events")
+            .context("failed to open audit_events tree")?;
 
         let store = Self {
             db_path,
             meta: meta_tree,
             enroll_tokens: enroll_tree,
             agents: agents_tree,
+            audit_events: audit_events_tree,
         };
 
         store.ensure_schema_version()?;
@@ -62,10 +70,12 @@ impl Store {
 
         let enroll_tokens = store.enroll_tokens.iter().count();
         let agents = store.agents.iter().count();
+        let audit_events = store.audit_events.iter().count();
         info!(
             path = %store.db_path.display(),
             enroll_tokens,
             agents,
+            audit_events,
             "control-plane store ready"
         );
         Ok(store)
@@ -218,6 +228,53 @@ impl Store {
         out
     }
 
+    pub async fn append_audit_event(&self, input: AuditEventInput) -> Result<AuditEvent> {
+        let event = AuditEvent {
+            event_id: format!("evt-{}", Uuid::new_v4()),
+            ts_unix: now_unix(),
+            actor_type: input.actor_type,
+            actor_id: input.actor_id,
+            agent_id: input.agent_id,
+            request_id: input.request_id,
+            event_type: input.event_type,
+            outcome: input.outcome,
+            latency_ms: input.latency_ms,
+            message: input.message,
+            metadata: input.metadata,
+        };
+
+        let key = format!("{:020}:{}", event.ts_unix, event.event_id);
+        let value = serde_json::to_vec(&event).context("failed to encode audit event")?;
+        self.audit_events
+            .insert(key.as_bytes(), value)
+            .context("failed persisting audit event")?;
+        self.flush()
+            .context("failed flushing state db after audit append")?;
+        Ok(event)
+    }
+
+    pub async fn list_audit_events(&self, filter: AuditEventFilter) -> Result<Vec<AuditEvent>> {
+        let limit = filter.limit.clamp(1, 500);
+        let mut out = Vec::new();
+
+        for item in self.audit_events.iter().rev() {
+            let (_, raw) = item.context("failed iterating audit event tree")?;
+            let event: AuditEvent =
+                serde_json::from_slice(raw.as_ref()).context("failed decoding audit event")?;
+
+            if !matches_audit_filter(&event, &filter) {
+                continue;
+            }
+
+            out.push(event);
+            if out.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(out)
+    }
+
     fn flush(&self) -> Result<()> {
         self.enroll_tokens
             .flush()
@@ -225,6 +282,9 @@ impl Store {
         self.agents
             .flush()
             .context("failed to flush agents tree")?;
+        self.audit_events
+            .flush()
+            .context("failed to flush audit event tree")?;
         debug!(path = %self.db_path.display(), "flushed sled state db");
         Ok(())
     }
@@ -311,6 +371,33 @@ fn decode_schema(raw: &[u8]) -> Result<u32> {
     let mut arr = [0u8; 4];
     arr.copy_from_slice(raw);
     Ok(u32::from_le_bytes(arr))
+}
+
+fn matches_audit_filter(event: &AuditEvent, filter: &AuditEventFilter) -> bool {
+    if let Some(agent_id) = filter.agent_id.as_deref()
+        && event.agent_id.as_deref() != Some(agent_id)
+    {
+        return false;
+    }
+    if let Some(request_id) = filter.request_id.as_deref()
+        && event.request_id.as_deref() != Some(request_id)
+    {
+        return false;
+    }
+    if let Some(event_type) = filter.event_type.as_deref() && event.event_type != event_type {
+        return false;
+    }
+    if let Some(outcome) = filter.outcome.as_deref() && event.outcome != outcome {
+        return false;
+    }
+    if let Some(since_unix) = filter.since_unix && event.ts_unix < since_unix {
+        return false;
+    }
+    if let Some(until_unix) = filter.until_unix && event.ts_unix > until_unix {
+        return false;
+    }
+
+    true
 }
 
 #[cfg(test)]
@@ -414,6 +501,64 @@ mod tests {
         assert_eq!(stats.agent_count, 1);
         assert_eq!(stats.enroll_token_count, 2);
         assert_eq!(stats.expired_enroll_token_count, 1);
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn audit_events_append_and_filter() {
+        let (store, dir) = make_store().await;
+
+        store
+            .append_audit_event(crate::state::AuditEventInput {
+                actor_type: "admin_api".into(),
+                actor_id: None,
+                agent_id: Some("agent-1".into()),
+                request_id: Some("req-1".into()),
+                event_type: "command_result".into(),
+                outcome: "ok".into(),
+                latency_ms: Some(12),
+                message: "command completed".into(),
+                metadata: serde_json::json!({"command":"devs"}),
+            })
+            .await
+            .expect("append first event should succeed");
+
+        store
+            .append_audit_event(crate::state::AuditEventInput {
+                actor_type: "agent".into(),
+                actor_id: Some("agent-2".into()),
+                agent_id: Some("agent-2".into()),
+                request_id: Some("req-2".into()),
+                event_type: "agent_ws_auth".into(),
+                outcome: "rejected".into(),
+                latency_ms: None,
+                message: "auth rejected".into(),
+                metadata: serde_json::json!({}),
+            })
+            .await
+            .expect("append second event should succeed");
+
+        let all = store
+            .list_audit_events(crate::state::AuditEventFilter {
+                limit: 10,
+                ..Default::default()
+            })
+            .await
+            .expect("list all should succeed");
+        assert_eq!(all.len(), 2);
+
+        let filtered = store
+            .list_audit_events(crate::state::AuditEventFilter {
+                agent_id: Some("agent-1".into()),
+                event_type: Some("command_result".into()),
+                outcome: Some("ok".into()),
+                limit: 10,
+                ..Default::default()
+            })
+            .await
+            .expect("filtered list should succeed");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].request_id.as_deref(), Some("req-1"));
         cleanup_dir(&dir);
     }
 }

@@ -1,0 +1,31 @@
+# Caddy template for wakey-control-plane with Cloudflare Access.
+#
+# Security model:
+# - Public endpoints for agents: /healthz, /api/v1/agents/enroll, /api/v1/agent/ws
+# - Private admin surface: /ui/* and /api/v1/control/* (requires CF Access headers)
+#
+# Replace cp.example.com with your public control-plane domain.
+
+cp.example.com {
+    encode zstd gzip
+
+    # Public agent-facing endpoints.
+    @public path /healthz /api/v1/agents/enroll /api/v1/agent/ws
+    handle @public {
+        reverse_proxy 127.0.0.1:8787
+    }
+
+    # Admin surface requires Cloudflare Access headers.
+    @admin path /ui* /api/v1/control/*
+    @cf_access header_regexp CFJWT Cf-Access-Jwt-Assertion .+
+
+    handle @admin {
+        handle @cf_access {
+            reverse_proxy 127.0.0.1:8787
+        }
+        respond "forbidden" 403
+    }
+
+    # Deny unknown paths by default.
+    respond "not found" 404
+}
