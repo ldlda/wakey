@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use std::net::IpAddr;
 use std::time::Instant;
 use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -39,6 +40,22 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
 
     let ws_url = websocket_url(&config.server_url)?;
     info!(%ws_url, agent_id = %config.agent_id, "connecting agent websocket");
+    if let Some((dns_resolve_ms, resolved_addrs)) = dns_resolution_diagnostics(&ws_url).await {
+        info!(
+            host = %ws_url.host_str().unwrap_or(""),
+            dns_resolve_ms,
+            resolved_addrs,
+            "agent websocket dns resolved"
+        );
+        if dns_resolve_ms > 5_000 {
+            warn!(
+                host = %ws_url.host_str().unwrap_or(""),
+                dns_resolve_ms,
+                resolved_addrs,
+                "agent websocket dns resolution was slow"
+            );
+        }
+    }
     let connect_started = Instant::now();
     let (stream, _) = connect_async(ws_url.as_str())
         .await
@@ -251,6 +268,23 @@ pub fn websocket_url(server_url: &str) -> Result<url::Url> {
     url.set_query(None);
     url.set_fragment(None);
     Ok(url)
+}
+
+async fn dns_resolution_diagnostics(ws_url: &url::Url) -> Option<(u64, usize)> {
+    let host = ws_url.host_str()?;
+    if host.parse::<IpAddr>().is_ok() {
+        return None;
+    }
+    let port = ws_url.port_or_known_default()?;
+
+    let started = Instant::now();
+    match tokio::net::lookup_host((host, port)).await {
+        Ok(addrs) => Some((started.elapsed().as_millis() as u64, addrs.count())),
+        Err(err) => {
+            warn!(host, port, error = %err, "agent websocket dns resolution failed");
+            None
+        }
+    }
 }
 
 #[cfg(test)]

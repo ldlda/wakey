@@ -172,7 +172,7 @@ During registration/enroll:
 During live connectivity:
 
 - control-plane: `agent websocket upgraded`, `agent authenticated`, `agent disconnected`
-- agent: `connecting agent websocket`, `agent websocket session authenticated`, `heartbeat sent` (debug)
+- agent: `connecting agent websocket`, `agent websocket dns resolved`, `agent websocket connected`, `agent websocket session authenticated`, `heartbeat sent` (debug)
 
 During command relay:
 
@@ -197,6 +197,10 @@ Control-plane admin API includes token management endpoints:
 
 If commands still appear silent, verify both processes are running with `-v`
 and that `RUST_LOG` is not overriding to a stricter level.
+
+If websocket connect feels delayed, compare `dns_resolve_ms` and `ws_connect_ms`
+from agent logs. Slow DNS is a common source of multi-second connection stalls
+when using hostnames; using a stable IP or local host mapping can avoid this.
 
 ## Edge Exposure (Caddy + Cloudflare Access)
 
