@@ -1,3 +1,4 @@
+#!/usr/bin/env pwsh
 [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidDefaultValueSwitchParameter', "", 
     Justification = 'Default true is intentional for fast dev loop')]
 param(

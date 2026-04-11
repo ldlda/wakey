@@ -1,3 +1,4 @@
+#!/usr/bin/env pwsh
 # Build a rootfs tarball suitable for `wget -O- ... | tar -xz -C /` on OpenWrt.
 # It lays out files as absolute-root paths inside the archive:
 #   root/.bin/wakey

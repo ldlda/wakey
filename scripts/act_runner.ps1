@@ -1,3 +1,4 @@
+#!/usr/bin/env pwsh
 # Starts the Windows-host Gitea act_runner if not already running.
 # Usage: ./scripts/act_runner.ps1 -Config "C:/Users/Admin/Documents/gitea/runner.yaml" -RunnerPath "C:/Users/Admin/Documents/gitea/act_runner.exe" -ServerUrl "https://git.ldlda.com/" -Token "<reg token>" -Labels "self-hosted,windows:host"
 param(

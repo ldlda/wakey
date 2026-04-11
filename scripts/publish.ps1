@@ -1,3 +1,4 @@
+#!/usr/bin/env pwsh
 # Publish to registry and tag
 # Usage: ./scripts/publish.ps1 -Version 0.1.0 -Tag
 # Publish to registry and tag (manual; CI does not use this)

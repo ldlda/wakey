@@ -1,3 +1,4 @@
+#!/usr/bin/env pwsh
 param(
     [ValidateSet("update", "register", "start", "stop", "status")]
     [string]$Action = "start",
