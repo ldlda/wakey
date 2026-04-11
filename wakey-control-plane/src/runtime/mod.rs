@@ -4,10 +4,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::Router;
+use axum::response::Redirect;
 use axum::routing::{get, post};
+use axum::routing::get_service;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use tokio::time::MissedTickBehavior;
+use tower_http::services::ServeDir;
 use tracing::{info, warn};
 use wakey_agent::protocol::{ErrorPayload, ServerMessage};
 
@@ -42,6 +45,8 @@ pub enum AgentReply {
 
 fn public_api_routes() -> Router<AppState> {
     Router::new()
+    .route("/ui", get(|| async { Redirect::temporary("/ui/") }))
+    .nest_service("/ui/", get_service(ServeDir::new("ui")))
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
         .route("/api/v1/agent/ws", get(ws::agent_ws))

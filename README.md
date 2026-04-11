@@ -224,6 +224,14 @@ Control-plane routing is organized with the same boundary in code:
 
 This keeps edge policy and app routing aligned as features grow.
 
+## UI (Initial Shell)
+
+Control-plane now serves a minimal operator shell at `/ui/` for immediate
+workflow testing (agents, command runner, alerts, and recent audits).
+
+This UI is intentionally lightweight and is the starting point for the richer
+Operator UI v1 plan.
+
 ## CLI
 
 `wakey` is usable as a local/operator CLI.

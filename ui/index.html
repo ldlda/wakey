@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wakey Control UI</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Wakey Control UI</h1>
+    <div id="status-pill" class="pill">Loading</div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h2>Agents</h2>
+      <button id="refresh-agents" class="btn">Refresh</button>
+      <div id="agents" class="list"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Command Runner</h2>
+      <form id="command-form" class="stack">
+        <label>
+          Agent ID
+          <input id="agent-id" name="agent_id" type="text" required />
+        </label>
+        <label>
+          Command
+          <select id="command-kind" name="kind">
+            <option value="devs">devs</option>
+            <option value="status">status</option>
+            <option value="leases">leases</option>
+            <option value="inventory">inventory</option>
+            <option value="wake">wake</option>
+          </select>
+        </label>
+        <label>
+          Query (status/inventory/wake)
+          <input id="command-query" name="query" type="text" />
+        </label>
+        <button class="btn" type="submit">Run</button>
+      </form>
+      <pre id="command-result" class="code"></pre>
+    </section>
+
+    <section class="panel">
+      <h2>Active Alerts</h2>
+      <button id="refresh-alerts" class="btn">Refresh</button>
+      <div id="alerts" class="list"></div>
+    </section>
+
+    <section class="panel wide">
+      <h2>Recent Audit Events</h2>
+      <button id="refresh-audit" class="btn">Refresh</button>
+      <pre id="audit" class="code"></pre>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>
