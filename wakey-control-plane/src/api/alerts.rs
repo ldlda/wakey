@@ -14,6 +14,18 @@ use crate::api::json_error;
 use crate::runtime::AppState;
 use crate::state::{AlertState, AuditEvent, AuditEventFilter};
 
+struct AlertBuildContext<'a> {
+    now_unix: u64,
+    enrolled_agents: &'a [String],
+    connected_agents: &'a HashSet<String>,
+    timeout_events: &'a [AuditEvent],
+    auth_reject_events: &'a [AuditEvent],
+    enroll_reject_events: &'a [AuditEvent],
+    timeout_threshold: u64,
+    auth_rejected_threshold: u64,
+    enroll_rejected_threshold: u64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ActiveAlertsQuery {
     pub lookback_seconds: Option<u64>,
@@ -215,34 +227,24 @@ async fn evaluate_alerts(
             )
         })?;
 
-    Ok(build_alerts(
-        now,
-        &enrolled_agents,
-        &connected_agents,
-        &timeout_events,
-        &auth_reject_events,
-        &enroll_reject_events,
+    Ok(build_alerts(AlertBuildContext {
+        now_unix: now,
+        enrolled_agents: &enrolled_agents,
+        connected_agents: &connected_agents,
+        timeout_events: &timeout_events,
+        auth_reject_events: &auth_reject_events,
+        enroll_reject_events: &enroll_reject_events,
         timeout_threshold,
         auth_rejected_threshold,
         enroll_rejected_threshold,
-    ))
+    }))
 }
 
-fn build_alerts(
-    now_unix: u64,
-    enrolled_agents: &[String],
-    connected_agents: &HashSet<String>,
-    timeout_events: &[AuditEvent],
-    auth_reject_events: &[AuditEvent],
-    enroll_reject_events: &[AuditEvent],
-    timeout_threshold: u64,
-    auth_rejected_threshold: u64,
-    enroll_rejected_threshold: u64,
-) -> Vec<AlertState> {
+fn build_alerts(ctx: AlertBuildContext<'_>) -> Vec<AlertState> {
     let mut alerts = Vec::new();
 
-    for agent_id in enrolled_agents {
-        if connected_agents.contains(agent_id) {
+    for agent_id in ctx.enrolled_agents {
+        if ctx.connected_agents.contains(agent_id) {
             continue;
         }
         alerts.push(AlertState {
@@ -254,14 +256,14 @@ fn build_alerts(
             message: format!("agent {agent_id} is enrolled but not currently connected"),
             value: 1,
             threshold: 1,
-            last_seen_unix: now_unix,
+            last_seen_unix: ctx.now_unix,
             metadata: serde_json::json!({}),
         });
     }
 
-    let timeout_counts = count_by_agent(timeout_events);
+    let timeout_counts = count_by_agent(ctx.timeout_events);
     for (agent_id, (count, last_seen)) in timeout_counts {
-        if count < timeout_threshold {
+        if count < ctx.timeout_threshold {
             continue;
         }
         alerts.push(AlertState {
@@ -274,15 +276,15 @@ fn build_alerts(
                 "agent {agent_id} had {count} command timeout(s) within evaluation window"
             ),
             value: count,
-            threshold: timeout_threshold,
+            threshold: ctx.timeout_threshold,
             last_seen_unix: last_seen,
             metadata: serde_json::json!({}),
         });
     }
 
-    let auth_reject_counts = count_by_agent(auth_reject_events);
+    let auth_reject_counts = count_by_agent(ctx.auth_reject_events);
     for (agent_id, (count, last_seen)) in auth_reject_counts {
-        if count < auth_rejected_threshold {
+        if count < ctx.auth_rejected_threshold {
             continue;
         }
         alerts.push(AlertState {
@@ -295,19 +297,20 @@ fn build_alerts(
                 "agent {agent_id} had {count} auth rejection(s) within evaluation window"
             ),
             value: count,
-            threshold: auth_rejected_threshold,
+            threshold: ctx.auth_rejected_threshold,
             last_seen_unix: last_seen,
             metadata: serde_json::json!({}),
         });
     }
 
-    let enroll_reject_count = enroll_reject_events.len() as u64;
-    if enroll_reject_count >= enroll_rejected_threshold {
-        let last_seen_unix = enroll_reject_events
+    let enroll_reject_count = ctx.enroll_reject_events.len() as u64;
+    if enroll_reject_count >= ctx.enroll_rejected_threshold {
+        let last_seen_unix = ctx
+            .enroll_reject_events
             .iter()
             .map(|e| e.ts_unix)
             .max()
-            .unwrap_or(now_unix);
+            .unwrap_or(ctx.now_unix);
         alerts.push(AlertState {
             alert_id: "enroll_reject_spike:global".into(),
             kind: "enroll_reject_spike".into(),
@@ -318,7 +321,7 @@ fn build_alerts(
                 "enrollment endpoint saw {enroll_reject_count} rejection(s) within evaluation window"
             ),
             value: enroll_reject_count,
-            threshold: enroll_rejected_threshold,
+            threshold: ctx.enroll_rejected_threshold,
             last_seen_unix,
             metadata: serde_json::json!({}),
         });
@@ -358,7 +361,7 @@ mod tests {
 
     use crate::state::AuditEvent;
 
-    use super::build_alerts;
+    use super::{AlertBuildContext, build_alerts};
 
     fn event(agent_id: Option<&str>, event_type: &str, outcome: &str, ts_unix: u64) -> AuditEvent {
         AuditEvent {
@@ -386,7 +389,17 @@ mod tests {
             event(Some("agent-a"), "command_result", "timeout", 102),
         ];
 
-        let alerts = build_alerts(200, &enrolled, &connected, &timeouts, &[], &[], 3, 3, 5);
+        let alerts = build_alerts(AlertBuildContext {
+            now_unix: 200,
+            enrolled_agents: &enrolled,
+            connected_agents: &connected,
+            timeout_events: &timeouts,
+            auth_reject_events: &[],
+            enroll_reject_events: &[],
+            timeout_threshold: 3,
+            auth_rejected_threshold: 3,
+            enroll_rejected_threshold: 5,
+        });
 
         assert!(
             alerts
@@ -416,17 +429,17 @@ mod tests {
             event(None, "agent_enroll", "rejected", 24),
         ];
 
-        let alerts = build_alerts(
-            30,
-            &[],
-            &HashSet::new(),
-            &[],
-            &auth_rejects,
-            &enroll_rejects,
-            3,
-            3,
-            5,
-        );
+        let alerts = build_alerts(AlertBuildContext {
+            now_unix: 30,
+            enrolled_agents: &[],
+            connected_agents: &HashSet::new(),
+            timeout_events: &[],
+            auth_reject_events: &auth_rejects,
+            enroll_reject_events: &enroll_rejects,
+            timeout_threshold: 3,
+            auth_rejected_threshold: 3,
+            enroll_rejected_threshold: 5,
+        });
 
         assert!(alerts.iter().any(
             |a| a.kind == "agent_auth_reject_spike" && a.agent_id.as_deref() == Some("agent-x")
