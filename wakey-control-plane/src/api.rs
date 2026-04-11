@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::{Path as AxumPath, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,12 @@ pub struct EnrollResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IssueEnrollTokenResponse {
     pub enroll_token: String,
+    pub expires_at_unix: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IssueEnrollTokenQuery {
+    pub ttl_seconds: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -81,14 +87,23 @@ pub async fn enroll(
 
 pub async fn issue_enroll_token(
     State(state): State<AppState>,
+    Query(query): Query<IssueEnrollTokenQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    match state.store.issue_enroll_token().await {
-        Ok(token) => {
-            info!("issued enroll token");
+    let ttl = std::time::Duration::from_secs(
+        query
+            .ttl_seconds
+            .unwrap_or(state.enroll_token_ttl.as_secs())
+            .max(1),
+    );
+
+    match state.store.issue_enroll_token(ttl).await {
+        Ok(issued) => {
+            info!(expires_at_unix = issued.expires_at_unix, "issued enroll token");
             Ok((
                 StatusCode::OK,
                 Json(IssueEnrollTokenResponse {
-                    enroll_token: token,
+                    enroll_token: issued.enroll_token,
+                    expires_at_unix: issued.expires_at_unix,
                 }),
             ))
         }

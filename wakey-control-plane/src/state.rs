@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,12 @@ use uuid::Uuid;
 pub struct IssuedAgent {
     pub agent_id: String,
     pub agent_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssuedEnrollToken {
+    pub enroll_token: String,
+    pub expires_at_unix: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,7 +32,7 @@ pub struct Store {
 }
 
 impl Store {
-    pub async fn load_or_init(path: &Path, enroll_tokens: Vec<String>) -> Result<Self> {
+    pub async fn load_or_init(path: &Path, enroll_tokens: Vec<String>, seed_ttl: Duration) -> Result<Self> {
         let db_path = canonical_db_path(path);
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
@@ -52,11 +59,14 @@ impl Store {
             if token.is_empty() {
                 continue;
             }
+            let expires_at = now_unix().saturating_add(seed_ttl.as_secs().max(1));
             store
                 .enroll_tokens
-                .insert(token.as_bytes(), &[])
+                .insert(token.as_bytes(), &expires_at.to_le_bytes())
                 .with_context(|| format!("failed to seed enroll token into {}", store.db_path.display()))?;
         }
+
+        store.gc_expired_enroll_tokens()?;
 
         store
             .flush()
@@ -74,15 +84,28 @@ impl Store {
     }
 
     pub async fn enroll(&self, enroll_token: &str) -> Result<IssuedAgent> {
-        if self
+        let Some(raw_expiry) = self
             .enroll_tokens
-            .remove(enroll_token.as_bytes())
-            .context("failed removing enroll token")?
-            .is_none()
-        {
-            warn!("rejecting enroll attempt with invalid or consumed token");
+            .get(enroll_token.as_bytes())
+            .context("failed reading enroll token")?
+        else {
+            warn!("rejecting enroll attempt with invalid, expired, or consumed token");
             anyhow::bail!("invalid or already-used enroll token");
+        };
+
+        let expires_at_unix = decode_expiry(raw_expiry.as_ref())
+            .context("failed decoding enroll token expiry")?;
+        let now = now_unix();
+        if expires_at_unix <= now {
+            let _ = self.enroll_tokens.remove(enroll_token.as_bytes());
+            self.flush().ok();
+            warn!(expires_at_unix, now_unix = now, "rejecting expired enroll token");
+            anyhow::bail!("enroll token has expired");
         }
+
+        self.enroll_tokens
+            .remove(enroll_token.as_bytes())
+            .context("failed consuming enroll token")?;
 
         let agent_id = format!("agent-{}", Uuid::new_v4());
         let agent_token = format!("tok-{}", Uuid::new_v4());
@@ -99,15 +122,19 @@ impl Store {
         })
     }
 
-    pub async fn issue_enroll_token(&self) -> Result<String> {
+    pub async fn issue_enroll_token(&self, ttl: Duration) -> Result<IssuedEnrollToken> {
         let token = format!("enr-{}", Uuid::new_v4());
+        let expires_at_unix = now_unix().saturating_add(ttl.as_secs().max(1));
         self.enroll_tokens
-            .insert(token.as_bytes(), &[])
+            .insert(token.as_bytes(), &expires_at_unix.to_le_bytes())
             .context("failed persisting enroll token")?;
         self.flush()
             .context("failed flushing state db after token issuance")?;
-        info!("persisted new enroll token");
-        Ok(token)
+        info!(expires_at_unix, "persisted new enroll token");
+        Ok(IssuedEnrollToken {
+            enroll_token: token,
+            expires_at_unix,
+        })
     }
 
     pub async fn reload_from_disk(&self) -> Result<()> {
@@ -150,24 +177,26 @@ impl Store {
     }
 
     fn maybe_migrate_legacy_json(&self, configured_path: &Path) -> Result<()> {
-        if configured_path.extension().and_then(|x| x.to_str()) != Some("json") {
-            return Ok(());
-        }
+        let legacy_path = match configured_path.extension().and_then(|x| x.to_str()) {
+            Some("json") => configured_path.to_path_buf(),
+            _ => configured_path.with_extension("json"),
+        };
         if self.enroll_tokens.iter().next().is_some() || self.agents.iter().next().is_some() {
             return Ok(());
         }
-        if !configured_path.exists() {
+        if !legacy_path.exists() {
             return Ok(());
         }
 
-        let raw = std::fs::read_to_string(configured_path)
-            .with_context(|| format!("failed to read legacy state {}", configured_path.display()))?;
+        let raw = std::fs::read_to_string(&legacy_path)
+            .with_context(|| format!("failed to read legacy state {}", legacy_path.display()))?;
         let legacy: LegacyPersistedState = serde_json::from_str(&raw)
-            .with_context(|| format!("failed to parse legacy state {}", configured_path.display()))?;
+            .with_context(|| format!("failed to parse legacy state {}", legacy_path.display()))?;
 
+        let expires_at_unix = now_unix().saturating_add(86_400);
         for token in legacy.enroll_tokens {
             self.enroll_tokens
-                .insert(token.as_bytes(), &[])
+            .insert(token.as_bytes(), &expires_at_unix.to_le_bytes())
                 .context("failed to migrate enroll token")?;
         }
         for (agent_id, token) in legacy.agents {
@@ -177,7 +206,29 @@ impl Store {
         }
 
         self.flush().context("failed flushing migrated legacy state")?;
-        info!(legacy = %configured_path.display(), db = %self.db_path.display(), "migrated legacy json state into sled db");
+        std::fs::remove_file(&legacy_path)
+            .with_context(|| format!("failed to delete legacy state {}", legacy_path.display()))?;
+        info!(legacy = %legacy_path.display(), db = %self.db_path.display(), "migrated legacy json state into sled db and deleted legacy file");
+        Ok(())
+    }
+
+    fn gc_expired_enroll_tokens(&self) -> Result<()> {
+        let now = now_unix();
+        let mut removed = 0u64;
+        for item in self.enroll_tokens.iter() {
+            let (token, value) = item.context("failed iterating enroll token tree")?;
+            let expires_at = decode_expiry(value.as_ref()).context("failed decoding token expiry during gc")?;
+            if expires_at <= now {
+                self.enroll_tokens
+                    .remove(token)
+                    .context("failed removing expired enroll token")?;
+                removed = removed.saturating_add(1);
+            }
+        }
+        if removed > 0 {
+            self.flush().context("failed flushing db after gc")?;
+            info!(removed, "garbage-collected expired enroll tokens");
+        }
         Ok(())
     }
 }
@@ -187,4 +238,20 @@ fn canonical_db_path(configured: &Path) -> PathBuf {
         Some("json") => configured.with_extension("db"),
         _ => configured.to_path_buf(),
     }
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn decode_expiry(raw: &[u8]) -> Result<u64> {
+    if raw.len() != 8 {
+        anyhow::bail!("invalid token expiry length {}", raw.len());
+    }
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(raw);
+    Ok(u64::from_le_bytes(arr))
 }

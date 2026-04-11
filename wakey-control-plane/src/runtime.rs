@@ -24,6 +24,7 @@ pub struct AppState {
     pub pending: Arc<Mutex<HashMap<String, oneshot::Sender<AgentReply>>>>,
     pub public_url: String,
     pub command_timeout: Duration,
+    pub enroll_token_ttl: Duration,
 }
 
 pub enum AgentReply {
@@ -35,7 +36,11 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     write_pid_file(&daemon.pid_file)?;
     info!(pid_file = %daemon.pid_file.display(), "wrote control-plane pid file");
 
-    let store = state::Store::load_or_init(&daemon.state_file, daemon.enroll_tokens.clone())
+    let store = state::Store::load_or_init(
+        &daemon.state_file,
+        daemon.enroll_tokens.clone(),
+        daemon.enroll_token_ttl,
+    )
         .await
         .with_context(|| format!("failed to initialize store {}", daemon.state_file.display()))?;
 
@@ -45,6 +50,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         pending: Arc::new(Mutex::new(HashMap::new())),
         public_url: daemon.public_url.clone(),
         command_timeout: daemon.command_timeout,
+        enroll_token_ttl: daemon.enroll_token_ttl,
     };
 
     let app = Router::new()
@@ -59,7 +65,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         )
         .with_state(app_state.clone());
 
-    info!(bind = %daemon.bind, pid_file = %daemon.pid_file.display(), "starting control-plane server");
+    info!(bind = %daemon.bind, data_dir = %daemon.data_dir.display(), pid_file = %daemon.pid_file.display(), state_file = %daemon.state_file.display(), "starting control-plane server");
     let listener = TcpListener::bind(daemon.bind).await?;
     let mut server = tokio::spawn(async move {
         axum::serve(listener, app)
@@ -106,9 +112,12 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
 }
 
 pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
+    let settings = config::resolve_issue_token_settings(&args)?;
+
     if let Some(url) = args.public_url {
         let base = config::normalize_public_url(&url);
-        let endpoint = config::issue_token_endpoint(&base);
+        let ttl_seconds = settings.ttl.as_secs().max(1);
+        let endpoint = format!("{}?ttl_seconds={ttl_seconds}", config::issue_token_endpoint(&base));
         info!(endpoint = %endpoint, "requesting live enroll token from running control-plane daemon");
         let client = reqwest::Client::new();
 
@@ -134,6 +143,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
         info!("received live enroll token response");
 
         println!("enroll_token={}", payload.enroll_token);
+        println!("expires_at_unix={}", payload.expires_at_unix);
         println!(
             "agent_command=wakey-agent enroll --server-url {base} --enroll-token {}",
             payload.enroll_token
@@ -142,15 +152,16 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
     }
 
     // Fallback for offline tooling: writes to state file, requires daemon reload to pick up.
-    info!(state_file = %args.state_file.display(), "issuing enroll token via offline state file fallback");
-    let store = state::Store::load_or_init(&args.state_file, args.enroll_tokens)
+    info!(data_dir = %settings.data_dir.display(), state_file = %settings.state_file.display(), ttl_seconds = settings.ttl.as_secs(), "issuing enroll token via offline state file fallback");
+    let store = state::Store::load_or_init(&settings.state_file, args.enroll_tokens, settings.ttl)
         .await
-        .with_context(|| format!("failed to initialize store {}", args.state_file.display()))?;
-    let token = store.issue_enroll_token().await?;
-    println!("enroll_token={token}");
+        .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
+    let issued = store.issue_enroll_token(settings.ttl).await?;
+    println!("enroll_token={}", issued.enroll_token);
+    println!("expires_at_unix={}", issued.expires_at_unix);
     eprintln!(
         "note: token was written to {}. running daemon must reload state to see it",
-        args.state_file.display()
+        settings.state_file.display()
     );
     Ok(())
 }

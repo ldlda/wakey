@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
-pub const DEFAULT_STATE_FILE: &str = "/var/lib/wakey-control-plane/state.db";
-pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-control-plane.pid";
+pub const DEFAULT_PID_FILE: &str = "/var/lib/wakey-control-plane/wakey-control-plane.pid";
+pub const DEFAULT_DATA_DIR: &str = "/var/lib/wakey-control-plane";
 pub const DEFAULT_CONFIG_FILE: &str = "/etc/wakey-control-plane/config.toml";
 
 #[derive(Parser)]
@@ -33,6 +33,9 @@ pub enum Command {
 #[derive(Args, Clone)]
 pub struct ServeArgs {
     #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+
+    #[arg(long)]
     pub bind: Option<SocketAddr>,
 
     #[arg(long)]
@@ -48,6 +51,9 @@ pub struct ServeArgs {
     pub command_timeout_ms: Option<u64>,
 
     #[arg(long)]
+    pub enroll_token_ttl_seconds: Option<u64>,
+
+    #[arg(long)]
     pub pid_file: Option<PathBuf>,
 
     #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
@@ -58,6 +64,9 @@ pub struct ServeArgs {
 pub struct InitConfigArgs {
     #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
     pub config_file: PathBuf,
+
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
 
     #[arg(long)]
     pub bind: Option<SocketAddr>,
@@ -73,6 +82,9 @@ pub struct InitConfigArgs {
 
     #[arg(long)]
     pub command_timeout_ms: Option<u64>,
+
+    #[arg(long)]
+    pub enroll_token_ttl_seconds: Option<u64>,
 
     #[arg(long = "enroll-token")]
     pub enroll_tokens: Vec<String>,
@@ -92,14 +104,23 @@ pub struct InitConfigArgs {
 
 #[derive(Args)]
 pub struct IssueEnrollTokenArgs {
-    #[arg(long, default_value = DEFAULT_STATE_FILE)]
-    pub state_file: PathBuf,
+    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    pub config_file: PathBuf,
+
+    #[arg(long)]
+    pub state_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
 
     #[arg(long = "enroll-token")]
     pub enroll_tokens: Vec<String>,
 
     #[arg(long)]
     pub public_url: Option<String>,
+
+    #[arg(long)]
+    pub ttl_seconds: Option<u64>,
 }
 
 #[derive(Args)]

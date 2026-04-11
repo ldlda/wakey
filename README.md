@@ -88,11 +88,13 @@ wakey-control-plane init-config
 Example:
 
 ```toml
+data_dir = "/var/lib/wakey-control-plane"
 bind = "0.0.0.0:8080"
 public_url = "https://cp.example.com"
-state_file = "/var/lib/wakey-control-plane/state.db"
-pid_file = "/var/run/wakey-control-plane.pid"
+state_file = "state.db"
+pid_file = "wakey-control-plane.pid"
 command_timeout_ms = 30000
+enroll_token_ttl_seconds = 86400
 
 [telemetry]
 otlp_endpoint = "http://127.0.0.1:4317"
@@ -105,6 +107,7 @@ structured logs are emitted.
 
 State is persisted in an embedded `sled` database (default
 `/var/lib/wakey-control-plane/state.db`) rather than single-file JSON snapshots.
+Relative paths in config are resolved under `data_dir`.
 
 ### Quick start
 
