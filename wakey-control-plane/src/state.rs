@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,20 +19,34 @@ pub struct IssuedEnrollToken {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct LegacyPersistedState {
-    enroll_tokens: std::collections::HashSet<String>,
-    agents: HashMap<String, String>,
+pub struct EnrollTokenInfo {
+    pub enroll_token: String,
+    pub expires_at_unix: u64,
+    pub expired: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateStats {
+    pub db_path: PathBuf,
+    pub schema_version: u32,
+    pub agent_count: usize,
+    pub enroll_token_count: usize,
+    pub expired_enroll_token_count: usize,
 }
 
 pub struct Store {
     db_path: PathBuf,
+    meta: sled::Tree,
     enroll_tokens: sled::Tree,
     agents: sled::Tree,
 }
 
+const SCHEMA_VERSION_KEY: &[u8] = b"schema_version";
+const SCHEMA_VERSION: u32 = 1;
+
 impl Store {
     pub async fn load_or_init(path: &Path, enroll_tokens: Vec<String>, seed_ttl: Duration) -> Result<Self> {
-        let db_path = canonical_db_path(path);
+        let db_path = path.to_path_buf();
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create state dir {}", parent.display()))?;
@@ -41,6 +54,7 @@ impl Store {
 
         let db = sled::open(&db_path)
             .with_context(|| format!("failed to open state db {}", db_path.display()))?;
+        let meta_tree = db.open_tree("meta").context("failed to open meta tree")?;
         let enroll_tree = db
             .open_tree("enroll_tokens")
             .context("failed to open enroll_tokens tree")?;
@@ -48,11 +62,12 @@ impl Store {
 
         let store = Self {
             db_path,
+            meta: meta_tree,
             enroll_tokens: enroll_tree,
             agents: agents_tree,
         };
 
-        store.maybe_migrate_legacy_json(path)?;
+        store.ensure_schema_version()?;
 
         for token in enroll_tokens {
             let token = token.trim();
@@ -66,7 +81,7 @@ impl Store {
                 .with_context(|| format!("failed to seed enroll token into {}", store.db_path.display()))?;
         }
 
-        store.gc_expired_enroll_tokens()?;
+        store.gc_expired_enroll_tokens_inner()?;
 
         store
             .flush()
@@ -137,6 +152,65 @@ impl Store {
         })
     }
 
+    pub async fn list_enroll_tokens(&self, include_expired: bool) -> Result<Vec<EnrollTokenInfo>> {
+        let now = now_unix();
+        let mut out = Vec::new();
+        for item in self.enroll_tokens.iter() {
+            let (token, value) = item.context("failed iterating enroll token tree")?;
+            let expires_at_unix = decode_expiry(value.as_ref()).context("failed decoding token expiry")?;
+            let expired = expires_at_unix <= now;
+            if !include_expired && expired {
+                continue;
+            }
+            let enroll_token = String::from_utf8(token.to_vec()).context("invalid utf-8 enroll token in db")?;
+            out.push(EnrollTokenInfo {
+                enroll_token,
+                expires_at_unix,
+                expired,
+            });
+        }
+        out.sort_by(|a, b| a.expires_at_unix.cmp(&b.expires_at_unix).then(a.enroll_token.cmp(&b.enroll_token)));
+        Ok(out)
+    }
+
+    pub async fn revoke_enroll_token(&self, token: &str) -> Result<bool> {
+        let removed = self
+            .enroll_tokens
+            .remove(token.as_bytes())
+            .context("failed removing enroll token")?
+            .is_some();
+        if removed {
+            self.flush().context("failed flushing db after enroll token revoke")?;
+        }
+        Ok(removed)
+    }
+
+    pub async fn stats(&self) -> Result<StateStats> {
+        let now = now_unix();
+        let mut enroll_token_count = 0usize;
+        let mut expired_enroll_token_count = 0usize;
+        for item in self.enroll_tokens.iter() {
+            let (_, value) = item.context("failed iterating enroll token tree")?;
+            let expires_at = decode_expiry(value.as_ref()).context("failed decoding token expiry during stats")?;
+            enroll_token_count = enroll_token_count.saturating_add(1);
+            if expires_at <= now {
+                expired_enroll_token_count = expired_enroll_token_count.saturating_add(1);
+            }
+        }
+
+        Ok(StateStats {
+            db_path: self.db_path.clone(),
+            schema_version: self.schema_version()?,
+            agent_count: self.agents.iter().count(),
+            enroll_token_count,
+            expired_enroll_token_count,
+        })
+    }
+
+    pub async fn gc_expired_enroll_tokens(&self) -> Result<u64> {
+        self.gc_expired_enroll_tokens_inner()
+    }
+
     pub async fn reload_from_disk(&self) -> Result<()> {
         // sled is durable and read-through; explicit reload is a no-op.
         info!(path = %self.db_path.display(), "reload requested; sled backend does not require in-memory reload");
@@ -176,43 +250,7 @@ impl Store {
         Ok(())
     }
 
-    fn maybe_migrate_legacy_json(&self, configured_path: &Path) -> Result<()> {
-        let legacy_path = match configured_path.extension().and_then(|x| x.to_str()) {
-            Some("json") => configured_path.to_path_buf(),
-            _ => configured_path.with_extension("json"),
-        };
-        if self.enroll_tokens.iter().next().is_some() || self.agents.iter().next().is_some() {
-            return Ok(());
-        }
-        if !legacy_path.exists() {
-            return Ok(());
-        }
-
-        let raw = std::fs::read_to_string(&legacy_path)
-            .with_context(|| format!("failed to read legacy state {}", legacy_path.display()))?;
-        let legacy: LegacyPersistedState = serde_json::from_str(&raw)
-            .with_context(|| format!("failed to parse legacy state {}", legacy_path.display()))?;
-
-        let expires_at_unix = now_unix().saturating_add(86_400);
-        for token in legacy.enroll_tokens {
-            self.enroll_tokens
-            .insert(token.as_bytes(), &expires_at_unix.to_le_bytes())
-                .context("failed to migrate enroll token")?;
-        }
-        for (agent_id, token) in legacy.agents {
-            self.agents
-                .insert(agent_id.as_bytes(), token.as_bytes())
-                .context("failed to migrate agent token")?;
-        }
-
-        self.flush().context("failed flushing migrated legacy state")?;
-        std::fs::remove_file(&legacy_path)
-            .with_context(|| format!("failed to delete legacy state {}", legacy_path.display()))?;
-        info!(legacy = %legacy_path.display(), db = %self.db_path.display(), "migrated legacy json state into sled db and deleted legacy file");
-        Ok(())
-    }
-
-    fn gc_expired_enroll_tokens(&self) -> Result<()> {
+    fn gc_expired_enroll_tokens_inner(&self) -> Result<u64> {
         let now = now_unix();
         let mut removed = 0u64;
         for item in self.enroll_tokens.iter() {
@@ -229,14 +267,39 @@ impl Store {
             self.flush().context("failed flushing db after gc")?;
             info!(removed, "garbage-collected expired enroll tokens");
         }
+        Ok(removed)
+    }
+
+    fn ensure_schema_version(&self) -> Result<()> {
+        match self.meta.get(SCHEMA_VERSION_KEY).context("failed reading schema version")? {
+            Some(raw) => {
+                let schema = decode_schema(raw.as_ref()).context("failed decoding schema version")?;
+                if schema != SCHEMA_VERSION {
+                    anyhow::bail!(
+                        "unsupported db schema version {}; expected {}",
+                        schema,
+                        SCHEMA_VERSION
+                    );
+                }
+            }
+            None => {
+                self.meta
+                    .insert(SCHEMA_VERSION_KEY, &SCHEMA_VERSION.to_le_bytes())
+                    .context("failed writing schema version")?;
+                self.flush().context("failed flushing db after schema init")?;
+                info!(schema_version = SCHEMA_VERSION, "initialized state schema version");
+            }
+        }
         Ok(())
     }
-}
 
-fn canonical_db_path(configured: &Path) -> PathBuf {
-    match configured.extension().and_then(|x| x.to_str()) {
-        Some("json") => configured.with_extension("db"),
-        _ => configured.to_path_buf(),
+    fn schema_version(&self) -> Result<u32> {
+        let raw = self
+            .meta
+            .get(SCHEMA_VERSION_KEY)
+            .context("failed reading schema version")?
+            .ok_or_else(|| anyhow::anyhow!("missing schema version in state db"))?;
+        decode_schema(raw.as_ref()).context("failed decoding schema version")
     }
 }
 
@@ -254,4 +317,13 @@ fn decode_expiry(raw: &[u8]) -> Result<u64> {
     let mut arr = [0u8; 8];
     arr.copy_from_slice(raw);
     Ok(u64::from_le_bytes(arr))
+}
+
+fn decode_schema(raw: &[u8]) -> Result<u32> {
+    if raw.len() != 4 {
+        anyhow::bail!("invalid schema version length {}", raw.len());
+    }
+    let mut arr = [0u8; 4];
+    arr.copy_from_slice(raw);
+    Ok(u32::from_le_bytes(arr))
 }

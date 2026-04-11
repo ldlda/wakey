@@ -6,7 +6,10 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{InitConfigArgs, IssueEnrollTokenArgs, ServeArgs};
+use crate::cli::{
+    InitConfigArgs, IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeEnrollTokenArgs,
+    ServeArgs, StateStatsArgs,
+};
 
 #[derive(Debug, Clone)]
 pub struct DaemonConfig {
@@ -279,22 +282,14 @@ pub struct IssueTokenSettings {
     pub ttl: Duration,
 }
 
+pub struct StateAccessSettings {
+    pub data_dir: PathBuf,
+    pub state_file: PathBuf,
+}
+
 pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<IssueTokenSettings> {
     let file = load_file_config(&args.config_file)?;
-
-    let data_dir = args
-        .data_dir
-        .clone()
-        .or(file.data_dir)
-        .unwrap_or_else(|| PathBuf::from(crate::cli::DEFAULT_DATA_DIR));
-
-    let state_file = resolve_path(
-        &data_dir,
-        args.state_file
-            .clone()
-            .or(file.state_file)
-            .unwrap_or_else(|| PathBuf::from("state.db")),
-    );
+    let state = resolve_state_access(&args.config_file, args.data_dir.clone(), args.state_file.clone())?;
 
     let ttl = Duration::from_secs(
         args.ttl_seconds
@@ -304,8 +299,44 @@ pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<Issue
     );
 
     Ok(IssueTokenSettings {
+        data_dir: state.data_dir,
+        state_file: state.state_file,
+        ttl,
+    })
+}
+
+pub fn resolve_list_enroll_token_settings(args: &ListEnrollTokensArgs) -> Result<StateAccessSettings> {
+    resolve_state_access(&args.config_file, args.data_dir.clone(), args.state_file.clone())
+}
+
+pub fn resolve_revoke_enroll_token_settings(args: &RevokeEnrollTokenArgs) -> Result<StateAccessSettings> {
+    resolve_state_access(&args.config_file, args.data_dir.clone(), args.state_file.clone())
+}
+
+pub fn resolve_state_stats_settings(args: &StateStatsArgs) -> Result<StateAccessSettings> {
+    resolve_state_access(&args.config_file, args.data_dir.clone(), args.state_file.clone())
+}
+
+fn resolve_state_access(
+    config_file: &Path,
+    cli_data_dir: Option<PathBuf>,
+    cli_state_file: Option<PathBuf>,
+) -> Result<StateAccessSettings> {
+    let file = load_file_config(config_file)?;
+
+    let data_dir = cli_data_dir
+        .or(file.data_dir)
+        .unwrap_or_else(|| PathBuf::from(crate::cli::DEFAULT_DATA_DIR));
+
+    let state_file = resolve_path(
+        &data_dir,
+        cli_state_file
+            .or(file.state_file)
+            .unwrap_or_else(|| PathBuf::from("state.db")),
+    );
+
+    Ok(StateAccessSettings {
         data_dir,
         state_file,
-        ttl,
     })
 }

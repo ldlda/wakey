@@ -34,6 +34,18 @@ async fn main() -> Result<()> {
             tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
             runtime::issue_enroll_token(args).await
         }
+        Command::ListEnrollTokens(args) => {
+            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
+            runtime::list_enroll_tokens(args).await
+        }
+        Command::RevokeEnrollToken(args) => {
+            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
+            runtime::revoke_enroll_token(args).await
+        }
+        Command::StateStats(args) => {
+            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
+            runtime::state_stats(args).await
+        }
         Command::Reload(args) => {
             tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
             runtime::reload_daemon(&args.pid_file)

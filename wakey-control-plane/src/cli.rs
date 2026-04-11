@@ -26,6 +26,12 @@ pub enum Command {
     InitConfig(InitConfigArgs),
     /// Create a new enroll token for provisioning a router.
     IssueEnrollToken(IssueEnrollTokenArgs),
+    /// List current enroll tokens and their expiration status.
+    ListEnrollTokens(ListEnrollTokensArgs),
+    /// Revoke a specific enroll token.
+    RevokeEnrollToken(RevokeEnrollTokenArgs),
+    /// Print state backend stats.
+    StateStats(StateStatsArgs),
     /// Send SIGHUP to an already-running daemon.
     Reload(ReloadArgs),
 }
@@ -121,6 +127,54 @@ pub struct IssueEnrollTokenArgs {
 
     #[arg(long)]
     pub ttl_seconds: Option<u64>,
+}
+
+#[derive(Args)]
+pub struct ListEnrollTokensArgs {
+    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    pub config_file: PathBuf,
+
+    #[arg(long)]
+    pub state_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    pub include_expired: bool,
+
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args)]
+pub struct RevokeEnrollTokenArgs {
+    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    pub config_file: PathBuf,
+
+    #[arg(long)]
+    pub state_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    pub token: String,
+}
+
+#[derive(Args)]
+pub struct StateStatsArgs {
+    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    pub config_file: PathBuf,
+
+    #[arg(long)]
+    pub state_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Args)]

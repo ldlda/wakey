@@ -8,11 +8,12 @@ use axum::Router;
 use axum::routing::{get, post};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
+use tokio::time::MissedTickBehavior;
 use tracing::{info, warn};
 use wakey_agent::protocol::{ErrorPayload, ServerMessage};
 
 use crate::api;
-use crate::cli::IssueEnrollTokenArgs;
+use crate::cli::{IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeEnrollTokenArgs, StateStatsArgs};
 use crate::config;
 use crate::state;
 use crate::ws;
@@ -57,6 +58,11 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
         .route("/api/v1/control/enroll-token", post(api::issue_enroll_token))
+        .route("/api/v1/control/enroll-tokens", get(api::list_enroll_tokens))
+        .route(
+            "/api/v1/control/enroll-tokens/{token}",
+            axum::routing::delete(api::revoke_enroll_token),
+        )
         .route("/api/v1/agent/ws", get(ws::agent_ws))
         .route("/api/v1/control/agents", get(api::list_agents))
         .route(
@@ -77,6 +83,8 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     {
         use tokio::signal::unix::{SignalKind, signal};
         let mut hup = signal(SignalKind::hangup()).context("failed to install SIGHUP handler")?;
+        let mut gc_tick = tokio::time::interval(Duration::from_secs(300));
+        gc_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -89,6 +97,16 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
                     match app_state.store.reload_from_disk().await {
                         Ok(()) => info!("reloaded state from disk"),
                         Err(err) => warn!(error = %err, "failed to reload state from disk"),
+                    }
+                }
+                _ = gc_tick.tick() => {
+                    match app_state.store.gc_expired_enroll_tokens().await {
+                        Ok(removed) => {
+                            if removed > 0 {
+                                info!(removed, "periodic gc removed expired enroll tokens");
+                            }
+                        }
+                        Err(err) => warn!(error = %err, "periodic gc failed"),
                     }
                 }
                 join = &mut server => {
@@ -163,6 +181,59 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
         "note: token was written to {}. running daemon must reload state to see it",
         settings.state_file.display()
     );
+    Ok(())
+}
+
+pub async fn list_enroll_tokens(args: ListEnrollTokensArgs) -> Result<()> {
+    let settings = config::resolve_list_enroll_token_settings(&args)?;
+    let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
+        .await
+        .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
+    let tokens = store.list_enroll_tokens(args.include_expired).await?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&tokens).context("failed to render json")?
+        );
+        return Ok(());
+    }
+    for token in tokens {
+        println!(
+            "token={} expires_at_unix={} expired={}",
+            token.enroll_token, token.expires_at_unix, token.expired
+        );
+    }
+    Ok(())
+}
+
+pub async fn revoke_enroll_token(args: RevokeEnrollTokenArgs) -> Result<()> {
+    let settings = config::resolve_revoke_enroll_token_settings(&args)?;
+    let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
+        .await
+        .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
+    let removed = store.revoke_enroll_token(&args.token).await?;
+    println!("token={} revoked={}", args.token, removed);
+    Ok(())
+}
+
+pub async fn state_stats(args: StateStatsArgs) -> Result<()> {
+    let settings = config::resolve_state_stats_settings(&args)?;
+    let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
+        .await
+        .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
+    let stats = store.stats().await?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&stats).context("failed to render json")?
+        );
+        return Ok(());
+    }
+    println!("db_path={}", stats.db_path.display());
+    println!("schema_version={}", stats.schema_version);
+    println!("agent_count={}", stats.agent_count);
+    println!("enroll_token_count={}", stats.enroll_token_count);
+    println!("expired_enroll_token_count={}", stats.expired_enroll_token_count);
     Ok(())
 }
 

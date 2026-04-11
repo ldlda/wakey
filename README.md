@@ -85,6 +85,26 @@ You can scaffold this file with:
 wakey-control-plane init-config
 ```
 
+Inspect current persisted state:
+
+```sh
+wakey-control-plane state-stats
+```
+
+List/revoke enroll tokens from CLI:
+
+```sh
+wakey-control-plane list-enroll-tokens --include-expired
+wakey-control-plane revoke-enroll-token --token enr-...
+```
+
+Machine-readable output is available:
+
+```sh
+wakey-control-plane list-enroll-tokens --include-expired --json
+wakey-control-plane state-stats --json
+```
+
 Example:
 
 ```toml
@@ -106,8 +126,10 @@ If `telemetry.otlp_endpoint` is omitted, logs still work normally and only local
 structured logs are emitted.
 
 State is persisted in an embedded `sled` database (default
-`/var/lib/wakey-control-plane/state.db`) rather than single-file JSON snapshots.
+`/var/lib/wakey-control-plane/state.db`).
 Relative paths in config are resolved under `data_dir`.
+
+Enroll tokens are now expiring and revocable. Issuance returns `expires_at_unix`.
 
 ### Quick start
 
@@ -154,6 +176,12 @@ During daemon control/state operations:
 
 - control-plane: `wrote control-plane pid file`, `saved control-plane store`, `reloaded control-plane store from disk`
 - agent: `wrote wakey-agent pid file`, `sending wakey-agent reload signal`
+
+Control-plane admin API includes token management endpoints:
+
+- `POST /api/v1/control/enroll-token?ttl_seconds=<n>`
+- `GET /api/v1/control/enroll-tokens?include_expired=true|false`
+- `DELETE /api/v1/control/enroll-tokens/{token}`
 
 If commands still appear silent, verify both processes are running with `-v`
 and that `RUST_LOG` is not overriding to a stricter level.

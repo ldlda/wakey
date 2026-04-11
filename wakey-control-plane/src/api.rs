@@ -32,6 +32,24 @@ pub struct IssueEnrollTokenQuery {
     pub ttl_seconds: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ListEnrollTokenQuery {
+    pub include_expired: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EnrollTokenStatus {
+    pub enroll_token: String,
+    pub expires_at_unix: u64,
+    pub expired: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RevokeEnrollTokenResponse {
+    pub token: String,
+    pub revoked: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AgentStatus {
     pub agent_id: String,
@@ -133,6 +151,54 @@ pub async fn list_agents(
         .collect::<Vec<_>>();
 
     Ok((StatusCode::OK, Json(agents)))
+}
+
+pub async fn list_enroll_tokens(
+    State(state): State<AppState>,
+    Query(query): Query<ListEnrollTokenQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let include_expired = query.include_expired.unwrap_or(false);
+    match state.store.list_enroll_tokens(include_expired).await {
+        Ok(tokens) => {
+            let body = tokens
+                .into_iter()
+                .map(|t| EnrollTokenStatus {
+                    enroll_token: t.enroll_token,
+                    expires_at_unix: t.expires_at_unix,
+                    expired: t.expired,
+                })
+                .collect::<Vec<_>>();
+            Ok((StatusCode::OK, Json(body)))
+        }
+        Err(err) => {
+            warn!(error = %err, "failed to list enroll tokens");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "list_enroll_tokens_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
+pub async fn revoke_enroll_token(
+    State(state): State<AppState>,
+    AxumPath(token): AxumPath<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    match state.store.revoke_enroll_token(&token).await {
+        Ok(revoked) => Ok((
+            StatusCode::OK,
+            Json(RevokeEnrollTokenResponse { token, revoked }),
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to revoke enroll token");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "revoke_enroll_token_failed",
+                &err.to_string(),
+            ))
+        }
+    }
 }
 
 pub async fn run_command(
@@ -265,5 +331,5 @@ pub fn json_error(
             AgentCommand::Devs(_) => "devs",
             AgentCommand::Inventory(_) => "inventory",
             AgentCommand::Wake(_) => "wake",
-        }
+    }
     }
