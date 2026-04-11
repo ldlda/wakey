@@ -52,6 +52,14 @@ pub struct EnrollArgs {
     /// Path to the agent config file to write.
     #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
+
+    /// Reload a running daemon after writing config.
+    #[arg(long)]
+    pub reload_running: bool,
+
+    /// Path to pid file used when `--reload-running` is enabled.
+    #[arg(long, default_value = DEFAULT_PID_FILE)]
+    pub pid_file: PathBuf,
 }
 
 #[derive(Args)]

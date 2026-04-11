@@ -22,6 +22,12 @@ async fn main() -> Result<()> {
             let config = enroll::enroll(&args.server_url, &args.enroll_token, &args.config).await?;
             println!("agent_id={}", config.agent_id);
             println!("config={}", args.config.display());
+            if args.reload_running {
+                match serve::reload_daemon(&args.pid_file) {
+                    Ok(()) => println!("reload=signaled pid_file={}", args.pid_file.display()),
+                    Err(err) => ::tracing::warn!(error = %err, pid_file = %args.pid_file.display(), "enroll completed but daemon reload failed"),
+                }
+            }
         }
         Command::InitConfig(args) => init_config(args)?,
         Command::Reload(args) => serve::reload_daemon(&args.pid_file)?,

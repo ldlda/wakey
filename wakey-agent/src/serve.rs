@@ -105,13 +105,19 @@ fn read_pid(path: &Path) -> Result<i32> {
 }
 
 fn send_hup(pid: i32) -> Result<()> {
-    let status = std::process::Command::new("kill")
-        .arg("-HUP")
-        .arg(pid.to_string())
-        .status()
-        .context("failed to invoke kill -HUP")?;
-    if !status.success() {
-        anyhow::bail!("kill -HUP failed for pid {pid}");
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{Signal, kill};
+        use nix::unistd::Pid;
+
+        kill(Pid::from_raw(pid), Signal::SIGHUP)
+            .with_context(|| format!("failed to send SIGHUP to pid {pid}"))?;
+        Ok(())
     }
-    Ok(())
+
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        anyhow::bail!("reload is only supported on Unix (SIGHUP unavailable on this platform)")
+    }
 }

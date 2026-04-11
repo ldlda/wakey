@@ -9,6 +9,7 @@ clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
 http = "1"
 macaddr = { version = "1", features = ["serde", "serde_std"] }
+nix = { version = "0.30", default-features = false, features = ["signal", "process"] }
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",

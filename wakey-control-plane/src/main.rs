@@ -1,5 +1,6 @@
 mod api;
 mod cli;
+mod config;
 mod runtime;
 mod state;
 mod tracing;

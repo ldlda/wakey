@@ -13,6 +13,7 @@ use wakey_agent::protocol::{ErrorPayload, ServerMessage};
 
 use crate::api;
 use crate::cli::{IssueEnrollTokenArgs, ServeArgs};
+use crate::config;
 use crate::state;
 use crate::ws;
 
@@ -31,23 +32,25 @@ pub enum AgentReply {
 }
 
 pub async fn serve(args: ServeArgs) -> Result<()> {
-    write_pid_file(&args.pid_file)?;
+    let daemon = config::DaemonConfig::from_serve_args(&args);
+    write_pid_file(&daemon.pid_file)?;
 
-    let store = state::Store::load_or_init(&args.state_file, args.enroll_tokens)
+    let store = state::Store::load_or_init(&daemon.state_file, args.enroll_tokens)
         .await
-        .with_context(|| format!("failed to initialize store {}", args.state_file.display()))?;
+        .with_context(|| format!("failed to initialize store {}", daemon.state_file.display()))?;
 
     let app_state = AppState {
         store: Arc::new(store),
         sessions: Arc::new(RwLock::new(HashMap::new())),
         pending: Arc::new(Mutex::new(HashMap::new())),
-        public_url: args.public_url.trim_end_matches('/').to_string(),
-        command_timeout: Duration::from_millis(args.command_timeout_ms.max(1)),
+        public_url: daemon.public_url.clone(),
+        command_timeout: daemon.command_timeout,
     };
 
     let app = Router::new()
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
+        .route("/api/v1/control/enroll-token", post(api::issue_enroll_token))
         .route("/api/v1/agent/ws", get(ws::agent_ws))
         .route("/api/v1/control/agents", get(api::list_agents))
         .route(
@@ -56,8 +59,8 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
         )
         .with_state(app_state.clone());
 
-    info!(bind = %args.bind, pid_file = %args.pid_file.display(), "starting control-plane server");
-    let listener = TcpListener::bind(args.bind).await?;
+    info!(bind = %daemon.bind, pid_file = %daemon.pid_file.display(), "starting control-plane server");
+    let listener = TcpListener::bind(daemon.bind).await?;
     let mut server = tokio::spawn(async move {
         axum::serve(listener, app)
             .await
@@ -83,7 +86,7 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
                     }
                 }
                 join = &mut server => {
-                    let _ = remove_pid_file(&args.pid_file);
+                    let _ = remove_pid_file(&daemon.pid_file);
                     return join.context("control-plane join failed")?;
                 }
             }
@@ -98,20 +101,54 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
         server.abort();
     }
 
-    let _ = remove_pid_file(&args.pid_file);
+    let _ = remove_pid_file(&daemon.pid_file);
     Ok(())
 }
 
 pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
+    if let Some(url) = args.public_url {
+        let base = config::normalize_public_url(&url);
+        let endpoint = config::issue_token_endpoint(&base);
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(&endpoint)
+            .send()
+            .await
+            .with_context(|| format!("failed to call live issuance endpoint {endpoint}"))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable error body>".to_string());
+            anyhow::bail!("live issuance failed with {status}: {body}");
+        }
+
+        let payload: api::IssueEnrollTokenResponse = response
+            .json()
+            .await
+            .context("failed to decode live issuance response")?;
+
+        println!("enroll_token={}", payload.enroll_token);
+        println!(
+            "agent_command=wakey-agent enroll --server-url {base} --enroll-token {}",
+            payload.enroll_token
+        );
+        return Ok(());
+    }
+
+    // Fallback for offline tooling: writes to state file, requires daemon reload to pick up.
     let store = state::Store::load_or_init(&args.state_file, args.enroll_tokens)
         .await
         .with_context(|| format!("failed to initialize store {}", args.state_file.display()))?;
     let token = store.issue_enroll_token().await?;
     println!("enroll_token={token}");
-    if let Some(url) = args.public_url {
-        let base = url.trim_end_matches('/');
-        println!("agent_command=wakey-agent enroll --server-url {base} --enroll-token {token}");
-    }
+    eprintln!(
+        "note: token was written to {}. running daemon must reload state to see it",
+        args.state_file.display()
+    );
     Ok(())
 }
 
@@ -153,13 +190,19 @@ fn read_pid(path: &Path) -> Result<i32> {
 }
 
 fn send_hup(pid: i32) -> Result<()> {
-    let status = std::process::Command::new("kill")
-        .arg("-HUP")
-        .arg(pid.to_string())
-        .status()
-        .context("failed to invoke kill -HUP")?;
-    if !status.success() {
-        anyhow::bail!("kill -HUP failed for pid {pid}");
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{Signal, kill};
+        use nix::unistd::Pid;
+
+        kill(Pid::from_raw(pid), Signal::SIGHUP)
+            .with_context(|| format!("failed to send SIGHUP to pid {pid}"))?;
+        Ok(())
     }
-    Ok(())
+
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        anyhow::bail!("reload is only supported on Unix (SIGHUP unavailable on this platform)")
+    }
 }

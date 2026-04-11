@@ -20,6 +20,11 @@ pub struct EnrollResponse {
     pub server_url: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IssueEnrollTokenResponse {
+    pub enroll_token: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AgentStatus {
     pub agent_id: String,
@@ -62,6 +67,24 @@ pub async fn enroll(
         Err(err) => Err(json_error(
             StatusCode::UNAUTHORIZED,
             "enrollment_rejected",
+            &err.to_string(),
+        )),
+    }
+}
+
+pub async fn issue_enroll_token(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    match state.store.issue_enroll_token().await {
+        Ok(token) => Ok((
+            StatusCode::OK,
+            Json(IssueEnrollTokenResponse {
+                enroll_token: token,
+            }),
+        )),
+        Err(err) => Err(json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "issue_enroll_token_failed",
             &err.to_string(),
         )),
     }
