@@ -16,7 +16,13 @@ function sourcemapEnabled(): boolean {
 }
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react({
+      babel: {
+        plugins: ["babel-plugin-react-compiler"],
+      },
+    }),
+  ],
   base: "/ui/",
   resolve: {
     alias: {
