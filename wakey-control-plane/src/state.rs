@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,9 +36,11 @@ impl Store {
             let raw = tokio::fs::read_to_string(path)
                 .await
                 .with_context(|| format!("failed to read store {}", path.display()))?;
+            debug!(path = %path.display(), bytes = raw.len(), "loading persisted control-plane store");
             serde_json::from_str::<PersistedState>(&raw)
                 .with_context(|| format!("failed to decode store {}", path.display()))?
         } else {
+            info!(path = %path.display(), seeded_enroll_tokens = seeded_tokens.len(), "initializing new control-plane store");
             PersistedState {
                 enroll_tokens: seeded_tokens,
                 agents: HashMap::new(),
@@ -49,12 +52,23 @@ impl Store {
             state: RwLock::new(initial),
         };
         store.save().await?;
+        let (enroll_tokens, agents) = {
+            let snapshot = store.state.read().await;
+            (snapshot.enroll_tokens.len(), snapshot.agents.len())
+        };
+        info!(
+            path = %store.path.display(),
+            enroll_tokens,
+            agents,
+            "control-plane store ready"
+        );
         Ok(store)
     }
 
     pub async fn enroll(&self, enroll_token: &str) -> Result<IssuedAgent> {
         let mut state = self.state.write().await;
         if !state.enroll_tokens.remove(enroll_token) {
+            warn!("rejecting enroll attempt with invalid or consumed token");
             anyhow::bail!("invalid or already-used enroll token");
         }
 
@@ -63,6 +77,7 @@ impl Store {
         state.agents.insert(agent_id.clone(), agent_token.clone());
         drop(state);
         self.save().await?;
+        info!(agent_id = %agent_id, "issued persistent agent credentials");
 
         Ok(IssuedAgent {
             agent_id,
@@ -76,11 +91,13 @@ impl Store {
         state.enroll_tokens.insert(token.clone());
         drop(state);
         self.save().await?;
+        info!("persisted new enroll token");
         Ok(token)
     }
 
     pub async fn reload_from_disk(&self) -> Result<()> {
         if !self.path.exists() {
+            warn!(path = %self.path.display(), "reload requested but store file is missing");
             return Ok(());
         }
 
@@ -90,7 +107,10 @@ impl Store {
         let decoded = serde_json::from_str::<PersistedState>(&raw)
             .with_context(|| format!("failed to decode store {}", self.path.display()))?;
 
+        let enroll_tokens = decoded.enroll_tokens.len();
+        let agents = decoded.agents.len();
         *self.state.write().await = decoded;
+        info!(path = %self.path.display(), enroll_tokens, agents, "reloaded control-plane store from disk");
         Ok(())
     }
 
@@ -121,6 +141,7 @@ impl Store {
         let snapshot = self.state.read().await;
         let body =
             serde_json::to_string_pretty(&*snapshot).context("failed to serialize store state")?;
+        let body_len = body.len();
 
         if let Some(parent) = self.path.parent() {
             tokio::fs::create_dir_all(parent)
@@ -139,6 +160,13 @@ impl Store {
                 self.path.display()
             )
         })?;
+        debug!(
+            path = %self.path.display(),
+            bytes = body_len,
+            enroll_tokens = snapshot.enroll_tokens.len(),
+            agents = snapshot.agents.len(),
+            "saved control-plane store"
+        );
         Ok(())
     }
 }

@@ -17,8 +17,12 @@ async fn main() -> Result<()> {
     tracing::init(cli.verbose);
 
     match cli.command {
-        Command::Serve(args) => serve::serve(args).await?,
+        Command::Serve(args) => {
+            ::tracing::info!("wakey-agent command: serve");
+            serve::serve(args).await?
+        }
         Command::Enroll(args) => {
+            ::tracing::info!(server_url = %args.server_url, config = %args.config.display(), "wakey-agent command: enroll");
             let config = enroll::enroll(&args.server_url, &args.enroll_token, &args.config).await?;
             println!("agent_id={}", config.agent_id);
             println!("config={}", args.config.display());
@@ -29,8 +33,14 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Command::InitConfig(args) => init_config(args)?,
-        Command::Reload(args) => serve::reload_daemon(&args.pid_file)?,
+        Command::InitConfig(args) => {
+            ::tracing::info!(config = %args.config.display(), force = args.force, "wakey-agent command: init-config");
+            init_config(args)?
+        }
+        Command::Reload(args) => {
+            ::tracing::info!(pid_file = %args.pid_file.display(), "wakey-agent command: reload");
+            serve::reload_daemon(&args.pid_file)?
+        }
     }
 
     Ok(())

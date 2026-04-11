@@ -5,7 +5,8 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, info_span, warn};
+use uuid::Uuid;
 use wakey_agent::protocol::{ErrorPayload, RequestId, ServerMessage};
 
 use crate::runtime::{AgentReply, AppState};
@@ -38,6 +39,11 @@ pub async fn agent_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> im
 }
 
 async fn handle_agent_socket(state: AppState, socket: WebSocket) {
+    let connection_id = Uuid::new_v4().to_string();
+    let span = info_span!("agent_ws_connection", connection_id = %connection_id);
+    let _span_guard = span.enter();
+    info!("agent websocket upgraded");
+
     let (mut write, mut read) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
 
@@ -55,6 +61,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
                 break;
             }
         }
+        debug!("websocket writer loop ended");
     });
 
     let mut authed_agent_id: Option<String> = None;
@@ -67,7 +74,10 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
                 warn!(error = %err, "agent websocket receive error");
                 break;
             }
-            None => break,
+            None => {
+                info!("agent websocket stream ended by peer");
+                break;
+            }
         };
 
         match msg {
@@ -80,7 +90,10 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
             }
             Message::Ping(_) => {}
             Message::Pong(_) => {}
-            Message::Close(_) => break,
+            Message::Close(frame) => {
+                info!(close = ?frame, "agent websocket close frame received");
+                break;
+            }
             Message::Binary(_) => {
                 debug!("ignoring unexpected binary websocket frame");
             }
@@ -93,6 +106,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
     }
 
     writer.abort();
+    debug!("agent websocket connection cleanup complete");
 }
 
 async fn process_agent_text(
@@ -117,6 +131,7 @@ async fn process_agent_text(
                 .verify_agent_token(&agent_id, &agent_token)
                 .await
             {
+                warn!(agent_id = %agent_id, "agent auth rejected");
                 anyhow::bail!("agent auth rejected");
             }
             state
@@ -140,6 +155,8 @@ async fn process_agent_text(
             let key = request_id.as_str().to_string();
             if let Some(waiter) = state.pending.lock().await.remove(&key) {
                 let _ = waiter.send(AgentReply::Result(result));
+            } else {
+                debug!(request_id = %key, "dropping unsolicited result from agent");
             }
         }
         IncomingClientMessage::Error { request_id, error } => {
@@ -149,6 +166,8 @@ async fn process_agent_text(
             let key = request_id.as_str().to_string();
             if let Some(waiter) = state.pending.lock().await.remove(&key) {
                 let _ = waiter.send(AgentReply::Error(error));
+            } else {
+                debug!(request_id = %key, "dropping unsolicited error from agent");
             }
         }
     }

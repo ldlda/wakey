@@ -3,6 +3,7 @@ use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
+use tracing::{info, info_span, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{AgentCommand, ErrorPayload, RequestId, ServerMessage};
 
@@ -56,19 +57,25 @@ pub async fn enroll(
     Json(req): Json<EnrollRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
     match state.store.enroll(&req.enroll_token).await {
-        Ok(issued) => Ok((
-            StatusCode::OK,
-            Json(EnrollResponse {
-                agent_id: issued.agent_id,
-                agent_token: issued.agent_token,
-                server_url: state.public_url,
-            }),
-        )),
-        Err(err) => Err(json_error(
-            StatusCode::UNAUTHORIZED,
-            "enrollment_rejected",
-            &err.to_string(),
-        )),
+        Ok(issued) => {
+            info!(agent_id = %issued.agent_id, "agent enrollment accepted");
+            Ok((
+                StatusCode::OK,
+                Json(EnrollResponse {
+                    agent_id: issued.agent_id,
+                    agent_token: issued.agent_token,
+                    server_url: state.public_url,
+                }),
+            ))
+        }
+        Err(err) => {
+            warn!(error = %err, "agent enrollment rejected");
+            Err(json_error(
+                StatusCode::UNAUTHORIZED,
+                "enrollment_rejected",
+                &err.to_string(),
+            ))
+        }
     }
 }
 
@@ -76,17 +83,23 @@ pub async fn issue_enroll_token(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
     match state.store.issue_enroll_token().await {
-        Ok(token) => Ok((
-            StatusCode::OK,
-            Json(IssueEnrollTokenResponse {
-                enroll_token: token,
-            }),
-        )),
-        Err(err) => Err(json_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "issue_enroll_token_failed",
-            &err.to_string(),
-        )),
+        Ok(token) => {
+            info!("issued enroll token");
+            Ok((
+                StatusCode::OK,
+                Json(IssueEnrollTokenResponse {
+                    enroll_token: token,
+                }),
+            ))
+        }
+        Err(err) => {
+            warn!(error = %err, "failed to issue enroll token");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "issue_enroll_token_failed",
+                &err.to_string(),
+            ))
+        }
     }
 }
 
@@ -113,6 +126,15 @@ pub async fn run_command(
     Json(req): Json<RelayCommandRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
     let request_id_string = format!("req-{}", Uuid::new_v4());
+    let command = command_kind(&req.command);
+    let span = info_span!(
+        "relay_command",
+        agent_id = %agent_id,
+        request_id = %request_id_string,
+        command = %command,
+    );
+    let _span_guard = span.enter();
+
     let request_id = RequestId::try_from(request_id_string.clone()).map_err(|err| {
         json_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -126,6 +148,7 @@ pub async fn run_command(
         sessions.get(&agent_id).cloned()
     }
     .ok_or_else(|| {
+        warn!("command rejected: agent not connected");
         json_error(
             StatusCode::NOT_FOUND,
             "agent_not_connected",
@@ -140,11 +163,16 @@ pub async fn run_command(
         .await
         .insert(request_id_string.clone(), pending_tx);
 
+    info!(
+        "dispatching command to agent"
+    );
+
     if let Err(err) = tx.send(ServerMessage::Command {
         request_id,
         command: req.command,
     }) {
         state.pending.lock().await.remove(&request_id_string);
+        warn!(error = %err, "failed sending command to agent session");
         return Err(json_error(
             StatusCode::BAD_GATEWAY,
             "agent_send_failed",
@@ -159,19 +187,26 @@ pub async fn run_command(
     );
     let outcome = tokio::time::timeout(timeout, pending_rx).await;
     let response = match outcome {
-        Ok(Ok(AgentReply::Result(result))) => RelayCommandResponse {
-            request_id: request_id_string,
-            status: "ok".into(),
-            result: Some(result),
-            error: None,
-        },
-        Ok(Ok(AgentReply::Error(error))) => RelayCommandResponse {
-            request_id: request_id_string,
-            status: "error".into(),
-            result: None,
-            error: Some(error),
-        },
+        Ok(Ok(AgentReply::Result(result))) => {
+            info!("agent command completed");
+            RelayCommandResponse {
+                request_id: request_id_string,
+                status: "ok".into(),
+                result: Some(result),
+                error: None,
+            }
+        }
+        Ok(Ok(AgentReply::Error(error))) => {
+            warn!(code = %error.code, "agent command returned error");
+            RelayCommandResponse {
+                request_id: request_id_string,
+                status: "error".into(),
+                result: None,
+                error: Some(error),
+            }
+        }
         Ok(Err(_)) => {
+            warn!("agent response channel dropped");
             return Err(json_error(
                 StatusCode::BAD_GATEWAY,
                 "agent_response_dropped",
@@ -180,6 +215,7 @@ pub async fn run_command(
         }
         Err(_) => {
             state.pending.lock().await.remove(&request_id_string);
+            warn!(timeout_ms = timeout.as_millis() as u64, "agent command timed out");
             return Err(json_error(
                 StatusCode::GATEWAY_TIMEOUT,
                 "agent_timeout",
@@ -206,3 +242,13 @@ pub fn json_error(
         })),
     )
 }
+
+    fn command_kind(command: &AgentCommand) -> &'static str {
+        match command {
+            AgentCommand::Status(_) => "status",
+            AgentCommand::Leases(_) => "leases",
+            AgentCommand::Devs(_) => "devs",
+            AgentCommand::Inventory(_) => "inventory",
+            AgentCommand::Wake(_) => "wake",
+        }
+    }

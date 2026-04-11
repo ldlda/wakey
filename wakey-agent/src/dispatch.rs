@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tracing::{debug, instrument};
+use tracing::{debug, info, instrument};
 
 use crate::protocol::{
     AgentCommand, CommandResult, DevsRequest, InventoryRequest, LeasesRequest, StatusRequest,
@@ -8,6 +8,8 @@ use crate::protocol::{
 
 #[instrument(skip_all)]
 pub async fn dispatch_command(command: AgentCommand) -> Result<CommandResult> {
+    let kind = command_kind(&command);
+    info!(command = %kind, "dispatching command into local wakey services");
     match command {
         AgentCommand::Status(req) => dispatch_status(req).await,
         AgentCommand::Leases(req) => dispatch_leases(req).await,
@@ -38,6 +40,7 @@ async fn dispatch_leases(req: LeasesRequest) -> Result<CommandResult> {
         include_state: req.include_state,
     })
     .await?;
+    debug!(rows = leases.len(), include_state = req.include_state, "dispatched leases command");
     Ok(CommandResult::Leases(leases))
 }
 
@@ -50,11 +53,13 @@ async fn dispatch_devs(req: DevsRequest) -> Result<CommandResult> {
     if req.up_only {
         devs.retain(|dev| dev.operstate == "up");
     }
+    debug!(rows = devs.len(), up_only = req.up_only, "dispatched devs command");
     Ok(CommandResult::Devs(devs))
 }
 
 async fn dispatch_inventory(req: InventoryRequest) -> Result<CommandResult> {
     let inventory = wakey::inventory(req.into_device_query()).await?;
+    debug!(rows = inventory.devices.len(), "dispatched inventory command");
     Ok(CommandResult::Inventory(inventory))
 }
 
@@ -65,7 +70,18 @@ async fn dispatch_wake(req: WakeRequest) -> Result<CommandResult> {
         (None, Some(mac), ip) => wakey::wake_explicit(mac, ip).await?,
         _ => unreachable!("wake request validated before dispatch"),
     };
+    debug!("dispatched wake command");
     Ok(CommandResult::Wake(result))
+}
+
+fn command_kind(command: &AgentCommand) -> &'static str {
+    match command {
+        AgentCommand::Status(_) => "status",
+        AgentCommand::Leases(_) => "leases",
+        AgentCommand::Devs(_) => "devs",
+        AgentCommand::Inventory(_) => "inventory",
+        AgentCommand::Wake(_) => "wake",
+    }
 }
 
 pub fn validate_wake_request(req: &WakeRequest) -> Result<()> {

@@ -12,7 +12,7 @@ use tracing::{info, warn};
 use wakey_agent::protocol::{ErrorPayload, ServerMessage};
 
 use crate::api;
-use crate::cli::{IssueEnrollTokenArgs, ServeArgs};
+use crate::cli::IssueEnrollTokenArgs;
 use crate::config;
 use crate::state;
 use crate::ws;
@@ -31,11 +31,11 @@ pub enum AgentReply {
     Error(ErrorPayload),
 }
 
-pub async fn serve(args: ServeArgs) -> Result<()> {
-    let daemon = config::DaemonConfig::from_serve_args(&args);
+pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     write_pid_file(&daemon.pid_file)?;
+    info!(pid_file = %daemon.pid_file.display(), "wrote control-plane pid file");
 
-    let store = state::Store::load_or_init(&daemon.state_file, args.enroll_tokens)
+    let store = state::Store::load_or_init(&daemon.state_file, daemon.enroll_tokens.clone())
         .await
         .with_context(|| format!("failed to initialize store {}", daemon.state_file.display()))?;
 
@@ -109,6 +109,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
     if let Some(url) = args.public_url {
         let base = config::normalize_public_url(&url);
         let endpoint = config::issue_token_endpoint(&base);
+        info!(endpoint = %endpoint, "requesting live enroll token from running control-plane daemon");
         let client = reqwest::Client::new();
 
         let response = client
@@ -130,6 +131,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
             .json()
             .await
             .context("failed to decode live issuance response")?;
+        info!("received live enroll token response");
 
         println!("enroll_token={}", payload.enroll_token);
         println!(
@@ -140,6 +142,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
     }
 
     // Fallback for offline tooling: writes to state file, requires daemon reload to pick up.
+    info!(state_file = %args.state_file.display(), "issuing enroll token via offline state file fallback");
     let store = state::Store::load_or_init(&args.state_file, args.enroll_tokens)
         .await
         .with_context(|| format!("failed to initialize store {}", args.state_file.display()))?;
@@ -154,6 +157,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
 
 pub fn reload_daemon(pid_file: &Path) -> Result<()> {
     let pid = read_pid(pid_file)?;
+    info!(pid, pid_file = %pid_file.display(), "sending control-plane reload signal");
     send_hup(pid)
 }
 

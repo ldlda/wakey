@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::{AgentConfig, save_config};
 
@@ -21,6 +21,7 @@ struct EnrollResponse {
 pub async fn enroll(server_url: &str, enroll_token: &str, config_path: &Path) -> Result<AgentConfig> {
     let server_url = normalize_server_url(server_url);
     let endpoint = format!("{server_url}/api/v1/agents/enroll");
+    info!(endpoint = %endpoint, config_path = %config_path.display(), "starting agent enrollment");
     let client = reqwest::Client::new();
     let response = client
         .post(endpoint)
@@ -35,6 +36,7 @@ pub async fn enroll(server_url: &str, enroll_token: &str, config_path: &Path) ->
             .text()
             .await
             .unwrap_or_else(|_| "<unable to read enrollment error body>".into());
+        warn!(status = %status, "agent enrollment request rejected by control-plane");
         anyhow::bail!("enrollment failed with {status}: {body}");
     }
 
@@ -51,7 +53,7 @@ pub async fn enroll(server_url: &str, enroll_token: &str, config_path: &Path) ->
         reconnect_max_ms: 30_000,
     };
     save_config(config_path, &config)?;
-    info!(config_path = %config_path.display(), "wrote agent config");
+    info!(agent_id = %config.agent_id, config_path = %config_path.display(), "agent enrollment succeeded and config was written");
     Ok(config)
 }
 

@@ -70,6 +70,82 @@ The project now uses:
 - `wakey-agent` for outbound enrollment and websocket execution
 - `wakey-control-plane` for enrollment, registry, and command relay
 
+## Logging and troubleshooting
+
+Both daemons emit structured tracing logs to stderr. If you are not seeing
+enrollment/command activity, run with increased verbosity.
+
+Control-plane also supports a config file at
+`/etc/wakey-control-plane/config.toml` (override with `--config-file`) so you
+can persist telemetry settings instead of passing flags.
+
+Example:
+
+```toml
+bind = "0.0.0.0:8080"
+public_url = "https://cp.example.com"
+state_file = "/var/lib/wakey-control-plane/state.json"
+pid_file = "/var/run/wakey-control-plane.pid"
+command_timeout_ms = 30000
+
+[telemetry]
+otlp_endpoint = "http://127.0.0.1:4317"
+service_name = "wakey-control-plane"
+json_logs = false
+```
+
+If `telemetry.otlp_endpoint` is omitted, logs still work normally and only local
+structured logs are emitted.
+
+### Quick start
+
+Control-plane:
+
+```sh
+wakey-control-plane -v serve --bind 0.0.0.0:8787 --public-url https://cp.example.com
+```
+
+Agent:
+
+```sh
+wakey-agent -v serve --config /etc/wakey-agent/config.toml
+```
+
+### Fine-grained log filters
+
+Use `RUST_LOG` when you want to focus on websocket/API internals.
+
+```sh
+RUST_LOG=wakey_control_plane=debug,wakey_agent=debug wakey-control-plane serve
+RUST_LOG=wakey_agent=debug wakey-agent serve
+```
+
+### What you should see
+
+During registration/enroll:
+
+- control-plane: `issued enroll token`, then `agent enrollment accepted`
+- agent: `starting agent enrollment`, then `agent enrollment succeeded and config was written`
+
+During live connectivity:
+
+- control-plane: `agent websocket upgraded`, `agent authenticated`, `agent disconnected`
+- agent: `connecting agent websocket`, `agent websocket session authenticated`, `heartbeat sent` (debug)
+
+During command relay:
+
+- control-plane: `dispatching command to agent`
+- agent: `received command from control-plane`, then `command execution completed` (or `command dispatch failed`)
+- control-plane: `agent command completed` (or timeout/error warnings)
+
+During daemon control/state operations:
+
+- control-plane: `wrote control-plane pid file`, `saved control-plane store`, `reloaded control-plane store from disk`
+- agent: `wrote wakey-agent pid file`, `sending wakey-agent reload signal`
+
+If commands still appear silent, verify both processes are running with `-v`
+and that `RUST_LOG` is not overriding to a stricter level.
+
 ## CLI
 
 `wakey` is usable as a local/operator CLI.

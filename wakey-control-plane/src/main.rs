@@ -13,11 +13,20 @@ use cli::{Cli, Command};
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    tracing::init(cli.verbose);
 
     match cli.command {
-        Command::Serve(args) => runtime::serve(args).await,
-        Command::IssueEnrollToken(args) => runtime::issue_enroll_token(args).await,
-        Command::Reload(args) => runtime::reload_daemon(&args.pid_file),
+        Command::Serve(args) => {
+            let daemon = config::DaemonConfig::from_serve_args(&args)?;
+            tracing::init(cli.verbose, &daemon.telemetry)?;
+            runtime::serve(daemon).await
+        }
+        Command::IssueEnrollToken(args) => {
+            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
+            runtime::issue_enroll_token(args).await
+        }
+        Command::Reload(args) => {
+            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
+            runtime::reload_daemon(&args.pid_file)
+        }
     }
 }

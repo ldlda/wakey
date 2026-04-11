@@ -5,6 +5,7 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 
 pub const DEFAULT_STATE_FILE: &str = "/var/lib/wakey-control-plane/state.json";
 pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-control-plane.pid";
+pub const DEFAULT_CONFIG_FILE: &str = "/etc/wakey-control-plane/config.toml";
 
 #[derive(Parser)]
 #[command(name = "wakey-control-plane")]
@@ -29,23 +30,26 @@ pub enum Command {
 
 #[derive(Args, Clone)]
 pub struct ServeArgs {
-    #[arg(long, default_value = "0.0.0.0:8080")]
-    pub bind: SocketAddr,
+    #[arg(long)]
+    pub bind: Option<SocketAddr>,
 
-    #[arg(long, default_value = "http://127.0.0.1:8080")]
-    pub public_url: String,
+    #[arg(long)]
+    pub public_url: Option<String>,
 
-    #[arg(long, default_value = DEFAULT_STATE_FILE)]
-    pub state_file: PathBuf,
+    #[arg(long)]
+    pub state_file: Option<PathBuf>,
 
     #[arg(long = "enroll-token")]
     pub enroll_tokens: Vec<String>,
 
-    #[arg(long, default_value_t = 30_000)]
-    pub command_timeout_ms: u64,
+    #[arg(long)]
+    pub command_timeout_ms: Option<u64>,
 
-    #[arg(long, default_value = DEFAULT_PID_FILE)]
-    pub pid_file: PathBuf,
+    #[arg(long)]
+    pub pid_file: Option<PathBuf>,
+
+    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    pub config_file: PathBuf,
 }
 
 #[derive(Args)]

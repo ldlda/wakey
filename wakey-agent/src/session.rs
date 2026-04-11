@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn};
 
 use crate::config::AgentConfig;
 use crate::dispatch::dispatch_command;
-use crate::protocol::{ClientMessage, ErrorPayload, ServerMessage};
+use crate::protocol::{AgentCommand, ClientMessage, ErrorPayload, ServerMessage};
 
 pub async fn run(config: AgentConfig) -> Result<()> {
     let mut backoff = config.reconnect_base_ms.max(100);
@@ -25,6 +25,17 @@ pub async fn run(config: AgentConfig) -> Result<()> {
 }
 
 async fn run_once(config: &AgentConfig) -> Result<()> {
+    let session_id = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or_default()
+    );
+    let span = info_span!("agent_session", session_id = %session_id, agent_id = %config.agent_id);
+    let _span_guard = span.enter();
+
     let ws_url = websocket_url(&config.server_url)?;
     info!(%ws_url, agent_id = %config.agent_id, "connecting agent websocket");
     let (stream, _) = connect_async(ws_url.as_str())
@@ -44,6 +55,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
         },
     )
     .await?;
+    info!(agent_id = %config.agent_id, "agent websocket session authenticated");
 
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -54,11 +66,15 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                 send_json(&mut sink, &ClientMessage::Heartbeat {
                     agent_id: config.agent_id.clone(),
                 }).await?;
+                debug!(agent_id = %config.agent_id, "heartbeat sent");
             }
             maybe_msg = source.next() => {
                 let msg = match maybe_msg {
                     Some(msg) => msg.context("websocket frame failed")?,
-                    None => anyhow::bail!("websocket closed by server"),
+                    None => {
+                        info!("websocket stream closed by server");
+                        anyhow::bail!("websocket closed by server");
+                    }
                 };
 
                 match msg {
@@ -79,6 +95,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                     }
                     Message::Pong(_) => {}
                     Message::Close(frame) => {
+                        info!(close = ?frame, "received close frame from server");
                         anyhow::bail!("websocket closed: {:?}", frame);
                     }
                     Message::Binary(_) => {
@@ -105,26 +122,31 @@ where
         ServerMessage::Command {
             request_id,
             command,
-        } => match dispatch_command(command).await {
-            Ok(result) => {
-                send_json(sink, &ClientMessage::Result { request_id, result }).await?;
-            }
-            Err(err) => {
-                error!(request_id = %request_id, error = %err, "command dispatch failed");
-                send_json(
-                    sink,
-                    &ClientMessage::Error {
-                        request_id,
-                        error: ErrorPayload {
-                            code: "command_dispatch_failed".into(),
-                            message: err.to_string(),
-                            retryable: None,
+        } => {
+            let kind = command_kind(&command);
+            info!(request_id = %request_id, command = %kind, "received command from control-plane");
+            match dispatch_command(command).await {
+                Ok(result) => {
+                    info!(request_id = %request_id, command = %kind, "command execution completed");
+                    send_json(sink, &ClientMessage::Result { request_id, result }).await?;
+                }
+                Err(err) => {
+                    error!(request_id = %request_id, command = %kind, error = %err, "command dispatch failed");
+                    send_json(
+                        sink,
+                        &ClientMessage::Error {
+                            request_id,
+                            error: ErrorPayload {
+                                code: "command_dispatch_failed".into(),
+                                message: err.to_string(),
+                                retryable: None,
+                            },
                         },
-                    },
-                )
-                .await?;
+                    )
+                    .await?;
+                }
             }
-        },
+        }
     }
     Ok(())
 }
@@ -135,10 +157,31 @@ where
     <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
 {
     let payload = serde_json::to_string(message).context("failed to serialize websocket message")?;
+    debug!(message_type = %client_message_kind(message), "sending websocket message");
     sink.send(Message::Text(payload))
         .await
         .context("failed to send websocket message")?;
     Ok(())
+}
+
+fn command_kind(command: &AgentCommand) -> &'static str {
+    match command {
+        AgentCommand::Status(_) => "status",
+        AgentCommand::Leases(_) => "leases",
+        AgentCommand::Devs(_) => "devs",
+        AgentCommand::Inventory(_) => "inventory",
+        AgentCommand::Wake(_) => "wake",
+    }
+}
+
+fn client_message_kind(message: &ClientMessage) -> &'static str {
+    match message {
+        ClientMessage::Hello { .. } => "hello",
+        ClientMessage::Auth { .. } => "auth",
+        ClientMessage::Heartbeat { .. } => "heartbeat",
+        ClientMessage::Result { .. } => "result",
+        ClientMessage::Error { .. } => "error",
+    }
 }
 
 pub fn websocket_url(server_url: &str) -> Result<url::Url> {
