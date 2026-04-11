@@ -15,13 +15,18 @@ function sourcemapEnabled(): boolean {
   return rustLog.includes("debug") || rustLog.includes("trace");
 }
 
+const ReactCompilerConfig = {
+  target: '18',
+  runtimeModule: 'react-compiler-runtime', // Redirects the missing specifier
+};
+
 export default defineConfig({
   plugins: [
     react(
       process.env.UI_REACT_COMPILER === "1"
         ? {
             babel: {
-              plugins: ["babel-plugin-react-compiler"],
+              plugins: [["babel-plugin-react-compiler", ReactCompilerConfig]],
             },
           }
         : undefined,
