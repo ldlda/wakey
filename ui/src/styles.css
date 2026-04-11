@@ -106,6 +106,23 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
 .form { display: grid; gap: 0.65rem; }
 .form label { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.9rem; }
 
+.grid-3 {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.grid-3.compact {
+  margin-top: 0.65rem;
+}
+
+.grid-3 label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .list { display: grid; gap: 0.4rem; margin-top: 0.55rem; }
 .row {
   display: flex;
@@ -120,6 +137,11 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
 }
 .row.selected { border-color: #6b84ad; }
 .row.plain { cursor: default; }
+.token-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
 .empty { color: var(--muted); padding: 0.35rem 0.2rem; }
 
 .output {

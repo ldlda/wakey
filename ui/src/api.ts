@@ -41,6 +41,22 @@ export type AuditEvent = {
 
 export type CommandKind = "status" | "devs" | "leases" | "inventory" | "wake";
 
+export type EnrollTokenStatus = {
+  enroll_token: string;
+  expires_at_unix: number;
+  expired: boolean;
+};
+
+export type IssueEnrollTokenResponse = {
+  enroll_token: string;
+  expires_at_unix: number;
+};
+
+export type RevokeEnrollTokenResponse = {
+  token: string;
+  revoked: boolean;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -77,6 +93,26 @@ export function fetchAlertHistory(limit = 50): Promise<AlertTransition[]> {
 
 export function fetchAudit(limit = 50): Promise<AuditEvent[]> {
   return request<AuditEvent[]>(`/api/v1/control/audit/events?limit=${limit}`);
+}
+
+export function fetchEnrollTokens(includeExpired = false): Promise<EnrollTokenStatus[]> {
+  return request<EnrollTokenStatus[]>(
+    `/api/v1/control/enroll-tokens?include_expired=${includeExpired ? "true" : "false"}`,
+  );
+}
+
+export function issueEnrollToken(ttlSeconds: number): Promise<IssueEnrollTokenResponse> {
+  return request<IssueEnrollTokenResponse>(
+    `/api/v1/control/enroll-token?ttl_seconds=${Math.max(1, Math.floor(ttlSeconds))}`,
+    { method: "POST" },
+  );
+}
+
+export function revokeEnrollToken(token: string): Promise<RevokeEnrollTokenResponse> {
+  return request<RevokeEnrollTokenResponse>(
+    `/api/v1/control/enroll-tokens/${encodeURIComponent(token)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function runCommand(agentId: string, kind: CommandKind, query: string): Promise<unknown> {
