@@ -6,7 +6,7 @@ param(
     [string]$Cargo = "cargo",
     [string]$Pass,
     [string]$HostName = "192.168.100.1",
-    [int]$Port = 2222,
+    [int]$Port = 22,
     [string]$User = "root",
     [string]$RemotePath = "/root/.bin/wakey",
     [string]$AgentRemotePath = "/root/.bin/wakey-agent",
@@ -14,6 +14,7 @@ param(
     [string]$BinName = "wakey",
     [string]$AgentBinName = "wakey-agent",
     [string]$HostKey,
+    [switch]$ForcePassword,
     [switch]$Restart = $true,
     [switch]$Quiet = $true
 )
@@ -26,7 +27,7 @@ try { $PSStyle.OutputRendering = 'Host' } catch {}
 $Pass = Get-DefaultPassword $Pass
 
 # Backward compatibility: allow HostName in the form host:port.
-$hostPort = Split-HostPort -Host $HostName -DefaultPort $Port
+$hostPort = Split-HostPort -HostName $HostName -DefaultPort $Port
 $HostName = $hostPort.Host
 $Port = $hostPort.Port
 
@@ -66,12 +67,12 @@ try {
     $deployPreferred = '/root/.bin/remote_deploy_wakey.sh'
 
     # Push binaries
-    Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet
-    Invoke-Scp -Local $localAgentBin -Dest $agentDestTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet
+    Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
+    Invoke-Scp -Local $localAgentBin -Dest $agentDestTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
 
     # Push deploy helper if exists
     if (Test-Path $localDeploy) {
-        Invoke-Scp -Local $localDeploy -Dest "$User@${HostName}:$deployTmp" -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet
+        Invoke-Scp -Local $localDeploy -Dest "$User@${HostName}:$deployTmp" -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
     }
 
     # Build and run remote deploy command
@@ -83,7 +84,7 @@ $(Get-DeployScript $deployPreferred $deployTmp $agentRemoteTmp $AgentRemotePath 
     $remoteCmd = "sh -lc '$($script -replace "`r",'')'"
     if ($Quiet) { $remoteCmd += " >/dev/null 2>&1" }
 
-    Invoke-Ssh -Cmd $remoteCmd -User $User -Remote $HostName -Pass $Pass -Port $Port -Quiet:$Quiet
+    Invoke-Ssh -Cmd $remoteCmd -User $User -Remote $HostName -Pass $Pass -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
 
     Write-Host "done ✔" -ForegroundColor Green
 }

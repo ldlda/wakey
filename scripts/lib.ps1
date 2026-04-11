@@ -2,26 +2,7 @@
 
 # Platform detection globals
 $script:IsWsl = $null
-$script:IsWindows = $null
 $script:WarnedNoSshpass = $false
-
-function Test-IsWindows {
-    if ($null -ne $script:IsWindows) {
-        return $script:IsWindows
-    }
-
-    $script:IsWindows = $false
-    try {
-        $osInfo = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
-        $script:IsWindows = $osInfo
-    }
-    catch {
-        # Fallback for older PowerShell versions
-        $script:IsWindows = $PSVersionTable.OS -like '*Windows*'
-    }
-
-    return $script:IsWindows
-}
 
 function Test-IsWsl {
     if ($null -ne $script:IsWsl) {
@@ -135,28 +116,28 @@ function Join-PosixPath {
 
 function Split-HostPort {
     param(
-        [string]$Host,
+        [string]$HostName,
         [int]$DefaultPort = 22
     )
 
     $result = [ordered]@{
-        Host = $Host
+        Host = $HostName
         Port = $DefaultPort
     }
 
-    if ([string]::IsNullOrWhiteSpace($Host)) {
+    if ([string]::IsNullOrWhiteSpace($HostName)) {
         return [PSCustomObject]$result
     }
 
     # IPv6 with brackets: [2001:db8::1]:2222
-    if ($Host -match '^\[(.+)\]:(\d+)$') {
+    if ($HostName -match '^\[(.+)\]:(\d+)$') {
         $result.Host = $matches[1]
         $result.Port = [int]$matches[2]
         return [PSCustomObject]$result
     }
 
     # host:port (single colon only, avoids plain IPv6 addresses)
-    if ($Host -match '^([^:]+):(\d+)$') {
+    if ($HostName -match '^([^:]+):(\d+)$') {
         $result.Host = $matches[1]
         $result.Port = [int]$matches[2]
         return [PSCustomObject]$result
@@ -179,7 +160,7 @@ function Invoke-Ext {
         if ($displayArgs[$i] -eq '-pw' -and ($i + 1) -lt $displayArgs.Count) {
             $displayArgs[$i + 1] = '****'
         }
-        if ($displayArgs[$i] -eq '-p' -and ($i + 1) -lt $displayArgs.Count -and $Exe -like '*sshpass*') {
+        if ($displayArgs[$i] -ceq '-p' -and ($i + 1) -lt $displayArgs.Count -and $Exe -like '*sshpass*') {
             $displayArgs[$i + 1] = '****'
         }
     }
@@ -187,6 +168,9 @@ function Invoke-Ext {
 
     $out = & $Exe @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) {
+        if ($Exe -like '*sshpass*' -and $LASTEXITCODE -eq 6) {
+            Write-Error ("{0} failed: sshpass could not confirm host key automatically (code 6). Use ssh once manually, or enable StrictHostKeyChecking=accept-new." -f $Label)
+        }
         Write-Error ("{0} exited with code {1}:`n{2}" -f $Label, $LASTEXITCODE, ($out -join "`n"))
         throw ("{0} exited with code {1}" -f $Label, $LASTEXITCODE)
     }
@@ -194,13 +178,13 @@ function Invoke-Ext {
 }
 
 function Invoke-Scp {
-    param($Local, $Dest, $Pass, $HostKey, [int]$Port = 22, [switch]$Quiet, [switch]$Recurse)
+    param($Local, $Dest, $Pass, $HostKey, [int]$Port = 22, [switch]$Quiet, [switch]$Recurse, [switch]$ForcePassword)
     
-    $isWindows = Test-IsWindows
+    $isWin = [bool]$IsWindows
     $isWsl = Test-IsWsl
     
     # Only use PuTTY on Windows (not in WSL)
-    if ($isWindows -and -not $isWsl -and ($pscp = Get-Command pscp.exe -ErrorAction SilentlyContinue)) {
+    if ($isWin -and -not $isWsl -and ($pscp = Get-Command pscp.exe -ErrorAction SilentlyContinue)) {
         $arguments = @('-scp')
         if ($Quiet) { $arguments += '-q' }
         if ($Recurse) { $arguments += '-r' }
@@ -221,6 +205,15 @@ function Invoke-Scp {
         $arguments = @('-O')
         if ($Quiet) { $arguments += '-q' }
         if ($Recurse) { $arguments += '-r' }
+        # Avoid interactive host-key prompts (important for sshpass usage)
+        $arguments += @('-o', 'StrictHostKeyChecking=accept-new')
+        if ($ForcePassword) {
+            $arguments += @('-o', 'PreferredAuthentications=keyboard-interactive,password')
+            $arguments += @('-o', 'PubkeyAuthentication=no')
+            $arguments += @('-o', 'KbdInteractiveAuthentication=yes')
+            $arguments += @('-o', 'PasswordAuthentication=yes')
+            $arguments += @('-o', 'NumberOfPasswordPrompts=1')
+        }
         if ($Port -gt 0) { $arguments += @('-P', $Port) }
         $arguments += @($Local)
         $arguments += $Dest
@@ -238,20 +231,30 @@ function Invoke-Scp {
             }
         }
 
+        if ($ForcePassword -and -not $Pass) {
+            Write-Error 'ForcePassword requires Pass to be provided.'
+            throw 'ForcePassword requires Pass'
+        }
+
+        if ($ForcePassword -and $Pass -and -not (Get-SshpassCommand)) {
+            Write-Error 'ForcePassword was requested but sshpass is not installed. Install sshpass or disable ForcePassword.'
+            throw 'ForcePassword requires sshpass'
+        }
+
         Invoke-Ext -Exe 'scp' -Arguments $arguments -Label 'scp'
     }
 }
 
 
 function Invoke-Ssh {
-    param($Cmd, $User, $Remote, $Pass, [int]$Port = 22, [switch]$Quiet)
+    param($Cmd, $User, $Remote, $Pass, [int]$Port = 22, [switch]$Quiet, [switch]$ForcePassword)
     $Cmd = Normalize-LineEndings $Cmd
     
-    $isWindows = Test-IsWindows
+    $isWin = [bool]$IsWindows
     $isWsl = Test-IsWsl
     
     # Only use PuTTY on Windows (not in WSL)
-    if ($isWindows -and -not $isWsl -and ($plink = Get-Command plink.exe -ErrorAction SilentlyContinue)) {
+    if ($isWin -and -not $isWsl -and ($plink = Get-Command plink.exe -ErrorAction SilentlyContinue)) {
         $arguments = @('-batch', '-ssh')
         if ($Port -gt 0) { $arguments += @('-P', $Port) }
         if ($Pass) { $arguments += @('-pw', $Pass) }
@@ -262,6 +265,15 @@ function Invoke-Ssh {
     else {
         $arguments = @()
         if ($Quiet) { $arguments += '-q' }
+        # Avoid interactive host-key prompts (important for sshpass usage)
+        $arguments += @('-o', 'StrictHostKeyChecking=accept-new')
+        if ($ForcePassword) {
+            $arguments += @('-o', 'PreferredAuthentications=keyboard-interactive,password')
+            $arguments += @('-o', 'PubkeyAuthentication=no')
+            $arguments += @('-o', 'KbdInteractiveAuthentication=yes')
+            $arguments += @('-o', 'PasswordAuthentication=yes')
+            $arguments += @('-o', 'NumberOfPasswordPrompts=1')
+        }
         if ($Port -gt 0) { $arguments += @('-p', $Port) }
         $dest = if ($User) { "$User@$Remote" } else { $Remote }
         $arguments += $dest, $Cmd
@@ -277,6 +289,16 @@ function Invoke-Ssh {
                 Write-Warning 'Password was provided but sshpass is not installed; falling back to plain ssh (key/agent auth expected).'
                 $script:WarnedNoSshpass = $true
             }
+        }
+
+        if ($ForcePassword -and -not $Pass) {
+            Write-Error 'ForcePassword requires Pass to be provided.'
+            throw 'ForcePassword requires Pass'
+        }
+
+        if ($ForcePassword -and $Pass -and -not (Get-SshpassCommand)) {
+            Write-Error 'ForcePassword was requested but sshpass is not installed. Install sshpass or disable ForcePassword.'
+            throw 'ForcePassword requires sshpass'
         }
 
         Invoke-Ext -Exe 'ssh' -Arguments $arguments -Label 'ssh'

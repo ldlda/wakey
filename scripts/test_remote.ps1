@@ -15,6 +15,7 @@ param(
     [string]$RemoteTestPath = "/tmp/tmp/wakey-test",
     [string]$RemoteHost = "root@192.168.100.1",
     [int]$RemotePort = 2222,
+    [switch]$ForcePassword,
     [switch]$Ignored,
     [switch]$IncludeIgnored,
     [switch]$NoCapture,
@@ -29,7 +30,7 @@ $ErrorActionPreference = "Stop"
 $password = Get-DefaultPassword $password
 
 $sshRemote = $RemoteHost
-$hostPort = Split-HostPort -Host $sshRemote -DefaultPort $RemotePort
+$hostPort = Split-HostPort -HostName $sshRemote -DefaultPort $RemotePort
 $sshRemote = $hostPort.Host
 $RemotePort = $hostPort.Port
 
@@ -134,14 +135,15 @@ function Ensure-RemoteParentDir {
         [string]$RemoteDirPath,
         [string]$RemoteHost,
         [string]$Password,
-        [int]$Port
+        [int]$Port,
+        [switch]$ForcePassword
     )
 
     $dir = Normalize-PosixPath $RemoteDirPath
     if ([string]::IsNullOrWhiteSpace($dir)) {
         return
     }
-    Invoke-Ssh -Cmd ("mkdir -p " + (Quote-ShArg $dir)) -Remote $RemoteHost -Pass $Password -Port $Port -Quiet
+    Invoke-Ssh -Cmd ("mkdir -p " + (Quote-ShArg $dir)) -Remote $RemoteHost -Pass $Password -Port $Port -Quiet -ForcePassword:$ForcePassword
 }
 
 $packages = if ($AllPackages) { Get-WorkspacePackages } else { @($Package) }
@@ -181,7 +183,8 @@ foreach ($packageName in $packages) {
     if ($testBinaries.Count -eq 0) {
         $reason = if ($BinaryFilter) {
             "no test executables matched binary filter '$BinaryFilter'"
-        } else {
+        }
+        else {
             "no test executables"
         }
         Write-Host "Skipping ${packageName}: $reason" -ForegroundColor DarkYellow
@@ -191,21 +194,22 @@ foreach ($packageName in $packages) {
     Write-Host "Found $($testBinaries.Count) test $($testBinaries.Count -eq 1 ? "binary" : "binaries") for $packageName" -ForegroundColor Green
 
     $remoteRunDir = New-RemoteRunDir -BasePath $RemoteTestPath -PackageName $packageName
-    Ensure-RemoteParentDir -RemoteDirPath $remoteRunDir -RemoteHost $sshRemote -Password $password -Port $RemotePort
+    Ensure-RemoteParentDir -RemoteDirPath $remoteRunDir -RemoteHost $sshRemote -Password $password -Port $RemotePort -ForcePassword:$ForcePassword
 
     try {
         $remoteUploadDir = (Normalize-PosixPath $remoteRunDir).TrimEnd('/') + '/'
         
         # Convert local file paths to WSL paths if running in WSL
         $localFilePaths = @($testBinaries | ForEach-Object {
-            if (Test-IsWsl) {
-                ConvertTo-WslPath $_.FullName
-            } else {
-                $_.FullName
-            }
-        })
+                if (Test-IsWsl) {
+                    ConvertTo-WslPath $_.FullName
+                }
+                else {
+                    $_.FullName
+                }
+            })
         
-        Invoke-Scp -Local $localFilePaths -Dest "${sshRemote}:$remoteUploadDir" -Pass $password -Port $RemotePort -Quiet
+        Invoke-Scp -Local $localFilePaths -Dest "${sshRemote}:$remoteUploadDir" -Pass $password -Port $RemotePort -Quiet -ForcePassword:$ForcePassword
 
         foreach ($testBinary in $testBinaries) {
             Write-Host "`nTesting: $packageName / $($testBinary.Name)" -ForegroundColor Cyan
@@ -226,7 +230,7 @@ foreach ($packageName in $packages) {
 
             # Run test binary (with chmod to ensure executable)
             try {
-                Invoke-Ssh -Cmd $remoteCmd -Remote $sshRemote -Pass $password -Port $RemotePort
+                Invoke-Ssh -Cmd $remoteCmd -Remote $sshRemote -Pass $password -Port $RemotePort -ForcePassword:$ForcePassword
             }
             catch {
                 $failures.Add("$packageName / $($testBinary.Name)")
@@ -238,7 +242,7 @@ foreach ($packageName in $packages) {
     }
     finally {
         try {
-            Invoke-Ssh -Cmd ("rm -rf " + (Quote-ShArg $remoteRunDir)) -Remote $sshRemote -Pass $password -Port $RemotePort -Quiet
+            Invoke-Ssh -Cmd ("rm -rf " + (Quote-ShArg $remoteRunDir)) -Remote $sshRemote -Pass $password -Port $RemotePort -Quiet -ForcePassword:$ForcePassword
         }
         catch {
             Write-Warning "Failed to remove remote test dir: $remoteRunDir"
