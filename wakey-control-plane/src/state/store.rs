@@ -6,8 +6,8 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::state::types::{
-    AuditEvent, AuditEventFilter, AuditEventInput, EnrollTokenInfo, IssuedAgent, IssuedEnrollToken,
-    StateStats,
+    AlertState, AlertTransition, AuditEvent, AuditEventFilter, AuditEventInput, EnrollTokenInfo,
+    IssuedAgent, IssuedEnrollToken, StateStats,
 };
 
 pub struct Store {
@@ -16,6 +16,8 @@ pub struct Store {
     enroll_tokens: sled::Tree,
     agents: sled::Tree,
     audit_events: sled::Tree,
+    active_alerts: sled::Tree,
+    alert_transitions: sled::Tree,
 }
 
 const SCHEMA_VERSION_KEY: &[u8] = b"schema_version";
@@ -39,6 +41,12 @@ impl Store {
         let audit_events_tree = db
             .open_tree("audit_events")
             .context("failed to open audit_events tree")?;
+        let active_alerts_tree = db
+            .open_tree("active_alerts")
+            .context("failed to open active_alerts tree")?;
+        let alert_transitions_tree = db
+            .open_tree("alert_transitions")
+            .context("failed to open alert_transitions tree")?;
 
         let store = Self {
             db_path,
@@ -46,6 +54,8 @@ impl Store {
             enroll_tokens: enroll_tree,
             agents: agents_tree,
             audit_events: audit_events_tree,
+            active_alerts: active_alerts_tree,
+            alert_transitions: alert_transitions_tree,
         };
 
         store.ensure_schema_version()?;
@@ -275,6 +285,111 @@ impl Store {
         Ok(out)
     }
 
+    pub async fn sync_alert_transitions(
+        &self,
+        current: &[AlertState],
+    ) -> Result<Vec<AlertTransition>> {
+        let mut previous = std::collections::HashMap::<String, AlertState>::new();
+        for item in self.active_alerts.iter() {
+            let (_, raw) = item.context("failed iterating active_alerts tree")?;
+            let alert: AlertState =
+                serde_json::from_slice(raw.as_ref()).context("failed decoding active alert")?;
+            previous.insert(alert.alert_id.clone(), alert);
+        }
+
+        let mut current_map = std::collections::HashMap::<String, AlertState>::new();
+        for alert in current {
+            current_map.insert(alert.alert_id.clone(), alert.clone());
+        }
+
+        let now = now_unix();
+        let mut transitions = Vec::new();
+
+        for (alert_id, current_alert) in &current_map {
+            if previous.contains_key(alert_id) {
+                continue;
+            }
+            transitions.push(AlertTransition {
+                transition_id: format!("atr-{}", Uuid::new_v4()),
+                ts_unix: now,
+                alert_id: current_alert.alert_id.clone(),
+                kind: current_alert.kind.clone(),
+                agent_id: current_alert.agent_id.clone(),
+                from_status: None,
+                to_status: "active".into(),
+                message: current_alert.message.clone(),
+                metadata: current_alert.metadata.clone(),
+            });
+        }
+
+        for (alert_id, previous_alert) in &previous {
+            if current_map.contains_key(alert_id) {
+                continue;
+            }
+            transitions.push(AlertTransition {
+                transition_id: format!("atr-{}", Uuid::new_v4()),
+                ts_unix: now,
+                alert_id: previous_alert.alert_id.clone(),
+                kind: previous_alert.kind.clone(),
+                agent_id: previous_alert.agent_id.clone(),
+                from_status: Some("active".into()),
+                to_status: "resolved".into(),
+                message: format!("resolved alert {}", previous_alert.alert_id),
+                metadata: previous_alert.metadata.clone(),
+            });
+        }
+
+        for item in self.active_alerts.iter() {
+            let (key, _) = item.context("failed iterating active_alerts keys")?;
+            self.active_alerts
+                .remove(key)
+                .context("failed clearing active alert snapshot")?;
+        }
+
+        for alert in current {
+            let key = alert.alert_id.as_bytes();
+            let value = serde_json::to_vec(alert).context("failed encoding active alert")?;
+            self.active_alerts
+                .insert(key, value)
+                .context("failed writing active alert snapshot")?;
+        }
+
+        for transition in &transitions {
+            let key = format!("{:020}:{}", transition.ts_unix, transition.transition_id);
+            let value =
+                serde_json::to_vec(transition).context("failed encoding alert transition")?;
+            self.alert_transitions
+                .insert(key.as_bytes(), value)
+                .context("failed persisting alert transition")?;
+        }
+
+        self.flush()
+            .context("failed flushing state db after alert sync")?;
+        Ok(transitions)
+    }
+
+    pub async fn list_alert_transitions(
+        &self,
+        since_unix: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<AlertTransition>> {
+        let limit = limit.clamp(1, 500);
+        let mut out = Vec::new();
+        for item in self.alert_transitions.iter().rev() {
+            let (_, raw) = item.context("failed iterating alert transition tree")?;
+            let transition: AlertTransition =
+                serde_json::from_slice(raw.as_ref()).context("failed decoding alert transition")?;
+            if let Some(since) = since_unix && transition.ts_unix < since {
+                continue;
+            }
+            out.push(transition);
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     fn flush(&self) -> Result<()> {
         self.enroll_tokens
             .flush()
@@ -285,6 +400,12 @@ impl Store {
         self.audit_events
             .flush()
             .context("failed to flush audit event tree")?;
+        self.active_alerts
+            .flush()
+            .context("failed to flush active alerts tree")?;
+        self.alert_transitions
+            .flush()
+            .context("failed to flush alert transitions tree")?;
         debug!(path = %self.db_path.display(), "flushed sled state db");
         Ok(())
     }
@@ -559,6 +680,44 @@ mod tests {
             .expect("filtered list should succeed");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].request_id.as_deref(), Some("req-1"));
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn alert_transitions_track_open_and_resolve() {
+        let (store, dir) = make_store().await;
+        let alert = crate::state::AlertState {
+            alert_id: "agent_offline:agent-a".into(),
+            kind: "agent_offline".into(),
+            severity: "warning".into(),
+            status: "active".into(),
+            agent_id: Some("agent-a".into()),
+            message: "agent agent-a offline".into(),
+            value: 1,
+            threshold: 1,
+            last_seen_unix: 10,
+            metadata: serde_json::json!({}),
+        };
+
+        let opened = store
+            .sync_alert_transitions(std::slice::from_ref(&alert))
+            .await
+            .expect("open transition should succeed");
+        assert_eq!(opened.len(), 1);
+        assert_eq!(opened[0].to_status, "active");
+
+        let resolved = store
+            .sync_alert_transitions(&[])
+            .await
+            .expect("resolve transition should succeed");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].to_status, "resolved");
+
+        let history = store
+            .list_alert_transitions(None, 10)
+            .await
+            .expect("history should load");
+        assert!(history.len() >= 2);
         cleanup_dir(&dir);
     }
 }

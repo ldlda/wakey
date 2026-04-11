@@ -83,3 +83,16 @@ pub struct AlertState {
     pub last_seen_unix: u64,
     pub metadata: serde_json::Value,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertTransition {
+    pub transition_id: String,
+    pub ts_unix: u64,
+    pub alert_id: String,
+    pub kind: String,
+    pub agent_id: Option<String>,
+    pub from_status: Option<String>,
+    pub to_status: String,
+    pub message: String,
+    pub metadata: serde_json::Value,
+}

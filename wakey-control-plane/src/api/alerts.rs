@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
+use tokio::time::Duration;
 use tracing::warn;
 
 use crate::api::json_error;
@@ -20,14 +22,129 @@ pub struct ActiveAlertsQuery {
     pub enroll_rejected_threshold: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AlertHistoryQuery {
+    pub since_unix: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct AlertRuleConfig {
+    pub lookback_seconds: Option<u64>,
+    pub timeout_threshold: Option<u64>,
+    pub auth_rejected_threshold: Option<u64>,
+    pub enroll_rejected_threshold: Option<u64>,
+}
+
 pub async fn active_alerts(
     State(state): State<AppState>,
     Query(query): Query<ActiveAlertsQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let lookback_seconds = query.lookback_seconds.unwrap_or(900).clamp(60, 86_400);
-    let timeout_threshold = query.timeout_threshold.unwrap_or(3).max(1);
-    let auth_rejected_threshold = query.auth_rejected_threshold.unwrap_or(3).max(1);
-    let enroll_rejected_threshold = query.enroll_rejected_threshold.unwrap_or(5).max(1);
+    let alerts = evaluate_alerts(
+        &state,
+        AlertRuleConfig {
+            lookback_seconds: query.lookback_seconds,
+            timeout_threshold: query.timeout_threshold,
+            auth_rejected_threshold: query.auth_rejected_threshold,
+            enroll_rejected_threshold: query.enroll_rejected_threshold,
+        },
+    )
+    .await?;
+
+    if let Err(err) = state.store.sync_alert_transitions(&alerts).await {
+        warn!(error = %err, "failed to sync alert transitions");
+    }
+
+    Ok((StatusCode::OK, Json(alerts)))
+}
+
+pub async fn alert_history(
+    State(state): State<AppState>,
+    Query(query): Query<AlertHistoryQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let history = state
+        .store
+        .list_alert_transitions(query.since_unix, limit)
+        .await
+        .map_err(|err| {
+            warn!(error = %err, "failed reading alert transition history");
+            json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "alert_history_failed",
+                &err.to_string(),
+            )
+        })?;
+
+    Ok((StatusCode::OK, Json(history)))
+}
+
+pub async fn alerts_stream(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Query(query): Query<ActiveAlertsQuery>,
+) -> impl IntoResponse {
+    let config = AlertRuleConfig {
+        lookback_seconds: query.lookback_seconds,
+        timeout_threshold: query.timeout_threshold,
+        auth_rejected_threshold: query.auth_rejected_threshold,
+        enroll_rejected_threshold: query.enroll_rejected_threshold,
+    };
+    ws.on_upgrade(move |socket| alerts_stream_socket(state, socket, config))
+}
+
+async fn alerts_stream_socket(state: AppState, mut socket: WebSocket, config: AlertRuleConfig) {
+    let mut tick = tokio::time::interval(Duration::from_secs(5));
+    loop {
+        tick.tick().await;
+        let alerts = match evaluate_alerts(&state, config.clone()).await {
+            Ok(alerts) => alerts,
+            Err(err) => {
+                warn!(code = %err.0, "failed to evaluate alerts for stream");
+                continue;
+            }
+        };
+
+        if let Err(err) = state.store.sync_alert_transitions(&alerts).await {
+            warn!(error = %err, "failed to sync alert transitions in stream");
+        }
+
+        let history = match state.store.list_alert_transitions(None, 20).await {
+            Ok(h) => h,
+            Err(err) => {
+                warn!(error = %err, "failed to load alert transition history for stream");
+                Vec::new()
+            }
+        };
+
+        let payload = serde_json::json!({
+            "type": "alerts_snapshot",
+            "ts_unix": now_unix(),
+            "alerts": alerts,
+            "recent_transitions": history,
+        });
+        let encoded = match serde_json::to_string(&payload) {
+            Ok(s) => s,
+            Err(err) => {
+                warn!(error = %err, "failed to encode alerts stream payload");
+                continue;
+            }
+        };
+
+        if socket.send(Message::Text(encoded.into())).await.is_err() {
+            break;
+        }
+    }
+}
+
+async fn evaluate_alerts(
+    state: &AppState,
+    config: AlertRuleConfig,
+) -> Result<Vec<AlertState>, (StatusCode, Json<serde_json::Value>)> {
+    let lookback_seconds = config.lookback_seconds.unwrap_or(900).clamp(60, 86_400);
+    let timeout_threshold = config.timeout_threshold.unwrap_or(3).max(1);
+    let auth_rejected_threshold = config.auth_rejected_threshold.unwrap_or(3).max(1);
+    let enroll_rejected_threshold = config.enroll_rejected_threshold.unwrap_or(5).max(1);
 
     let now = now_unix();
     let since_unix = now.saturating_sub(lookback_seconds);
@@ -98,7 +215,7 @@ pub async fn active_alerts(
             )
         })?;
 
-    let alerts = build_alerts(
+    Ok(build_alerts(
         now,
         &enrolled_agents,
         &connected_agents,
@@ -108,9 +225,7 @@ pub async fn active_alerts(
         timeout_threshold,
         auth_rejected_threshold,
         enroll_rejected_threshold,
-    );
-
-    Ok((StatusCode::OK, Json(alerts)))
+    ))
 }
 
 fn build_alerts(

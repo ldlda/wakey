@@ -192,6 +192,8 @@ Control-plane admin API includes token management endpoints:
 - `DELETE /api/v1/control/enroll-tokens/{token}`
 - `GET /api/v1/control/audit/events?agent_id=<id>&event_type=<type>&limit=<n>`
 - `GET /api/v1/control/alerts?lookback_seconds=900`
+- `GET /api/v1/control/alerts/history?since_unix=<ts>&limit=<n>`
+- `GET /api/v1/control/alerts/ws` (websocket snapshots + recent transitions)
 
 If commands still appear silent, verify both processes are running with `-v`
 and that `RUST_LOG` is not overriding to a stricter level.
@@ -210,6 +212,13 @@ Expected exposure model:
 
 - Public: `/healthz`, `/api/v1/agents/enroll`, `/api/v1/agent/ws`
 - Private (Cloudflare Access): `/ui/*`, `/api/v1/control/*`
+
+Control-plane routing is organized with the same boundary in code:
+
+- public router: health, enroll, agent websocket
+- control router: all `/api/v1/control/*` admin endpoints
+
+This keeps edge policy and app routing aligned as features grow.
 
 ## CLI
 

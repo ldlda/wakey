@@ -7,7 +7,7 @@ mod audit;
 mod alerts;
 
 pub use commands::{list_agents, run_command};
-pub use alerts::active_alerts;
+pub use alerts::{active_alerts, alert_history, alerts_stream};
 pub use audit::list_audit_events;
 pub use control::{
     EnrollTokenStatus, IssueEnrollTokenResponse, RevokeEnrollTokenResponse, StateStatsResponse,

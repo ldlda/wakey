@@ -40,6 +40,33 @@ pub enum AgentReply {
     Error(ErrorPayload),
 }
 
+fn public_api_routes() -> Router<AppState> {
+    Router::new()
+        .route("/healthz", get(api::healthz))
+        .route("/api/v1/agents/enroll", post(api::enroll))
+        .route("/api/v1/agent/ws", get(ws::agent_ws))
+}
+
+fn control_api_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/control/enroll-token", post(api::issue_enroll_token))
+        .route("/api/v1/control/enroll-tokens", get(api::list_enroll_tokens))
+        .route(
+            "/api/v1/control/enroll-tokens/{token}",
+            axum::routing::delete(api::revoke_enroll_token),
+        )
+        .route("/api/v1/control/state-stats", get(api::state_stats))
+        .route("/api/v1/control/audit/events", get(api::list_audit_events))
+        .route("/api/v1/control/alerts", get(api::active_alerts))
+        .route("/api/v1/control/alerts/history", get(api::alert_history))
+        .route("/api/v1/control/alerts/ws", get(api::alerts_stream))
+        .route("/api/v1/control/agents", get(api::list_agents))
+        .route(
+            "/api/v1/control/agents/{agent_id}/command",
+            post(api::run_command),
+        )
+}
+
 /// Starts the control-plane HTTP and websocket surfaces and manages daemon lifecycle hooks.
 pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     write_pid_file(&daemon.pid_file)?;
@@ -62,24 +89,12 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         enroll_token_ttl: daemon.enroll_token_ttl,
     };
 
+    // Keep route classes explicit so edge policy can map directly:
+    // - public_api_routes: intended internet-facing agent endpoints
+    // - control_api_routes: intended admin-only endpoints behind Access
     let app = Router::new()
-        .route("/healthz", get(api::healthz))
-        .route("/api/v1/agents/enroll", post(api::enroll))
-        .route("/api/v1/control/enroll-token", post(api::issue_enroll_token))
-        .route("/api/v1/control/enroll-tokens", get(api::list_enroll_tokens))
-        .route(
-            "/api/v1/control/enroll-tokens/{token}",
-            axum::routing::delete(api::revoke_enroll_token),
-        )
-        .route("/api/v1/control/state-stats", get(api::state_stats))
-        .route("/api/v1/control/audit/events", get(api::list_audit_events))
-        .route("/api/v1/control/alerts", get(api::active_alerts))
-        .route("/api/v1/agent/ws", get(ws::agent_ws))
-        .route("/api/v1/control/agents", get(api::list_agents))
-        .route(
-            "/api/v1/control/agents/{agent_id}/command",
-            post(api::run_command),
-        )
+        .merge(public_api_routes())
+        .merge(control_api_routes())
         .with_state(app_state.clone());
 
     info!(bind = %daemon.bind, data_dir = %daemon.data_dir.display(), pid_file = %daemon.pid_file.display(), state_file = %daemon.state_file.display(), "starting control-plane server");
