@@ -37,17 +37,26 @@ pub struct ListEnrollTokenQuery {
     pub include_expired: Option<bool>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EnrollTokenStatus {
     pub enroll_token: String,
     pub expires_at_unix: u64,
     pub expired: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RevokeEnrollTokenResponse {
     pub token: String,
     pub revoked: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StateStatsResponse {
+    pub db_path: String,
+    pub schema_version: u32,
+    pub agent_count: usize,
+    pub enroll_token_count: usize,
+    pub expired_enroll_token_count: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -195,6 +204,31 @@ pub async fn revoke_enroll_token(
             Err(json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "revoke_enroll_token_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
+pub async fn state_stats(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    match state.store.stats().await {
+        Ok(stats) => Ok((
+            StatusCode::OK,
+            Json(StateStatsResponse {
+                db_path: stats.db_path.display().to_string(),
+                schema_version: stats.schema_version,
+                agent_count: stats.agent_count,
+                enroll_token_count: stats.enroll_token_count,
+                expired_enroll_token_count: stats.expired_enroll_token_count,
+            }),
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to read state stats");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "state_stats_failed",
                 &err.to_string(),
             ))
         }

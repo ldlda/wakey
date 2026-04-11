@@ -268,6 +268,31 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<()> {
     Ok(())
 }
 
+pub fn bootstrap_config_if_missing(args: &ServeArgs) -> Result<bool> {
+    if args.config_file.exists() {
+        return Ok(false);
+    }
+
+    let init = InitConfigArgs {
+        config_file: args.config_file.clone(),
+        data_dir: args.data_dir.clone(),
+        bind: args.bind,
+        public_url: args.public_url.clone(),
+        state_file: args.state_file.clone(),
+        pid_file: args.pid_file.clone(),
+        command_timeout_ms: args.command_timeout_ms,
+        enroll_token_ttl_seconds: args.enroll_token_ttl_seconds,
+        enroll_tokens: args.enroll_tokens.clone(),
+        telemetry_otlp_endpoint: None,
+        telemetry_service_name: None,
+        telemetry_json_logs: false,
+        force: false,
+    };
+
+    write_init_config(&init)?;
+    Ok(true)
+}
+
 pub fn resolve_path(data_dir: &Path, candidate: PathBuf) -> PathBuf {
     if candidate.is_absolute() {
         candidate
@@ -285,11 +310,17 @@ pub struct IssueTokenSettings {
 pub struct StateAccessSettings {
     pub data_dir: PathBuf,
     pub state_file: PathBuf,
+    pub public_url: Option<String>,
 }
 
 pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<IssueTokenSettings> {
     let file = load_file_config(&args.config_file)?;
-    let state = resolve_state_access(&args.config_file, args.data_dir.clone(), args.state_file.clone())?;
+    let state = resolve_state_access(
+        &args.config_file,
+        args.data_dir.clone(),
+        args.state_file.clone(),
+        args.public_url.clone(),
+    )?;
 
     let ttl = Duration::from_secs(
         args.ttl_seconds
@@ -306,21 +337,37 @@ pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<Issue
 }
 
 pub fn resolve_list_enroll_token_settings(args: &ListEnrollTokensArgs) -> Result<StateAccessSettings> {
-    resolve_state_access(&args.config_file, args.data_dir.clone(), args.state_file.clone())
+    resolve_state_access(
+        &args.config_file,
+        args.data_dir.clone(),
+        args.state_file.clone(),
+        args.public_url.clone(),
+    )
 }
 
 pub fn resolve_revoke_enroll_token_settings(args: &RevokeEnrollTokenArgs) -> Result<StateAccessSettings> {
-    resolve_state_access(&args.config_file, args.data_dir.clone(), args.state_file.clone())
+    resolve_state_access(
+        &args.config_file,
+        args.data_dir.clone(),
+        args.state_file.clone(),
+        args.public_url.clone(),
+    )
 }
 
 pub fn resolve_state_stats_settings(args: &StateStatsArgs) -> Result<StateAccessSettings> {
-    resolve_state_access(&args.config_file, args.data_dir.clone(), args.state_file.clone())
+    resolve_state_access(
+        &args.config_file,
+        args.data_dir.clone(),
+        args.state_file.clone(),
+        args.public_url.clone(),
+    )
 }
 
 fn resolve_state_access(
     config_file: &Path,
     cli_data_dir: Option<PathBuf>,
     cli_state_file: Option<PathBuf>,
+    cli_public_url: Option<String>,
 ) -> Result<StateAccessSettings> {
     let file = load_file_config(config_file)?;
 
@@ -335,8 +382,13 @@ fn resolve_state_access(
             .unwrap_or_else(|| PathBuf::from("state.db")),
     );
 
+    let public_url = cli_public_url
+        .or(file.public_url)
+        .map(|url| normalize_public_url(&url));
+
     Ok(StateAccessSettings {
         data_dir,
         state_file,
+        public_url,
     })
 }

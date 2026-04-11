@@ -85,6 +85,12 @@ You can scaffold this file with:
 wakey-control-plane init-config
 ```
 
+Or bootstrap once during serve (writes only if config is missing):
+
+```sh
+wakey-control-plane serve --bootstrap-config
+```
+
 Inspect current persisted state:
 
 ```sh

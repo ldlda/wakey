@@ -64,6 +64,9 @@ pub struct ServeArgs {
 
     #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
     pub config_file: PathBuf,
+
+    #[arg(long)]
+    pub bootstrap_config: bool,
 }
 
 #[derive(Args, Clone)]
@@ -141,6 +144,9 @@ pub struct ListEnrollTokensArgs {
     pub data_dir: Option<PathBuf>,
 
     #[arg(long)]
+    pub public_url: Option<String>,
+
+    #[arg(long)]
     pub include_expired: bool,
 
     #[arg(long)]
@@ -159,6 +165,9 @@ pub struct RevokeEnrollTokenArgs {
     pub data_dir: Option<PathBuf>,
 
     #[arg(long)]
+    pub public_url: Option<String>,
+
+    #[arg(long)]
     pub token: String,
 }
 
@@ -172,6 +181,9 @@ pub struct StateStatsArgs {
 
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    pub public_url: Option<String>,
 
     #[arg(long)]
     pub json: bool,

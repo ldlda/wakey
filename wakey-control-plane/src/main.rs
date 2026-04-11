@@ -16,6 +16,15 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Serve(args) => {
+            if args.bootstrap_config {
+                let created = config::bootstrap_config_if_missing(&args)?;
+                if created {
+                    eprintln!(
+                        "bootstrapped missing config at {}",
+                        args.config_file.display()
+                    );
+                }
+            }
             let daemon = config::DaemonConfig::from_serve_args(&args)?;
             tracing::init(cli.verbose, &daemon.telemetry)?;
             runtime::serve(daemon).await

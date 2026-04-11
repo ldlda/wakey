@@ -63,6 +63,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
             "/api/v1/control/enroll-tokens/{token}",
             axum::routing::delete(api::revoke_enroll_token),
         )
+        .route("/api/v1/control/state-stats", get(api::state_stats))
         .route("/api/v1/agent/ws", get(ws::agent_ws))
         .route("/api/v1/control/agents", get(api::list_agents))
         .route(
@@ -186,6 +187,43 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
 
 pub async fn list_enroll_tokens(args: ListEnrollTokensArgs) -> Result<()> {
     let settings = config::resolve_list_enroll_token_settings(&args)?;
+    if let Some(base) = settings.public_url.as_deref() {
+        let url = format!(
+            "{}/api/v1/control/enroll-tokens?include_expired={}",
+            base,
+            args.include_expired
+        );
+        let response = reqwest::get(&url)
+            .await
+            .with_context(|| format!("failed to call {url}"))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable error body>".to_string());
+            anyhow::bail!("live list-enroll-tokens failed with {status}: {body}");
+        }
+        let body: Vec<api::EnrollTokenStatus> = response
+            .json()
+            .await
+            .context("failed to decode list-enroll-tokens response")?;
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&body).context("failed to render json")?
+            );
+            return Ok(());
+        }
+        for token in body {
+            println!(
+                "token={} expires_at_unix={} expired={}",
+                token.enroll_token, token.expires_at_unix, token.expired
+            );
+        }
+        return Ok(());
+    }
+
     let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
         .await
         .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
@@ -208,6 +246,30 @@ pub async fn list_enroll_tokens(args: ListEnrollTokensArgs) -> Result<()> {
 
 pub async fn revoke_enroll_token(args: RevokeEnrollTokenArgs) -> Result<()> {
     let settings = config::resolve_revoke_enroll_token_settings(&args)?;
+    if let Some(base) = settings.public_url.as_deref() {
+        let url = format!("{}/api/v1/control/enroll-tokens/{}", base, args.token);
+        let client = reqwest::Client::new();
+        let response = client
+            .delete(&url)
+            .send()
+            .await
+            .with_context(|| format!("failed to call {url}"))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable error body>".to_string());
+            anyhow::bail!("live revoke-enroll-token failed with {status}: {body}");
+        }
+        let body: api::RevokeEnrollTokenResponse = response
+            .json()
+            .await
+            .context("failed to decode revoke-enroll-token response")?;
+        println!("token={} revoked={}", body.token, body.revoked);
+        return Ok(());
+    }
+
     let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
         .await
         .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
@@ -218,6 +280,38 @@ pub async fn revoke_enroll_token(args: RevokeEnrollTokenArgs) -> Result<()> {
 
 pub async fn state_stats(args: StateStatsArgs) -> Result<()> {
     let settings = config::resolve_state_stats_settings(&args)?;
+    if let Some(base) = settings.public_url.as_deref() {
+        let url = format!("{}/api/v1/control/state-stats", base);
+        let response = reqwest::get(&url)
+            .await
+            .with_context(|| format!("failed to call {url}"))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable error body>".to_string());
+            anyhow::bail!("live state-stats failed with {status}: {body}");
+        }
+        let body: api::StateStatsResponse = response
+            .json()
+            .await
+            .context("failed to decode state-stats response")?;
+        if args.json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&body).context("failed to render json")?
+            );
+            return Ok(());
+        }
+        println!("db_path={}", body.db_path);
+        println!("schema_version={}", body.schema_version);
+        println!("agent_count={}", body.agent_count);
+        println!("enroll_token_count={}", body.enroll_token_count);
+        println!("expired_enroll_token_count={}", body.expired_enroll_token_count);
+        return Ok(());
+    }
+
     let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
         .await
         .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
