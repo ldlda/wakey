@@ -6,10 +6,13 @@ USE_PROCD=1
 
 NAME=wakey
 BIN=/root/.bin/wakey-agent
+CONFIG=/etc/wakey-agent/config.toml
 
 start_service() {
     procd_open_instance
-    procd_set_param command "$BIN" serve
+    procd_set_param command "$BIN" serve --config "$CONFIG"
+    procd_set_param file "$CONFIG"
+    procd_set_param env RUST_LOG=wakey_agent=debug,wakey=debug
     procd_set_param respawn 5 1 0
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -18,4 +21,9 @@ start_service() {
 
 stop_service() {
     : # procd manages the process; nothing to do here
+}
+
+reload_service() {
+    # Prefer in-process reload; fallback to full restart if signal path is unavailable.
+    procd_send_signal "$NAME" HUP 2>/dev/null || restart
 }

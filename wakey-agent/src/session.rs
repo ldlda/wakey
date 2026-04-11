@@ -128,7 +128,7 @@ where
             match dispatch_command(command).await {
                 Ok(result) => {
                     info!(request_id = %request_id, command = %kind, "command execution completed");
-                    send_json(sink, &ClientMessage::Result { request_id, result }).await?;
+                    send_command_result(sink, request_id, kind, result).await?;
                 }
                 Err(err) => {
                     error!(request_id = %request_id, command = %kind, error = %err, "command dispatch failed");
@@ -148,6 +148,49 @@ where
             }
         }
     }
+    Ok(())
+}
+
+async fn send_command_result<S>(
+    sink: &mut S,
+    request_id: crate::protocol::RequestId,
+    kind: &str,
+    result: crate::protocol::CommandResult,
+) -> Result<()>
+where
+    S: SinkExt<Message> + Unpin,
+    <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
+{
+    if let Err(err) = send_json(
+        sink,
+        &ClientMessage::Result {
+            request_id: request_id.clone(),
+            result,
+        },
+    )
+    .await
+    {
+        error!(
+            request_id = %request_id,
+            command = %kind,
+            error = %err,
+            "failed to send command result; sending explicit error frame"
+        );
+
+        send_json(
+            sink,
+            &ClientMessage::Error {
+                request_id,
+                error: ErrorPayload {
+                    code: "command_result_serialize_failed".into(),
+                    message: err.to_string(),
+                    retryable: Some(true),
+                },
+            },
+        )
+        .await?;
+    }
+
     Ok(())
 }
 
@@ -205,7 +248,56 @@ pub fn websocket_url(server_url: &str) -> Result<url::Url> {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_backoff_ms, websocket_url};
+    use std::collections::VecDeque;
+    use std::io;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use futures_util::Sink;
+    use serde_json::Value;
+    use tokio_tungstenite::tungstenite::Message;
+
+    use super::{next_backoff_ms, send_command_result, websocket_url};
+    use crate::protocol::{CommandResult, RequestId};
+
+    struct RecordingSink {
+        fail_sends_remaining: usize,
+        sent: VecDeque<Message>,
+    }
+
+    impl RecordingSink {
+        fn new(fail_sends_remaining: usize) -> Self {
+            Self {
+                fail_sends_remaining,
+                sent: VecDeque::new(),
+            }
+        }
+    }
+
+    impl Sink<Message> for RecordingSink {
+        type Error = io::Error;
+
+        fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+            if self.fail_sends_remaining > 0 {
+                self.fail_sends_remaining -= 1;
+                return Err(io::Error::other("injected send failure"));
+            }
+            self.sent.push_back(item);
+            Ok(())
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
 
     #[test]
     fn websocket_url_uses_expected_path() {
@@ -223,5 +315,50 @@ mod tests {
     #[test]
     fn backoff_never_shrinks_when_max_is_lower() {
         assert_eq!(next_backoff_ms(8_000, 1_000), 8_000);
+    }
+
+    #[tokio::test]
+    async fn send_command_result_emits_result_on_success() {
+        let mut sink = RecordingSink::new(0);
+        let request_id = RequestId::try_from("req-success".to_string()).expect("request id");
+
+        send_command_result(
+            &mut sink,
+            request_id,
+            "wake",
+            CommandResult::Wake(wakey_core::WakeResult { result: vec![] }),
+        )
+            .await
+            .expect("send should succeed");
+
+        assert_eq!(sink.sent.len(), 1);
+        let Some(Message::Text(payload)) = sink.sent.pop_front() else {
+            panic!("expected text websocket message");
+        };
+        let v: Value = serde_json::from_str(payload.as_ref()).expect("json");
+        assert_eq!(v["type"], "result");
+    }
+
+    #[tokio::test]
+    async fn send_command_result_falls_back_to_error_frame() {
+        let mut sink = RecordingSink::new(1);
+        let request_id = RequestId::try_from("req-fallback".to_string()).expect("request id");
+
+        send_command_result(
+            &mut sink,
+            request_id,
+            "devs",
+            CommandResult::Devs { rows: vec![] },
+        )
+            .await
+            .expect("fallback error frame should be sent");
+
+        assert_eq!(sink.sent.len(), 1);
+        let Some(Message::Text(payload)) = sink.sent.pop_front() else {
+            panic!("expected text websocket message");
+        };
+        let v: Value = serde_json::from_str(payload.as_ref()).expect("json");
+        assert_eq!(v["type"], "error");
+        assert_eq!(v["error"]["code"], "command_result_serialize_failed");
     }
 }

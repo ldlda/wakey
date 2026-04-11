@@ -175,8 +175,8 @@ pub enum AgentCommand {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CommandResult {
     Status(Status<NeighborEntry>),
-    Leases(Vec<DhcpLeaseWithState>),
-    Devs(Vec<InterfaceSummary>),
+    Leases { rows: Vec<DhcpLeaseWithState> },
+    Devs { rows: Vec<InterfaceSummary> },
     Inventory(DeviceInventory),
     Wake(WakeResult),
 }
@@ -235,5 +235,17 @@ mod tests {
     fn request_id_rejects_empty() {
         let err = RequestId::try_from("   ".to_string()).expect_err("must fail");
         assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn client_result_with_devs_serializes() {
+        let msg = ClientMessage::Result {
+            request_id: RequestId::try_from("req-devs-1".to_string()).expect("request id"),
+            result: CommandResult::Devs { rows: vec![] },
+        };
+
+        let json = serde_json::to_string(&msg).expect("serialize");
+        assert!(json.contains("\"type\":\"result\""));
+        assert!(json.contains("\"kind\":\"devs\""));
     }
 }

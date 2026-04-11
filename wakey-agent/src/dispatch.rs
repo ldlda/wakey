@@ -41,7 +41,7 @@ async fn dispatch_leases(req: LeasesRequest) -> Result<CommandResult> {
     })
     .await?;
     debug!(rows = leases.len(), include_state = req.include_state, "dispatched leases command");
-    Ok(CommandResult::Leases(leases))
+    Ok(CommandResult::Leases { rows: leases })
 }
 
 async fn dispatch_devs(req: DevsRequest) -> Result<CommandResult> {
@@ -54,7 +54,7 @@ async fn dispatch_devs(req: DevsRequest) -> Result<CommandResult> {
         devs.retain(|dev| dev.operstate == "up");
     }
     debug!(rows = devs.len(), up_only = req.up_only, "dispatched devs command");
-    Ok(CommandResult::Devs(devs))
+    Ok(CommandResult::Devs { rows: devs })
 }
 
 async fn dispatch_inventory(req: InventoryRequest) -> Result<CommandResult> {
