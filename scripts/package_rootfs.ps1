@@ -62,12 +62,6 @@ if (Test-Path $deploySrc) {
     Set-Content -NoNewline -LiteralPath (Join-Path $rootDir "remote_deploy_wakey.sh") -Value $deployContent -Encoding UTF8
 }
 
-# Copy static assets
-$staticSrc = Join-Path $root "static"
-if (Test-Path $staticSrc) {
-    Copy-Item -Recurse $staticSrc (Join-Path $rootDir "static") -Force
-}
-
 # Copy all OpenWrt init scripts present in repo
 Get-ChildItem (Join-Path $root 'scripts/init/openwrt') -File | ForEach-Object {
     $dest = Join-Path $etcDir $_.Name

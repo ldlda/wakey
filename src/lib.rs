@@ -1,9 +1,6 @@
-pub mod http;
-pub mod legacy;
 pub mod service;
 pub mod utils;
 
-pub use http::{http_app, serve_http, serve_http_from_current_exe};
 pub use service::{
     StatusResponse, broadcast_wake_targets, device_to_status_rows, get_interface_summaries,
     get_interface_summary, get_ips, get_leases, get_status, get_status_for_input, inventory,

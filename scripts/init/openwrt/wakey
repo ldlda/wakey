@@ -5,13 +5,11 @@ START=99
 USE_PROCD=1
 
 NAME=wakey
-# BIN=/root/.bin/wakey-agent
-BIN=/root/.bin/wakey
+BIN=/root/.bin/wakey-agent
 
 start_service() {
     procd_open_instance
-    # procd_set_param command "$BIN" serve
-    procd_set_param command "$BIN" http --host :: --port 12012
+    procd_set_param command "$BIN" serve
     procd_set_param respawn 5 1 0
     procd_set_param stdout 1
     procd_set_param stderr 1

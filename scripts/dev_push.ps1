@@ -69,20 +69,6 @@ try {
     Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet
     Invoke-Scp -Local $localAgentBin -Dest $agentDestTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet
 
-    # Push static assets
-    $localStatic = Join-Path $repoRoot "static"
-    if (Test-Path $localStatic) {
-        # Assuming RemotePath is like /root/.bin/wakey, we want /root/.bin/static
-        # So we push 'static' directory to /root/.bin/
-        $remoteDir = (Split-Path $RemotePath -Parent) -replace '\\', '/'
-        # Ensure remote dir exists (ssh mkdir -p)
-        Invoke-Ssh -Cmd "mkdir -p $remoteDir" -User $User -Remote $HostName -Pass $Pass -Port $Port -Quiet:$Quiet
-        
-        # SCP -r static user@host:/root/.bin/
-        # Note: pscp/scp behavior: if dest is a dir, it copies the source dir INTO it.
-        Invoke-Scp -Local $localStatic -Dest "$User@${HostName}:$remoteDir/" -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -Recurse
-    }
-
     # Push deploy helper if exists
     if (Test-Path $localDeploy) {
         Invoke-Scp -Local $localDeploy -Dest "$User@${HostName}:$deployTmp" -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet

@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::path::Path;
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/wakey-agent/config.toml";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentConfig {
     pub server_url: String,
     pub agent_id: String,
@@ -13,6 +14,18 @@ pub struct AgentConfig {
     pub reconnect_base_ms: u64,
     #[serde(default = "default_reconnect_max_ms")]
     pub reconnect_max_ms: u64,
+}
+
+impl fmt::Debug for AgentConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AgentConfig")
+            .field("server_url", &self.server_url)
+            .field("agent_id", &self.agent_id)
+            .field("agent_token", &"<redacted>")
+            .field("reconnect_base_ms", &self.reconnect_base_ms)
+            .field("reconnect_max_ms", &self.reconnect_max_ms)
+            .finish()
+    }
 }
 
 const fn default_reconnect_base_ms() -> u64 {
@@ -69,6 +82,7 @@ mod tests {
         save_config(&path, &config).expect("save");
         let loaded = load_config(&path).expect("load");
         assert_eq!(loaded, config);
+        assert!(format!("{:?}", loaded).contains("<redacted>"));
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir_all(&dir);
     }

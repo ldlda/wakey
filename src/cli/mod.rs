@@ -2,20 +2,17 @@
 
 pub mod table;
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 
 use anyhow::Result;
 use clap::{ArgAction, Args, Parser, Subcommand};
-use tracing::{debug, info};
+use tracing::debug;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 use wakey_core::{DeviceFilters, DeviceQuery, InterfaceSummary, WakeResult};
 
 #[derive(Parser)]
 #[command(name = "wakey")]
-#[command(version, about = "CLI and temporary HTTP adapter for Wakey")]
-#[command(
-    long_about = "Wakey can run as a local/operator CLI or serve the legacy HTTP/static interface during the migration to a service-first architecture."
-)]
+#[command(version, about = "Operator CLI for Wakey service actions")]
 pub struct Cli {
     /// Increase log verbosity. Use `-v` for debug and `-vv` for trace.
     #[arg(short = 'v', long = "verbose", action = ArgAction::Count, global = true)]
@@ -27,8 +24,6 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Serve the temporary legacy HTTP/static app.
-    Http(HttpArgs),
     /// Show device status rows from neighbor/device data.
     Status(StatusArgs),
     /// Show DHCP leases, optionally enriched with current neighbor state.
@@ -37,16 +32,6 @@ pub enum Command {
     Wake(WakeArgs),
     /// Show condensed network interface summaries.
     Devs(DevsArgs),
-}
-
-#[derive(Args)]
-pub struct HttpArgs {
-    /// Host address to bind the HTTP server to.
-    #[arg(long, default_value = "::")]
-    pub host: IpAddr,
-    /// TCP port to bind the HTTP server to.
-    #[arg(long, default_value_t = 12012)]
-    pub port: u16,
 }
 
 #[derive(Args)]
@@ -143,9 +128,9 @@ pub fn init_tracing(verbose: u8) {
 
 pub fn default_filter_for_verbosity(verbose: u8) -> &'static str {
     match verbose {
-        0 => "wakey=info,tower_http=info",
-        1 => "wakey=debug,tower_http=debug",
-        _ => "wakey=trace,tower_http=trace",
+        0 => "wakey=info",
+        1 => "wakey=debug",
+        _ => "wakey=trace",
     }
 }
 
@@ -153,11 +138,6 @@ pub async fn run(cli: Cli) -> Result<()> {
     init_tracing(cli.verbose);
 
     match cli.command {
-        Command::Http(args) => {
-            let addr = SocketAddr::new(args.host, args.port);
-            info!(%addr, "dispatching http command");
-            wakey::serve_http_from_current_exe(addr).await?;
-        }
         Command::Status(args) => {
             let as_json = args.json;
             let query = status_args_to_query(args);
@@ -357,9 +337,9 @@ mod tests {
 
     #[test]
     fn verbosity_maps_to_expected_default_filters() {
-        assert_eq!(default_filter_for_verbosity(0), "wakey=info,tower_http=info");
-        assert_eq!(default_filter_for_verbosity(1), "wakey=debug,tower_http=debug");
-        assert_eq!(default_filter_for_verbosity(2), "wakey=trace,tower_http=trace");
-        assert_eq!(default_filter_for_verbosity(9), "wakey=trace,tower_http=trace");
+        assert_eq!(default_filter_for_verbosity(0), "wakey=info");
+        assert_eq!(default_filter_for_verbosity(1), "wakey=debug");
+        assert_eq!(default_filter_for_verbosity(2), "wakey=trace");
+        assert_eq!(default_filter_for_verbosity(9), "wakey=trace");
     }
 }

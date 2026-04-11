@@ -61,10 +61,77 @@ pub fn normalize_server_url(server_url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_server_url;
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::{SocketAddr, TcpListener};
+    use std::thread;
+
+    fn spawn_enroll_server(response_body: &'static str, status: &'static str) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr: SocketAddr = listener.local_addr().expect("local addr");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept connection");
+
+            // Read until end-of-headers; body content is irrelevant for this test.
+            let mut buf = [0u8; 4096];
+            let mut req = Vec::new();
+            loop {
+                let n = stream.read(&mut buf).expect("read request");
+                if n == 0 {
+                    break;
+                }
+                req.extend_from_slice(&buf[..n]);
+                if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+
+        (format!("http://{}", addr), handle)
+    }
 
     #[test]
     fn normalize_server_url_trims_slash() {
         assert_eq!(normalize_server_url("https://example.com/"), "https://example.com");
+    }
+
+    #[tokio::test]
+    async fn enroll_response_persists_config() {
+        let response = r#"{"agent_id":"agent-123","agent_token":"token-xyz","server_url":"https://control.example.com"}"#;
+        let (server_url, handle) = spawn_enroll_server(response, "200 OK");
+
+        let dir = std::env::temp_dir().join(format!(
+            "wakey-agent-enroll-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let path = dir.join("config.toml");
+
+        let config = enroll(&server_url, "enroll-abc", &path)
+            .await
+            .expect("enroll should succeed");
+
+        assert_eq!(config.agent_id, "agent-123");
+        assert_eq!(config.agent_token, "token-xyz");
+        assert_eq!(config.server_url, "https://control.example.com");
+
+        let persisted = crate::config::load_config(&path).expect("load persisted config");
+        assert_eq!(persisted, config);
+
+        handle.join().expect("server thread joined");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

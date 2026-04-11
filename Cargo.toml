@@ -6,8 +6,6 @@ publish = ["gitea"]
 
 [dependencies]
 anyhow = "1"
-axum = { version = "0", features = ["macros"] }
-axum-extra = { version = "0", features = ["query"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
 color-eyre = "0"
@@ -15,7 +13,6 @@ comfy-table = "7"
 futures = "0"
 macaddr = { version = "1", features = ["serde", "serde_std"] }
 serde = { version = "1", features = ["derive"] }
-serde_html_form = "0"
 serde_json = "1"
 tokio = { version = "1", features = [
     "fs",
@@ -23,18 +20,17 @@ tokio = { version = "1", features = [
     "rt-multi-thread",
     "io-util",
     "macros",
+    "time",
 ] }
-tower-http = { version = "0", features = ["fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-urlencoding = "2"
 
 [profile.release]
 opt-level = "z"
 strip = true
 
 [workspace]
-members = ["ipjs", "wakey-agent", "wakey-core", "wakey-linux"]
+members = ["ipjs", "wakey-agent", "wakey-control-plane", "wakey-core", "wakey-linux"]
 
 [dependencies.lda-ipjs]
 path = "ipjs"

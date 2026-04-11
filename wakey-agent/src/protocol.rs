@@ -1,11 +1,71 @@
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::net::IpAddr;
 use wakey_core::{
     DeviceFilters, DeviceInventory, DeviceQuery, DhcpLeaseWithState, InterfaceSummary, NeighborEntry,
     Status, WakeResult,
 };
 use wakey_core::parse::mac;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RequestId(String);
+
+impl RequestId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for RequestId {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.trim().is_empty() {
+            return Err("request_id must not be empty".into());
+        }
+        Ok(Self(value))
+    }
+}
+
+impl From<RequestId> for String {
+    fn from(value: RequestId) -> Self {
+        value.0
+    }
+}
+
+impl fmt::Display for RequestId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Serialize for RequestId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for RequestId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        RequestId::try_from(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ErrorPayload {
+    pub code: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusRequest {
@@ -135,12 +195,12 @@ pub enum ClientMessage {
         agent_id: String,
     },
     Result {
-        request_id: String,
+        request_id: RequestId,
         result: CommandResult,
     },
     Error {
-        request_id: String,
-        error: String,
+        request_id: RequestId,
+        error: ErrorPayload,
     },
 }
 
@@ -148,7 +208,7 @@ pub enum ClientMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     Command {
-        request_id: String,
+        request_id: RequestId,
         command: AgentCommand,
     },
 }
@@ -160,7 +220,7 @@ mod tests {
     #[test]
     fn command_serialization_is_stable() {
         let msg = ServerMessage::Command {
-            request_id: "req-1".into(),
+            request_id: RequestId::try_from("req-1".to_string()).expect("request id"),
             command: AgentCommand::Leases(LeasesRequest {
                 include_state: true,
             }),
@@ -169,5 +229,11 @@ mod tests {
         let json = serde_json::to_string(&msg).expect("serialize");
         assert!(json.contains("\"request_id\":\"req-1\""));
         assert!(json.contains("\"kind\":\"leases\""));
+    }
+
+    #[test]
+    fn request_id_rejects_empty() {
+        let err = RequestId::try_from("   ".to_string()).expect_err("must fail");
+        assert!(err.contains("must not be empty"));
     }
 }

@@ -8,7 +8,7 @@ service-first project with:
 - a reusable core model
 - a Linux/OpenWrt adapter layer
 - a CLI for operators
-- a temporary legacy HTTP/static adapter during migration
+- an outbound agent plus control-plane model
 
 ## What it does
 
@@ -28,7 +28,6 @@ wakey leases --include-state
 wakey devs
 wakey wake bedroom-pc
 wakey wake --mac aa:bb:cc:dd:ee:ff
-wakey http --host :: --port 12012
 ```
 
 ## Workspace layout
@@ -40,7 +39,11 @@ wakey http --host :: --port 12012
   - Linux/OpenWrt adapter
   - DHCP lease loading, interface summaries, neighbor lookup, WoL sending
 - `wakey`
-  - service layer, CLI, and temporary HTTP/static adapter
+  - service layer and operator CLI
+- `wakey-agent`
+  - outbound router daemon, enrollment, websocket command execution
+- `wakey-control-plane`
+  - enrollment endpoint, connected-agent registry, command relay API
 - `ipjs`
   - typed wrappers around Linux `ip -j ...` data
   - JSON-first, with optional experimental netlink backends
@@ -52,40 +55,20 @@ Inside the `wakey` crate:
 - `src/service`
   - the real use-case layer
   - status, leases, inventory, interfaces, wake, and query resolution
-- `src/http`
-  - temporary legacy HTTP/static adapter
-  - compatibility mapping for the current `/static` client
-- `src/legacy`
-  - transitional compatibility wrappers kept during the migration
 
 The long-term direction is:
 
 - keep the service layer stable
-- keep HTTP as an adapter, not the architecture
-- eventually move toward an agent + control-plane model
+- keep the local CLI stable for operators
+- run remote control via outbound agent + control-plane relay
 
 ## Future direction
 
-The likely next large step is splitting the current temporary HTTP/web hosting
-role away from the main `wakey` binary.
+The project now uses:
 
-The intended shape is roughly:
-
-- `wakey`
-  - stable service layer and operator CLI
-- `wakey-agent`
-  - router-side daemon exposing a network API over the service layer
-- control-center app
-  - remote UI or control plane that talks to one or more agents
-
-That future agent layer will likely need:
-
-- explicit registration/authentication
-- a stable remote API
-- a small deployment/bootstrap story on the router
-
-The current CLI and compatibility HTTP adapter are being kept small on purpose
-so that split can happen later without moving the real product logic again.
+- `wakey` for local operator workflows and shared service behavior
+- `wakey-agent` for outbound enrollment and websocket execution
+- `wakey-control-plane` for enrollment, registry, and command relay
 
 ## CLI
 
@@ -149,17 +132,6 @@ wakey devs br-lan
 wakey devs --up
 wakey devs --json
 ```
-
-### Temporary HTTP adapter
-
-The old web/static app can still be served during migration:
-
-```sh
-wakey http --host :: --port 12012
-```
-
-This should be treated as a compatibility surface, not the long-term product
-shape.
 
 ## Tests
 

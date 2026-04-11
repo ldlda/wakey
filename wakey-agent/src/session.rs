@@ -6,7 +6,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::config::AgentConfig;
 use crate::dispatch::dispatch_command;
-use crate::protocol::{ClientMessage, ServerMessage};
+use crate::protocol::{ClientMessage, ErrorPayload, ServerMessage};
 
 pub async fn run(config: AgentConfig) -> Result<()> {
     let mut backoff = config.reconnect_base_ms.max(100);
@@ -18,7 +18,7 @@ pub async fn run(config: AgentConfig) -> Result<()> {
             Err(err) => {
                 warn!(error = %err, backoff_ms = backoff, "agent session ended; reconnecting");
                 sleep(Duration::from_millis(backoff)).await;
-                backoff = (backoff.saturating_mul(2)).min(config.reconnect_max_ms.max(backoff));
+                backoff = next_backoff_ms(backoff, config.reconnect_max_ms);
             }
         }
     }
@@ -63,9 +63,16 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
 
                 match msg {
                     Message::Text(text) => {
-                        let message: ServerMessage = serde_json::from_str(&text)
-                            .context("failed to decode server message")?;
-                        handle_server_message(&mut sink, message).await?;
+                        match serde_json::from_str::<ServerMessage>(&text) {
+                            Ok(message) => {
+                                handle_server_message(&mut sink, message).await?;
+                            }
+                            Err(err) => {
+                                // Allow the server to introduce extra frame types without
+                                // forcing reconnects for older agents.
+                                warn!(error = %err, payload = %text, "ignoring unknown server message");
+                            }
+                        }
                     }
                     Message::Ping(payload) => {
                         sink.send(Message::Pong(payload)).await.context("failed to send pong")?;
@@ -84,6 +91,11 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
     }
 }
 
+pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
+    let cap = max_ms.max(current_ms);
+    current_ms.saturating_mul(2).min(cap)
+}
+
 async fn handle_server_message<S>(sink: &mut S, message: ServerMessage) -> Result<()>
 where
     S: SinkExt<Message> + Unpin,
@@ -98,12 +110,16 @@ where
                 send_json(sink, &ClientMessage::Result { request_id, result }).await?;
             }
             Err(err) => {
-                error!(request_id, error = %err, "command dispatch failed");
+                error!(request_id = %request_id, error = %err, "command dispatch failed");
                 send_json(
                     sink,
                     &ClientMessage::Error {
                         request_id,
-                        error: err.to_string(),
+                        error: ErrorPayload {
+                            code: "command_dispatch_failed".into(),
+                            message: err.to_string(),
+                            retryable: None,
+                        },
                     },
                 )
                 .await?;
@@ -146,11 +162,23 @@ pub fn websocket_url(server_url: &str) -> Result<url::Url> {
 
 #[cfg(test)]
 mod tests {
-    use super::websocket_url;
+    use super::{next_backoff_ms, websocket_url};
 
     #[test]
     fn websocket_url_uses_expected_path() {
         let url = websocket_url("https://example.com/control").expect("url");
         assert_eq!(url.as_str(), "wss://example.com/api/v1/agent/ws");
+    }
+
+    #[test]
+    fn backoff_doubles_until_cap() {
+        assert_eq!(next_backoff_ms(1_000, 30_000), 2_000);
+        assert_eq!(next_backoff_ms(16_000, 30_000), 30_000);
+        assert_eq!(next_backoff_ms(30_000, 30_000), 30_000);
+    }
+
+    #[test]
+    fn backoff_never_shrinks_when_max_is_lower() {
+        assert_eq!(next_backoff_ms(8_000, 1_000), 8_000);
     }
 }
