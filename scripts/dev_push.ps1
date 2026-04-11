@@ -10,11 +10,13 @@ param(
     [string]$User = "root",
     [string]$RemotePath = "/root/.bin/wakey",
     [string]$AgentRemotePath = "/root/.bin/wakey-agent",
+    [string]$RemoteInitPath = "/etc/init.d/wakey",
     [string]$Target = "armv7-unknown-linux-musleabihf",
     [string]$BinName = "wakey",
     [string]$AgentBinName = "wakey-agent",
     [string]$HostKey,
     [switch]$ForcePassword,
+    [switch]$SkipInitScript,
     [switch]$Restart = $true,
     [switch]$Quiet = $true
 )
@@ -62,13 +64,21 @@ try {
     $agentRemoteTmp = "$AgentRemotePath.tmp"
     $destTmp = "$User@${HostName}:$remoteTmp"
     $agentDestTmp = "$User@${HostName}:$agentRemoteTmp"
+    $initTmp = '/var/tmp/wakey.init.tmp'
+    $initDestTmp = "$User@${HostName}:$initTmp"
     $localDeploy = Join-Path $repoRoot 'scripts/remote_deploy_wakey.sh'
+    $localInit = Join-Path $repoRoot 'scripts/init/openwrt/wakey'
     $deployTmp = '/var/tmp/remote_deploy_wakey.sh'
     $deployPreferred = '/root/.bin/remote_deploy_wakey.sh'
 
     # Push binaries
     Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
     Invoke-Scp -Local $localAgentBin -Dest $agentDestTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
+
+    # Push OpenWrt init script unless explicitly skipped
+    if (-not $SkipInitScript -and (Test-Path $localInit)) {
+        Invoke-Scp -Local $localInit -Dest $initDestTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
+    }
 
     # Push deploy helper if exists
     if (Test-Path $localDeploy) {
@@ -80,6 +90,19 @@ try {
     $script = @"
 $(Get-DeployScript $deployPreferred $deployTmp $remoteTmp $RemotePath 0)
 $(Get-DeployScript $deployPreferred $deployTmp $agentRemoteTmp $AgentRemotePath $restartFlag)
+$(if (-not $SkipInitScript) {
+@"
+if [ -f $initTmp ]; then
+    sed -i "s/\r$//" $initTmp 2>/dev/null || true
+    if command -v install >/dev/null 2>&1; then
+        install -m 0755 $initTmp $RemoteInitPath
+    else
+        cp -f $initTmp $RemoteInitPath
+        chmod 0755 $RemoteInitPath
+    fi
+fi
+"@
+})
 "@
     $remoteCmd = "sh -lc '$($script -replace "`r",'')'"
     if ($Quiet) { $remoteCmd += " >/dev/null 2>&1" }
