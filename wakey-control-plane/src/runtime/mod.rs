@@ -11,6 +11,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 use tokio::time::MissedTickBehavior;
 use tower_http::services::ServeDir;
+use tower_http::services::ServeFile;
 use tracing::{info, warn};
 use wakey_agent::protocol::{ErrorPayload, ServerMessage};
 
@@ -46,7 +47,12 @@ pub enum AgentReply {
 fn public_api_routes() -> Router<AppState> {
     Router::new()
     .route("/ui", get(|| async { Redirect::temporary("/ui/") }))
-    .nest_service("/ui/", get_service(ServeDir::new("ui")))
+        .nest_service(
+            "/ui/",
+            get_service(
+                ServeDir::new("ui/dist").not_found_service(ServeFile::new("ui/dist/index.html")),
+            ),
+        )
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
         .route("/api/v1/agent/ws", get(ws::agent_ws))

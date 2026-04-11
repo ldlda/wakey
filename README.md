@@ -226,11 +226,17 @@ This keeps edge policy and app routing aligned as features grow.
 
 ## UI (Initial Shell)
 
-Control-plane now serves a minimal operator shell at `/ui/` for immediate
-workflow testing (agents, command runner, alerts, and recent audits).
+Control-plane serves the built Operator UI at `/ui/` from `ui/dist`.
 
-This UI is intentionally lightweight and is the starting point for the richer
-Operator UI v1 plan.
+Build UI assets before starting control-plane:
+
+```sh
+cd ui
+pnpm install
+pnpm build
+```
+
+Then start control-plane and open `/ui/` on the same host/port.
 
 ## CLI
 
