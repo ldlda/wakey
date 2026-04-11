@@ -20,6 +20,16 @@ async fn main() -> Result<()> {
             tracing::init(cli.verbose, &daemon.telemetry)?;
             runtime::serve(daemon).await
         }
+        Command::InitConfig(args) => {
+            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
+            config::write_init_config(&args)?;
+            println!("config={}", args.config_file.display());
+            println!(
+                "next=wakey-control-plane serve --config-file {}",
+                args.config_file.display()
+            );
+            Ok(())
+        }
         Command::IssueEnrollToken(args) => {
             tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
             runtime::issue_enroll_token(args).await

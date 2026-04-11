@@ -1,9 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -14,50 +13,59 @@ pub struct IssuedAgent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedState {
-    enroll_tokens: HashSet<String>,
+struct LegacyPersistedState {
+    enroll_tokens: std::collections::HashSet<String>,
     agents: HashMap<String, String>,
 }
 
 pub struct Store {
-    path: PathBuf,
-    state: RwLock<PersistedState>,
+    db_path: PathBuf,
+    enroll_tokens: sled::Tree,
+    agents: sled::Tree,
 }
 
 impl Store {
     pub async fn load_or_init(path: &Path, enroll_tokens: Vec<String>) -> Result<Self> {
-        let seeded_tokens = enroll_tokens
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect::<HashSet<_>>();
+        let db_path = canonical_db_path(path);
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create state dir {}", parent.display()))?;
+        }
 
-        let initial = if path.exists() {
-            let raw = tokio::fs::read_to_string(path)
-                .await
-                .with_context(|| format!("failed to read store {}", path.display()))?;
-            debug!(path = %path.display(), bytes = raw.len(), "loading persisted control-plane store");
-            serde_json::from_str::<PersistedState>(&raw)
-                .with_context(|| format!("failed to decode store {}", path.display()))?
-        } else {
-            info!(path = %path.display(), seeded_enroll_tokens = seeded_tokens.len(), "initializing new control-plane store");
-            PersistedState {
-                enroll_tokens: seeded_tokens,
-                agents: HashMap::new(),
-            }
-        };
+        let db = sled::open(&db_path)
+            .with_context(|| format!("failed to open state db {}", db_path.display()))?;
+        let enroll_tree = db
+            .open_tree("enroll_tokens")
+            .context("failed to open enroll_tokens tree")?;
+        let agents_tree = db.open_tree("agents").context("failed to open agents tree")?;
 
         let store = Self {
-            path: path.to_path_buf(),
-            state: RwLock::new(initial),
+            db_path,
+            enroll_tokens: enroll_tree,
+            agents: agents_tree,
         };
-        store.save().await?;
-        let (enroll_tokens, agents) = {
-            let snapshot = store.state.read().await;
-            (snapshot.enroll_tokens.len(), snapshot.agents.len())
-        };
+
+        store.maybe_migrate_legacy_json(path)?;
+
+        for token in enroll_tokens {
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            store
+                .enroll_tokens
+                .insert(token.as_bytes(), &[])
+                .with_context(|| format!("failed to seed enroll token into {}", store.db_path.display()))?;
+        }
+
+        store
+            .flush()
+            .with_context(|| format!("failed to flush state db {}", store.db_path.display()))?;
+
+        let enroll_tokens = store.enroll_tokens.iter().count();
+        let agents = store.agents.iter().count();
         info!(
-            path = %store.path.display(),
+            path = %store.db_path.display(),
             enroll_tokens,
             agents,
             "control-plane store ready"
@@ -66,17 +74,23 @@ impl Store {
     }
 
     pub async fn enroll(&self, enroll_token: &str) -> Result<IssuedAgent> {
-        let mut state = self.state.write().await;
-        if !state.enroll_tokens.remove(enroll_token) {
+        if self
+            .enroll_tokens
+            .remove(enroll_token.as_bytes())
+            .context("failed removing enroll token")?
+            .is_none()
+        {
             warn!("rejecting enroll attempt with invalid or consumed token");
             anyhow::bail!("invalid or already-used enroll token");
         }
 
         let agent_id = format!("agent-{}", Uuid::new_v4());
         let agent_token = format!("tok-{}", Uuid::new_v4());
-        state.agents.insert(agent_id.clone(), agent_token.clone());
-        drop(state);
-        self.save().await?;
+
+        self.agents
+            .insert(agent_id.as_bytes(), agent_token.as_bytes())
+            .context("failed persisting agent credentials")?;
+        self.flush().context("failed flushing state db after enroll")?;
         info!(agent_id = %agent_id, "issued persistent agent credentials");
 
         Ok(IssuedAgent {
@@ -87,86 +101,90 @@ impl Store {
 
     pub async fn issue_enroll_token(&self) -> Result<String> {
         let token = format!("enr-{}", Uuid::new_v4());
-        let mut state = self.state.write().await;
-        state.enroll_tokens.insert(token.clone());
-        drop(state);
-        self.save().await?;
+        self.enroll_tokens
+            .insert(token.as_bytes(), &[])
+            .context("failed persisting enroll token")?;
+        self.flush()
+            .context("failed flushing state db after token issuance")?;
         info!("persisted new enroll token");
         Ok(token)
     }
 
     pub async fn reload_from_disk(&self) -> Result<()> {
-        if !self.path.exists() {
-            warn!(path = %self.path.display(), "reload requested but store file is missing");
-            return Ok(());
-        }
-
-        let raw = tokio::fs::read_to_string(&self.path)
-            .await
-            .with_context(|| format!("failed to read store {}", self.path.display()))?;
-        let decoded = serde_json::from_str::<PersistedState>(&raw)
-            .with_context(|| format!("failed to decode store {}", self.path.display()))?;
-
-        let enroll_tokens = decoded.enroll_tokens.len();
-        let agents = decoded.agents.len();
-        *self.state.write().await = decoded;
-        info!(path = %self.path.display(), enroll_tokens, agents, "reloaded control-plane store from disk");
+        // sled is durable and read-through; explicit reload is a no-op.
+        info!(path = %self.db_path.display(), "reload requested; sled backend does not require in-memory reload");
         Ok(())
     }
 
     pub async fn verify_agent_token(&self, agent_id: &str, token: &str) -> bool {
-        self.state
-            .read()
-            .await
-            .agents
-            .get(agent_id)
-            .map(|stored| stored == token)
-            .unwrap_or(false)
+        match self.agents.get(agent_id.as_bytes()) {
+            Ok(Some(value)) => value.as_ref() == token.as_bytes(),
+            Ok(None) => false,
+            Err(err) => {
+                warn!(error = %err, agent_id = %agent_id, "failed to read agent token from state db");
+                false
+            }
+        }
     }
 
     pub async fn list_agents(&self) -> Vec<String> {
         let mut out = self
-            .state
-            .read()
-            .await
             .agents
-            .keys()
-            .cloned()
+            .iter()
+            .filter_map(|item| item.ok())
+            .filter_map(|(key, _)| String::from_utf8(key.to_vec()).ok())
             .collect::<Vec<_>>();
         out.sort();
         out
     }
 
-    async fn save(&self) -> Result<()> {
-        let snapshot = self.state.read().await;
-        let body =
-            serde_json::to_string_pretty(&*snapshot).context("failed to serialize store state")?;
-        let body_len = body.len();
+    fn flush(&self) -> Result<()> {
+        self.enroll_tokens
+            .flush()
+            .context("failed to flush enroll token tree")?;
+        self.agents
+            .flush()
+            .context("failed to flush agents tree")?;
+        debug!(path = %self.db_path.display(), "flushed sled state db");
+        Ok(())
+    }
 
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("failed to create store dir {}", parent.display()))?;
+    fn maybe_migrate_legacy_json(&self, configured_path: &Path) -> Result<()> {
+        if configured_path.extension().and_then(|x| x.to_str()) != Some("json") {
+            return Ok(());
+        }
+        if self.enroll_tokens.iter().next().is_some() || self.agents.iter().next().is_some() {
+            return Ok(());
+        }
+        if !configured_path.exists() {
+            return Ok(());
         }
 
-        let tmp = self.path.with_extension("json.tmp");
-        tokio::fs::write(&tmp, body)
-            .await
-            .with_context(|| format!("failed to write temp store {}", tmp.display()))?;
-        tokio::fs::rename(&tmp, &self.path).await.with_context(|| {
-            format!(
-                "failed to atomically move temp store {} into {}",
-                tmp.display(),
-                self.path.display()
-            )
-        })?;
-        debug!(
-            path = %self.path.display(),
-            bytes = body_len,
-            enroll_tokens = snapshot.enroll_tokens.len(),
-            agents = snapshot.agents.len(),
-            "saved control-plane store"
-        );
+        let raw = std::fs::read_to_string(configured_path)
+            .with_context(|| format!("failed to read legacy state {}", configured_path.display()))?;
+        let legacy: LegacyPersistedState = serde_json::from_str(&raw)
+            .with_context(|| format!("failed to parse legacy state {}", configured_path.display()))?;
+
+        for token in legacy.enroll_tokens {
+            self.enroll_tokens
+                .insert(token.as_bytes(), &[])
+                .context("failed to migrate enroll token")?;
+        }
+        for (agent_id, token) in legacy.agents {
+            self.agents
+                .insert(agent_id.as_bytes(), token.as_bytes())
+                .context("failed to migrate agent token")?;
+        }
+
+        self.flush().context("failed flushing migrated legacy state")?;
+        info!(legacy = %configured_path.display(), db = %self.db_path.display(), "migrated legacy json state into sled db");
         Ok(())
+    }
+}
+
+fn canonical_db_path(configured: &Path) -> PathBuf {
+    match configured.extension().and_then(|x| x.to_str()) {
+        Some("json") => configured.with_extension("db"),
+        _ => configured.to_path_buf(),
     }
 }

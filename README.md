@@ -79,12 +79,18 @@ Control-plane also supports a config file at
 `/etc/wakey-control-plane/config.toml` (override with `--config-file`) so you
 can persist telemetry settings instead of passing flags.
 
+You can scaffold this file with:
+
+```sh
+wakey-control-plane init-config
+```
+
 Example:
 
 ```toml
 bind = "0.0.0.0:8080"
 public_url = "https://cp.example.com"
-state_file = "/var/lib/wakey-control-plane/state.json"
+state_file = "/var/lib/wakey-control-plane/state.db"
 pid_file = "/var/run/wakey-control-plane.pid"
 command_timeout_ms = 30000
 
@@ -96,6 +102,9 @@ json_logs = false
 
 If `telemetry.otlp_endpoint` is omitted, logs still work normally and only local
 structured logs are emitted.
+
+State is persisted in an embedded `sled` database (default
+`/var/lib/wakey-control-plane/state.db`) rather than single-file JSON snapshots.
 
 ### Quick start
 

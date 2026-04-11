@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
-pub const DEFAULT_STATE_FILE: &str = "/var/lib/wakey-control-plane/state.json";
+pub const DEFAULT_STATE_FILE: &str = "/var/lib/wakey-control-plane/state.db";
 pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-control-plane.pid";
 pub const DEFAULT_CONFIG_FILE: &str = "/etc/wakey-control-plane/config.toml";
 
@@ -22,6 +22,8 @@ pub struct Cli {
 pub enum Command {
     /// Run the control-plane daemon.
     Serve(ServeArgs),
+    /// Write a control-plane config scaffold.
+    InitConfig(InitConfigArgs),
     /// Create a new enroll token for provisioning a router.
     IssueEnrollToken(IssueEnrollTokenArgs),
     /// Send SIGHUP to an already-running daemon.
@@ -50,6 +52,42 @@ pub struct ServeArgs {
 
     #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
     pub config_file: PathBuf,
+}
+
+#[derive(Args, Clone)]
+pub struct InitConfigArgs {
+    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    pub config_file: PathBuf,
+
+    #[arg(long)]
+    pub bind: Option<SocketAddr>,
+
+    #[arg(long)]
+    pub public_url: Option<String>,
+
+    #[arg(long)]
+    pub state_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub pid_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub command_timeout_ms: Option<u64>,
+
+    #[arg(long = "enroll-token")]
+    pub enroll_tokens: Vec<String>,
+
+    #[arg(long)]
+    pub telemetry_otlp_endpoint: Option<String>,
+
+    #[arg(long)]
+    pub telemetry_service_name: Option<String>,
+
+    #[arg(long)]
+    pub telemetry_json_logs: bool,
+
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args)]
