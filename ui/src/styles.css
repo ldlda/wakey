@@ -25,6 +25,27 @@ body {
 .topbar h1 { margin: 0; }
 .topbar p { margin: 0.35rem 0 0; color: var(--muted); }
 
+.tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.8rem;
+}
+
+.tab {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  text-decoration: none;
+  color: var(--muted);
+  background: #0b1528;
+}
+
+.tab.active {
+  color: var(--text);
+  border-color: #6b84ad;
+}
+
 .pill {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -41,10 +62,22 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   margin-bottom: 1rem;
 }
+
+.card-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
 .stat h3 { margin: 0; color: var(--muted); font-weight: 500; }
 .stat strong { font-size: 1.5rem; }
 
 .grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+}
+
+.two-col {
   display: grid;
   gap: 0.8rem;
   grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
@@ -56,7 +89,9 @@ body {
   padding: 0.8rem;
 }
 .span-2 { grid-column: 1 / -1; }
+.span-full { grid-column: 1 / -1; }
 .row-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.muted { color: var(--muted); }
 
 button, input, select {
   border-radius: 8px;

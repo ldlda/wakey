@@ -17,11 +17,15 @@ function sourcemapEnabled(): boolean {
 
 export default defineConfig({
   plugins: [
-    react({
-      babel: {
-        plugins: ["babel-plugin-react-compiler"],
-      },
-    }),
+    react(
+      process.env.UI_REACT_COMPILER === "1"
+        ? {
+            babel: {
+              plugins: ["babel-plugin-react-compiler"],
+            },
+          }
+        : undefined,
+    ),
   ],
   base: "/ui/",
   resolve: {
