@@ -10,7 +10,7 @@ import {
   fetchAlertHistory,
   fetchAudit,
   runCommand,
-} from "./api";
+} from "@/api";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
