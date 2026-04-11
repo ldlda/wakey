@@ -4,6 +4,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
@@ -44,6 +45,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
     let span = info_span!("agent_ws_connection", connection_id = %connection_id);
     let _span_guard = span.enter();
     info!("agent websocket upgraded");
+    let connected_at = Instant::now();
 
     let (mut write, mut read) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
@@ -66,6 +68,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
     });
 
     let mut authed_agent_id: Option<String> = None;
+    let mut hello_at: Option<Instant> = None;
 
     loop {
         let frame = read.next().await;
@@ -83,7 +86,15 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
 
         match msg {
             Message::Text(text) => {
-                if let Err(err) = process_agent_text(&state, &tx, &mut authed_agent_id, &text).await
+                if let Err(err) = process_agent_text(
+                    &state,
+                    &tx,
+                    &mut authed_agent_id,
+                    &mut hello_at,
+                    connected_at,
+                    &text,
+                )
+                .await
                 {
                     warn!(error = %err, "closing agent websocket due to protocol/auth error");
                     break;
@@ -131,6 +142,8 @@ async fn process_agent_text(
     state: &AppState,
     tx: &mpsc::UnboundedSender<ServerMessage>,
     authed_agent_id: &mut Option<String>,
+    hello_at: &mut Option<Instant>,
+    connected_at: Instant,
     text: &str,
 ) -> Result<()> {
     let message: IncomingClientMessage =
@@ -138,12 +151,19 @@ async fn process_agent_text(
 
     match message {
         IncomingClientMessage::Hello { agent_id } => {
-            debug!(agent_id = %agent_id, "agent hello received");
+            let now = Instant::now();
+            if hello_at.is_none() {
+                *hello_at = Some(now);
+            }
+            let connect_to_hello_ms = connected_at.elapsed().as_millis() as u64;
+            info!(agent_id = %agent_id, connect_to_hello_ms, "agent hello received");
         }
         IncomingClientMessage::Auth {
             agent_id,
             agent_token,
         } => {
+            let connect_to_auth_ms = connected_at.elapsed().as_millis() as u64;
+            let hello_to_auth_ms = hello_at.map(|t| now_duration_ms(t.elapsed()));
             if !state
                 .store
                 .verify_agent_token(&agent_id, &agent_token)
@@ -159,9 +179,12 @@ async fn process_agent_text(
                         request_id: None,
                         event_type: "agent_ws_auth".into(),
                         outcome: "rejected".into(),
-                        latency_ms: None,
+                        latency_ms: Some(connect_to_auth_ms),
                         message: "agent auth rejected".into(),
-                        metadata: serde_json::json!({}),
+                        metadata: serde_json::json!({
+                            "connect_to_auth_ms": connect_to_auth_ms,
+                            "hello_to_auth_ms": hello_to_auth_ms,
+                        }),
                     })
                     .await
                 {
@@ -175,7 +198,7 @@ async fn process_agent_text(
                 .await
                 .insert(agent_id.clone(), tx.clone());
             *authed_agent_id = Some(agent_id.clone());
-            info!(agent_id = %agent_id, "agent authenticated");
+            info!(agent_id = %agent_id, connect_to_auth_ms, hello_to_auth_ms = hello_to_auth_ms.unwrap_or(0), "agent authenticated");
             if let Err(err) = state
                 .store
                 .append_audit_event(AuditEventInput {
@@ -185,9 +208,12 @@ async fn process_agent_text(
                     request_id: None,
                     event_type: "agent_ws_auth".into(),
                     outcome: "ok".into(),
-                    latency_ms: None,
+                    latency_ms: Some(connect_to_auth_ms),
                     message: "agent websocket authenticated".into(),
-                    metadata: serde_json::json!({}),
+                    metadata: serde_json::json!({
+                        "connect_to_auth_ms": connect_to_auth_ms,
+                        "hello_to_auth_ms": hello_to_auth_ms,
+                    }),
                 })
                 .await
             {
@@ -225,4 +251,8 @@ async fn process_agent_text(
     }
 
     Ok(())
+}
+
+fn now_duration_ms(duration: std::time::Duration) -> u64 {
+    duration.as_millis() as u64
 }

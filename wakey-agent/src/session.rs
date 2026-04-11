@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use std::time::Instant;
 use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, info_span, warn};
@@ -38,9 +39,15 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
 
     let ws_url = websocket_url(&config.server_url)?;
     info!(%ws_url, agent_id = %config.agent_id, "connecting agent websocket");
+    let connect_started = Instant::now();
     let (stream, _) = connect_async(ws_url.as_str())
         .await
         .context("failed to connect websocket")?;
+    let ws_connect_ms = connect_started.elapsed().as_millis() as u64;
+    info!(%ws_url, agent_id = %config.agent_id, ws_connect_ms, "agent websocket connected");
+    if ws_connect_ms > 10_000 {
+        warn!(%ws_url, agent_id = %config.agent_id, ws_connect_ms, "agent websocket connect was slow");
+    }
     let (mut sink, mut source) = stream.split();
 
     send_json(&mut sink, &ClientMessage::Hello {
