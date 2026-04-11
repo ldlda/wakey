@@ -4,8 +4,10 @@ use axum::http::StatusCode;
 mod commands;
 mod control;
 mod audit;
+mod alerts;
 
 pub use commands::{list_agents, run_command};
+pub use alerts::active_alerts;
 pub use audit::list_audit_events;
 pub use control::{
     EnrollTokenStatus, IssueEnrollTokenResponse, RevokeEnrollTokenResponse, StateStatsResponse,

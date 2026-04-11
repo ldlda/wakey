@@ -2,4 +2,4 @@ mod store;
 mod types;
 
 pub use store::Store;
-pub use types::{AuditEventFilter, AuditEventInput};
+pub use types::{AlertState, AuditEvent, AuditEventFilter, AuditEventInput};

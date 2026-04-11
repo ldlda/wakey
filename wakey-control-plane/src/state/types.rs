@@ -69,3 +69,17 @@ pub struct AuditEventFilter {
     pub until_unix: Option<u64>,
     pub limit: usize,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertState {
+    pub alert_id: String,
+    pub kind: String,
+    pub severity: String,
+    pub status: String,
+    pub agent_id: Option<String>,
+    pub message: String,
+    pub value: u64,
+    pub threshold: u64,
+    pub last_seen_unix: u64,
+    pub metadata: serde_json::Value,
+}

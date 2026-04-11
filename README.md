@@ -191,6 +191,7 @@ Control-plane admin API includes token management endpoints:
 - `GET /api/v1/control/enroll-tokens?include_expired=true|false`
 - `DELETE /api/v1/control/enroll-tokens/{token}`
 - `GET /api/v1/control/audit/events?agent_id=<id>&event_type=<type>&limit=<n>`
+- `GET /api/v1/control/alerts?lookback_seconds=900`
 
 If commands still appear silent, verify both processes are running with `-v`
 and that `RUST_LOG` is not overriding to a stricter level.
