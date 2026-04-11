@@ -70,6 +70,30 @@ impl Store {
         })
     }
 
+    pub async fn issue_enroll_token(&self) -> Result<String> {
+        let token = format!("enr-{}", Uuid::new_v4());
+        let mut state = self.state.write().await;
+        state.enroll_tokens.insert(token.clone());
+        drop(state);
+        self.save().await?;
+        Ok(token)
+    }
+
+    pub async fn reload_from_disk(&self) -> Result<()> {
+        if !self.path.exists() {
+            return Ok(());
+        }
+
+        let raw = tokio::fs::read_to_string(&self.path)
+            .await
+            .with_context(|| format!("failed to read store {}", self.path.display()))?;
+        let decoded = serde_json::from_str::<PersistedState>(&raw)
+            .with_context(|| format!("failed to decode store {}", self.path.display()))?;
+
+        *self.state.write().await = decoded;
+        Ok(())
+    }
+
     pub async fn verify_agent_token(&self, agent_id: &str, token: &str) -> bool {
         self.state
             .read()
