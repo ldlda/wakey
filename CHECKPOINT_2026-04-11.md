@@ -44,8 +44,10 @@ This checkpoint captures the current state after control-plane migration, loggin
 
 - Control-plane state backend moved from JSON snapshot to embedded `sled` DB.
 - Default state path changed to `/var/lib/wakey-control-plane/state.db`.
-- Legacy JSON migration support exists:
-  - if a `.json` path is configured and DB is empty, tokens/agents are migrated into DB.
+- Legacy JSON migration support has been removed; sled is now the only supported
+  state format.
+- Enroll tokens include persisted expiry timestamps and are validated on enroll.
+- Periodic and explicit garbage collection remove expired tokens.
 
 ## Operator Commands
 
@@ -74,6 +76,13 @@ wakey-agent serve --config /etc/wakey-agent/config.toml
 - Last verified passing:
   - `cargo check --workspace`
   - `cargo clippy --workspace`
+
+## Test Coverage Added In This Pass
+
+- Unit tests in `wakey-control-plane/src/state/store.rs` now cover:
+  - expired-token garbage collection removes persisted stale tokens
+  - enroll rejects expired tokens and consumes stale entries
+  - state stats counters for agents and expired token totals
 
 ## Known Tradeoffs / Follow-ups
 

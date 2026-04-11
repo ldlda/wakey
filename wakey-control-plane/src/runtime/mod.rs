@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,10 +17,14 @@ use crate::state;
 use crate::ws;
 
 mod admin;
+mod process;
 pub use admin::{
     issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats,
 };
+pub use process::reload_daemon;
+use process::{remove_pid_file, write_pid_file};
 
+/// Shared state for HTTP handlers and websocket relay paths.
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<state::Store>,
@@ -37,6 +40,7 @@ pub enum AgentReply {
     Error(ErrorPayload),
 }
 
+/// Starts the control-plane HTTP and websocket surfaces and manages daemon lifecycle hooks.
 pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     write_pid_file(&daemon.pid_file)?;
     info!(pid_file = %daemon.pid_file.display(), "wrote control-plane pid file");
@@ -91,6 +95,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         let mut gc_tick = tokio::time::interval(Duration::from_secs(300));
         gc_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+        // Unix daemon loop: shutdown signal, config reload trigger, and periodic maintenance.
         loop {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
@@ -132,60 +137,4 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
 
     let _ = remove_pid_file(&daemon.pid_file);
     Ok(())
-}
-
-pub fn reload_daemon(pid_file: &Path) -> Result<()> {
-    let pid = read_pid(pid_file)?;
-    info!(pid, pid_file = %pid_file.display(), "sending control-plane reload signal");
-    send_hup(pid)
-}
-
-fn write_pid_file(path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create pid dir {}", parent.display()))?;
-    }
-    std::fs::write(path, format!("{}\n", std::process::id()))
-        .with_context(|| format!("failed to write pid file {}", path.display()))
-}
-
-fn remove_pid_file(path: &Path) -> Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => {
-            Err(err).with_context(|| format!("failed to remove pid file {}", path.display()))
-        }
-    }
-}
-
-fn read_pid(path: &Path) -> Result<i32> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read pid file {}", path.display()))?;
-    let pid = raw
-        .trim()
-        .parse::<i32>()
-        .with_context(|| format!("invalid pid in {}", path.display()))?;
-    if pid <= 0 {
-        anyhow::bail!("invalid non-positive pid {pid}");
-    }
-    Ok(pid)
-}
-
-fn send_hup(pid: i32) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{Signal, kill};
-        use nix::unistd::Pid;
-
-        kill(Pid::from_raw(pid), Signal::SIGHUP)
-            .with_context(|| format!("failed to send SIGHUP to pid {pid}"))?;
-        Ok(())
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        anyhow::bail!("reload is only supported on Unix (SIGHUP unavailable on this platform)")
-    }
 }

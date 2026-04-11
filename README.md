@@ -136,6 +136,8 @@ State is persisted in an embedded `sled` database (default
 Relative paths in config are resolved under `data_dir`.
 
 Enroll tokens are now expiring and revocable. Issuance returns `expires_at_unix`.
+Expired tokens are rejected on enroll and can be garbage-collected periodically
+or on demand.
 
 ### Quick start
 
@@ -268,6 +270,14 @@ This repo has two useful testing modes:
 cargo check
 cargo test --no-run
 cargo clippy --all-targets --all-features -- -D warnings
+```
+
+Focused control-plane state tests:
+
+```sh
+cargo test -p wakey-control-plane state::store::tests::gc_removes_expired_tokens
+cargo test -p wakey-control-plane state::store::tests::enroll_rejects_expired_token
+cargo test -p wakey-control-plane state::store::tests::stats_counts_agents_and_expired_tokens
 ```
 
 ### On-device

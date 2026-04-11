@@ -312,3 +312,108 @@ fn decode_schema(raw: &[u8]) -> Result<u32> {
     arr.copy_from_slice(raw);
     Ok(u32::from_le_bytes(arr))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::time::Duration;
+
+    use super::Store;
+
+    async fn make_store() -> (Store, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
+        let db_path = dir.join("state.db");
+        let store = Store::load_or_init(&db_path, Vec::new(), Duration::from_secs(60))
+            .await
+            .expect("store should initialize");
+        (store, dir)
+    }
+
+    fn cleanup_dir(path: &std::path::Path) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[tokio::test]
+    async fn gc_removes_expired_tokens() {
+        let (store, dir) = make_store().await;
+        let key = b"enr-expired-gc-test";
+        let expired = 1u64.to_le_bytes();
+        store
+            .enroll_tokens
+            .insert(key, &expired)
+            .expect("insert should succeed");
+
+        let removed = store
+            .gc_expired_enroll_tokens()
+            .await
+            .expect("gc should succeed");
+
+        assert_eq!(removed, 1);
+        assert!(
+            store
+                .enroll_tokens
+                .get(key)
+                .expect("read should succeed")
+                .is_none()
+        );
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn enroll_rejects_expired_token() {
+        let (store, dir) = make_store().await;
+        let key = b"enr-expired-enroll-test";
+        let expired = 1u64.to_le_bytes();
+        store
+            .enroll_tokens
+            .insert(key, &expired)
+            .expect("insert should succeed");
+
+        let err = store
+            .enroll("enr-expired-enroll-test")
+            .await
+            .expect_err("expired token should be rejected");
+
+        assert!(err.to_string().contains("expired"));
+        assert!(
+            store
+                .enroll_tokens
+                .get(key)
+                .expect("read should succeed")
+                .is_none()
+        );
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn stats_counts_agents_and_expired_tokens() {
+        let (store, dir) = make_store().await;
+        store
+            .enroll_tokens
+            .insert(b"enr-valid-test", &(u64::MAX - 10).to_le_bytes())
+            .expect("insert valid should succeed");
+
+        let _issued = store
+            .issue_enroll_token(Duration::from_secs(60))
+            .await
+            .expect("issue should succeed");
+
+        store
+            .enroll_tokens
+            .insert(b"enr-expired-stats-test", &1u64.to_le_bytes())
+            .expect("insert expired should succeed");
+
+        let issued_agent = store
+            .enroll("enr-valid-test")
+            .await
+            .expect("enroll should succeed for valid token");
+        assert!(!issued_agent.agent_id.is_empty());
+
+        let stats = store.stats().await.expect("stats should succeed");
+
+        assert_eq!(stats.agent_count, 1);
+        assert_eq!(stats.enroll_token_count, 2);
+        assert_eq!(stats.expired_enroll_token_count, 1);
+        cleanup_dir(&dir);
+    }
+}

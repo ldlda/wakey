@@ -2,7 +2,7 @@
 linker = "rust-lld"
 
 [build]
-target = "armv7-unknown-linux-musleabihf"
+# target = "armv7-unknown-linux-musleabihf"
 
 [alias]
 cl = "c --target=armv7-unknown-linux-musleabihf"
