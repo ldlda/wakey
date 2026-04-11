@@ -24,6 +24,8 @@ pub enum Command {
     Serve(ServeArgs),
     /// Enroll this router with a control plane and write agent config.
     Enroll(EnrollArgs),
+    /// Create a local config scaffold for manual bootstrap.
+    InitConfig(InitConfigArgs),
     /// Reload a running agent daemon by sending SIGHUP.
     Reload(ReloadArgs),
 }
@@ -50,6 +52,29 @@ pub struct EnrollArgs {
     /// Path to the agent config file to write.
     #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
+}
+
+#[derive(Args)]
+pub struct InitConfigArgs {
+    /// Path to the agent config file to write.
+    #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
+    pub config: PathBuf,
+
+    /// Base HTTPS URL of the control plane.
+    #[arg(long)]
+    pub server_url: Option<String>,
+
+    /// Persistent agent id obtained from enroll flow.
+    #[arg(long)]
+    pub agent_id: Option<String>,
+
+    /// Persistent agent token obtained from enroll flow.
+    #[arg(long)]
+    pub agent_token: Option<String>,
+
+    /// Replace an existing config file.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args)]

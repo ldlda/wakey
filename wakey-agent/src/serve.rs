@@ -7,6 +7,14 @@ use crate::cli::ServeArgs;
 use crate::{config, session};
 
 pub async fn serve(args: ServeArgs) -> Result<()> {
+    if !args.config.exists() {
+        anyhow::bail!(
+            "agent config {} not found. Run `wakey-agent enroll --server-url <url> --enroll-token <token>` or `wakey-agent init-config --config {}` first",
+            args.config.display(),
+            args.config.display()
+        );
+    }
+
     write_pid_file(&args.pid_file)?;
 
     let mut cfg = config::load_config(&args.config)?;
