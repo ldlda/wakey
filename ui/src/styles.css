@@ -142,6 +142,40 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
   align-items: center;
   gap: 0.45rem;
 }
+.device-list {
+  margin-top: 0.8rem;
+}
+
+.device-row {
+  align-items: stretch;
+}
+
+.device-main {
+  min-width: 0;
+}
+
+.device-main strong {
+  display: inline-block;
+  margin-bottom: 0.25rem;
+}
+
+.device-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 720px) {
+  .device-row {
+    flex-direction: column;
+  }
+
+  .device-meta {
+    justify-content: flex-start;
+  }
+}
 .empty { color: var(--muted); padding: 0.35rem 0.2rem; }
 
 .output {

@@ -1,9 +1,10 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const navItems = [
-  ["/", "Dashboard"],
+  ["/", "Devices"],
+  ["/commands", "Wake Tools"],
+  ["/dashboard", "Fleet Health"],
   ["/agents", "Agents"],
-  ["/commands", "Commands"],
   ["/audit", "Audit"],
   ["/alerts", "Alerts"],
   ["/tokens", "Tokens"],
@@ -15,7 +16,7 @@ export function AppLayout() {
       <header className="topbar">
         <div>
           <h1>Wakey Operator UI</h1>
-          <p>Control-plane operations, audits, and live alerts</p>
+          <p>Find devices fast and wake them reliably</p>
         </div>
       </header>
 

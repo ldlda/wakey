@@ -1,47 +1,149 @@
-## Plan: Operator UI v1 (Flexible Delivery)
+## Plan: wakey UI v1 (Device-First)
 
-Ship a practical, operator-first UI quickly using existing control-plane APIs, while keeping implementation choices flexible where they do not affect UX outcomes. Prioritize clear workflows, reliable live state, and low-friction deployment at /ui.
+The Operator UI is not the end goal by itself.
+The goal is to make wakey excellent at its original purpose: quickly finding devices and waking them reliably.
 
-**Steps**
-1. Phase 1: Experience goals and page IA. Define primary workflows and success criteria before coding: monitor fleet health, run commands safely, inspect audit history, manage alerts, and handle enrollment tokens.
-2. Phase 1: Information architecture. Create a minimal nav with Dashboard, Agents, Commands, Audit, Alerts, and Tokens; keep room to merge/split pages later based on usage.
-3. Phase 1: Data contracts and client boundaries. Build a typed API client around existing endpoints with origin-relative URLs only; centralize request/retry/error normalization and leave room to swap transport helpers.
-4. Phase 2: Core shell and states. Implement app shell, loading/empty/error states, top-level notifications, and shared primitives (table/list/cards/filter panel) without prematurely freezing visual details.
-5. Phase 2: Dashboard and Agents first. Surface connected/offline agent state and active alert counts, with quick navigation into command and investigation workflows.
-6. Phase 2: Command Runner. Implement safe command form (status/devs/leases/inventory/wake), result rendering, request_id visibility, and copy/share affordances for incident collaboration.
-7. Phase 3: Audit timeline. Implement filterable audit feed (agent_id, event_type, outcome, time window) with metadata drill-down and links back to related command outcomes.
-8. Phase 3: Alerts center. Implement active alerts plus transition history, with live subscription via alerts websocket and automatic polling fallback if stream drops.
-9. Phase 3: Token operations. Implement issue/list/revoke flows with expiry visibility and clear destructive-action confirmation UX.
-10. Phase 4: UX polish and operator ergonomics. Add keyboard-friendly flow, persisted local filters, robust reconnect indicators, and compact/high-density views for on-call usage.
-11. Phase 4: Deployment integration. Build static UI artifact into release pipeline and serve at /ui behind Cloudflare Access with the existing edge policy.
-12. Phase 5: Validation and soak. Run realistic operator drills and prolonged soak to tune alert noise, UI refresh cadence, and failure handling.
+Agent, audit, and token features remain important, but they should support the device workflow rather than dominate the navigation and development effort.
 
-**Relevant files**
-- [wakey-control-plane/src/runtime/mod.rs](wakey-control-plane/src/runtime/mod.rs) — route integration point for serving /ui and preserving public/control boundary.
-- [wakey-control-plane/src/api/commands.rs](wakey-control-plane/src/api/commands.rs) — command runner response contract.
-- [wakey-control-plane/src/api/audit.rs](wakey-control-plane/src/api/audit.rs) — audit query/filter contract.
-- [wakey-control-plane/src/api/alerts.rs](wakey-control-plane/src/api/alerts.rs) — active alerts, transition history, and websocket stream contracts.
-- [wakey-control-plane/src/api/control.rs](wakey-control-plane/src/api/control.rs) — token-management contracts.
-- [deploy/Caddyfile.control-plane.example](deploy/Caddyfile.control-plane.example) — edge gating and /ui exposure model.
-- [scripts/package_rootfs.ps1](scripts/package_rootfs.ps1) — package integration for UI artifact.
-- [.gitea/workflows/release.yml](.gitea/workflows/release.yml) — CI build and release integration.
-- [README.md](README.md) — operator-facing UI and API usage docs.
+## Product North Star
 
-**Verification**
-1. UI build verification in CI (typecheck, lint, production build) and artifact presence checks.
-2. Page-level smoke tests: Dashboard, Agents, Commands, Audit, Alerts, Tokens all load and complete primary actions.
-3. Contract checks between typed client models and control-plane payloads for commands/audit/alerts.
-4. Live-state checks: websocket stream updates alerts; fallback polling activates on disconnect and recovers gracefully.
-5. Security checks: /ui and /api/v1/control/* remain blocked without Access policy; public agent endpoints remain reachable.
-6. Soak checks: multi-hour sessions preserve responsiveness and do not lose transitions during reconnect churn.
+An operator should be able to do this in under 10 seconds:
+1. Open the UI.
+2. Search for a device by name, IP, or MAC.
+3. See whether it looks online/reachable.
+4. Trigger wake.
+5. See immediate command result and short follow-up status.
 
-**Decisions**
-- Keep major architecture fixed: same-domain /ui, origin-relative API client, edge-enforced admin access.
-- Keep minor implementation details flexible: exact component library, state library, and styling primitives can change if DX improves.
-- Optimize for operator speed over visual novelty: dense information, low click depth, and fast command feedback.
-- Treat websocket as enhancement, not dependency: polling fallback is mandatory.
+## Scope Priorities
 
-**Further Considerations**
-1. Short-term backend enhancements likely to improve UX quickly: agent metadata labels, audit cursor pagination, persisted alert-rule defaults.
-2. If team preference changes, frontend framework can be swapped as long as route/contracts/deploy shape stays the same.
-3. Add a lightweight investigation-mode preset in UI that pivots from alert to related audits to related command request_id in one flow.
+1. P0: Device discovery and wake UX.
+2. P1: Fast troubleshooting context around wake results.
+3. P2: Fleet/agent/admin operations.
+
+This explicitly means pages and components for Agent, Audit, Alerts, and Tokens should be present but secondary in visual hierarchy and effort until P0 is complete.
+
+## IA Direction (v1)
+
+Primary top-level focus:
+1. Devices
+2. Wake Queue (or Recent Actions)
+
+Secondary top-level focus:
+1. Fleet Health
+2. Audit
+3. Alerts
+4. Access/Tokens
+
+If needed, keep current routes during transition, but adjust default landing and navigation emphasis so Devices is the home workflow.
+
+## Phase Plan
+
+### Phase 1: Device-Centric Foundation
+
+1. Add a dedicated Devices page that merges existing status/leases/inventory signal into one operator list.
+2. Include searchable columns for name, IP, MAC, interface/dev, and recency indicators.
+3. Provide row-level wake action and bulk-safe interaction model (single-click row action, confirm for bulk).
+4. Define a compact "device confidence" heuristic from available data (for example: recent lease + reachable neighbor).
+5. Set the default route to Devices, with prominent search and wake controls above the fold.
+
+Acceptance criteria:
+1. Search by hostname, IP, and MAC all work from one input.
+2. Wake action reachable in one click from list row.
+3. Response feedback shown immediately with clear success/error text.
+
+### Phase 2: Wake Execution UX
+
+1. Build a focused wake panel with explicit target preview before send.
+2. Provide quick presets: "wake by selected device", "wake by MAC", "wake by query".
+3. Persist recent wake targets locally for operator speed.
+4. Add post-wake verification loop (short timed refresh of status indicators).
+5. Surface request correlation id and a copy action for incident sharing.
+
+Acceptance criteria:
+1. Operator can retry wake with one click.
+2. Operator can see last 20 wake attempts with outcome and timestamp.
+3. Error states differentiate validation, timeout, and execution failure.
+
+### Phase 3: Context Without Workflow Drift
+
+1. Keep Alerts and Audit accessible from device rows and wake outcomes.
+2. Add contextual deep links: device -> related alerts, device -> recent audit events.
+3. Improve filtering for alerts/audit with saved local filter presets.
+4. Add gentle live updates, keeping websocket optional with polling fallback.
+
+Acceptance criteria:
+1. From any failed wake, operator can jump to relevant audit entries in one step.
+2. Alerts page can be filtered by kind/severity/agent and linked back to impacted devices.
+
+### Phase 4: Fleet/Admin Hardening
+
+1. Keep Agents page for connectivity and control routing visibility.
+2. Keep Tokens page for enrollment lifecycle operations.
+3. Keep Dashboard but reframe metrics around "device availability" and "wake success" first.
+4. Add audit-friendly confirmation flows for destructive actions.
+
+Acceptance criteria:
+1. Admin flows do not block or slow P0 device workflows.
+2. All admin actions produce clear audit-visible outcomes.
+
+### Phase 5: Validation and Production Readiness
+
+1. Add smoke tests for P0 flow: find device -> wake -> observe result.
+2. Add contract checks for command payload/response shapes used by device and wake screens.
+3. Add scenario drills (offline agent, delayed command, websocket drop, expired token).
+4. Verify edge policy still protects control routes while preserving required public endpoints.
+
+Acceptance criteria:
+1. P0 flow remains usable during partial degradation.
+2. Build/typecheck/test gates stay green in CI.
+
+## Concrete UI Backlog (Ordered)
+
+1. Create DevicesPage with unified searchable table.
+2. Wire wake action directly from device row.
+3. Add Recent Wake Actions panel with outcomes.
+4. Add post-wake short verification refresh.
+5. Rework Dashboard cards to device-first metrics.
+6. Add deep links from wake result to audit and alerts context.
+7. Add empty/loading/error skeleton patterns tuned for device list scale.
+
+## Metrics of Success
+
+1. Time-to-wake median under 10 seconds for known target.
+2. Wake success rate visible per time window.
+3. Fewer operator clicks for common tasks (device lookup + wake).
+4. Reduced navigation to agent-centric pages for everyday usage.
+
+## Design and Interaction Principles
+
+1. Device-first information density over generic admin dashboards.
+2. Search and action bar always visible on desktop and mobile.
+3. Action feedback must be immediate and explicit.
+4. Keep advanced infrastructure details available but visually de-emphasized.
+
+## Architecture Decisions
+
+1. Keep same-domain /ui serving and origin-relative API requests.
+2. Keep route and API contracts stable while iterating UX aggressively.
+3. Treat websocket as progressive enhancement; polling fallback required.
+4. Preserve Cloudflare Access boundary for all control endpoints.
+
+## Relevant Files
+
+1. [ui/src/App.tsx](ui/src/App.tsx)
+2. [ui/src/pages/CommandsPage.tsx](ui/src/pages/CommandsPage.tsx)
+3. [ui/src/pages/DashboardPage.tsx](ui/src/pages/DashboardPage.tsx)
+4. [ui/src/api.ts](ui/src/api.ts)
+5. [wakey-control-plane/src/api/commands.rs](wakey-control-plane/src/api/commands.rs)
+6. [wakey-control-plane/src/api/audit.rs](wakey-control-plane/src/api/audit.rs)
+7. [wakey-control-plane/src/api/alerts.rs](wakey-control-plane/src/api/alerts.rs)
+8. [wakey-control-plane/src/api/control.rs](wakey-control-plane/src/api/control.rs)
+9. [wakey-control-plane/src/runtime/mod.rs](wakey-control-plane/src/runtime/mod.rs)
+10. [README.md](README.md)
+
+## Immediate Next Build Slice
+
+1. Implement DevicesPage and make it default route.
+2. Add row-level wake action with in-place result feedback.
+3. Add Recent Wake Actions section backed by local state first, then audit correlation.
+4. Rebalance navigation labels/order to make device workflows primary.

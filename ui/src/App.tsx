@@ -17,6 +17,7 @@ import { AlertsPage } from "@/pages/AlertsPage";
 import { AuditPage } from "@/pages/AuditPage";
 import { CommandsPage } from "@/pages/CommandsPage";
 import { DashboardPage } from "@/pages/DashboardPage";
+import { DevicesPage } from "@/pages/DevicesPage";
 import { TokensPage } from "@/pages/TokensPage";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -99,6 +100,17 @@ export function App() {
         <Route path="/" element={<AppLayout />}>
           <Route
             index
+            element={
+              <DevicesPage
+                agents={agents}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={setSelectedAgentId}
+                onAfterWake={loadAll}
+              />
+            }
+          />
+          <Route
+            path="dashboard"
             element={
               <DashboardPage
                 agents={agents}
