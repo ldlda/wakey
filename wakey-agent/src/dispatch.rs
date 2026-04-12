@@ -40,26 +40,40 @@ async fn dispatch_leases(req: LeasesRequest) -> Result<CommandResult> {
         include_state: req.include_state,
     })
     .await?;
-    debug!(rows = leases.len(), include_state = req.include_state, "dispatched leases command");
+    debug!(
+        rows = leases.len(),
+        include_state = req.include_state,
+        "dispatched leases command"
+    );
     Ok(CommandResult::Leases { rows: leases })
 }
 
 async fn dispatch_devs(req: DevsRequest) -> Result<CommandResult> {
     let mut devs = if let Some(name) = &req.dev {
-        wakey::get_interface_summary(name).await?.into_iter().collect()
+        wakey::get_interface_summary(name)
+            .await?
+            .into_iter()
+            .collect()
     } else {
         wakey::get_interface_summaries().await?
     };
     if req.up_only {
         devs.retain(|dev| dev.operstate == "up");
     }
-    debug!(rows = devs.len(), up_only = req.up_only, "dispatched devs command");
+    debug!(
+        rows = devs.len(),
+        up_only = req.up_only,
+        "dispatched devs command"
+    );
     Ok(CommandResult::Devs { rows: devs })
 }
 
 async fn dispatch_inventory(req: InventoryRequest) -> Result<CommandResult> {
     let inventory = wakey::inventory(req.into_device_query()).await?;
-    debug!(rows = inventory.devices.len(), "dispatched inventory command");
+    debug!(
+        rows = inventory.devices.len(),
+        "dispatched inventory command"
+    );
     Ok(CommandResult::Inventory(inventory))
 }
 

@@ -67,9 +67,12 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
     }
     let (mut sink, mut source) = stream.split();
 
-    send_json(&mut sink, &ClientMessage::Hello {
-        agent_id: config.agent_id.clone(),
-    })
+    send_json(
+        &mut sink,
+        &ClientMessage::Hello {
+            agent_id: config.agent_id.clone(),
+        },
+    )
     .await?;
     send_json(
         &mut sink,
@@ -223,7 +226,8 @@ where
     S: SinkExt<Message> + Unpin,
     <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
 {
-    let payload = serde_json::to_string(message).context("failed to serialize websocket message")?;
+    let payload =
+        serde_json::to_string(message).context("failed to serialize websocket message")?;
     debug!(message_type = %client_message_kind(message), "sending websocket message");
     sink.send(Message::Text(payload))
         .await
@@ -318,7 +322,10 @@ mod tests {
     impl Sink<Message> for RecordingSink {
         type Error = io::Error;
 
-        fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
 
@@ -331,11 +338,17 @@ mod tests {
             Ok(())
         }
 
-        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
 
-        fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
     }
@@ -369,8 +382,8 @@ mod tests {
             "wake",
             CommandResult::Wake(wakey_core::WakeResult { result: vec![] }),
         )
-            .await
-            .expect("send should succeed");
+        .await
+        .expect("send should succeed");
 
         assert_eq!(sink.sent.len(), 1);
         let Some(Message::Text(payload)) = sink.sent.pop_front() else {
@@ -391,8 +404,8 @@ mod tests {
             "devs",
             CommandResult::Devs { rows: vec![] },
         )
-            .await
-            .expect("fallback error frame should be sent");
+        .await
+        .expect("fallback error frame should be sent");
 
         assert_eq!(sink.sent.len(), 1);
         let Some(Message::Text(payload)) = sink.sent.pop_front() else {

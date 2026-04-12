@@ -85,10 +85,7 @@ pub async fn get_with_handle(
             .or_default()
             .push(AddrInfo {
                 family,
-                cidr: InterfaceCidr {
-                    local,
-                    prefixlen,
-                },
+                cidr: InterfaceCidr { local, prefixlen },
                 broadcast,
                 scope,
                 label,

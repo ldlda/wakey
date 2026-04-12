@@ -230,7 +230,10 @@ pub async fn run_command(
         }
         Err(_) => {
             state.pending.lock().await.remove(&request_id_string);
-            warn!(timeout_ms = timeout.as_millis() as u64, "agent command timed out");
+            warn!(
+                timeout_ms = timeout.as_millis() as u64,
+                "agent command timed out"
+            );
             if let Err(err) = state
                 .store
                 .append_audit_event(AuditEventInput {

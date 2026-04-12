@@ -201,17 +201,13 @@ async fn process_agent_text(
                 }
                 anyhow::bail!("agent auth rejected");
             }
-            state
-                .sessions
-                .write()
-                .await
-                .insert(
-                    agent_id.clone(),
-                    AgentSession {
-                        connection_id: connection_id.to_string(),
-                        tx: tx.clone(),
-                    },
-                );
+            state.sessions.write().await.insert(
+                agent_id.clone(),
+                AgentSession {
+                    connection_id: connection_id.to_string(),
+                    tx: tx.clone(),
+                },
+            );
             *authed_agent_id = Some(agent_id.clone());
             info!(agent_id = %agent_id, connect_to_auth_ms, hello_to_auth_ms = hello_to_auth_ms.unwrap_or(0), "agent authenticated");
             if let Err(err) = state
@@ -275,7 +271,11 @@ fn now_duration_ms(duration: std::time::Duration) -> u64 {
     duration.as_millis() as u64
 }
 
-async fn ensure_current_session(state: &AppState, agent_id: &str, connection_id: &str) -> Result<()> {
+async fn ensure_current_session(
+    state: &AppState,
+    agent_id: &str,
+    connection_id: &str,
+) -> Result<()> {
     let sessions = state.sessions.read().await;
     if is_current_session(&sessions, agent_id, connection_id) {
         Ok(())

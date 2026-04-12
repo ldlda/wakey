@@ -120,6 +120,12 @@ function chooseWakeTarget(device: DeviceRow): string {
     : (device.macs[0] || device.ips[0] || "");
 }
 
+function summarize(values: string[]): string {
+  if (!values.length) return "-";
+  if (values.length === 1) return values[0];
+  return `${values[0]} (+${values.length - 1})`;
+}
+
 function loadHistory(): WakeEvent[] {
   try {
     const raw = window.localStorage.getItem(WAKE_HISTORY_KEY);
@@ -337,46 +343,42 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
         <p className="muted">Showing {filtered.length} of {rows.length}</p>
         {error && <pre className="error">{error}</pre>}
         <div className="list device-list">
-          <div className="row plain device-row device-header" style={{ fontWeight: 600 }}>
+          <div className="row plain device-row device-header">
             <span
-              className="sortable-col"
-              style={{ cursor: "pointer" }}
+              className="sortable-col device-cell"
               onClick={() => setSort((s) => ({ key: "name", dir: s.key === "name" && s.dir === "asc" ? "desc" : "asc" }))}
             >
               Name {sort.key === "name" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
             </span>
             <span
-              className="sortable-col"
-              style={{ cursor: "pointer" }}
+              className="sortable-col device-cell"
               onClick={() => setSort((s) => ({ key: "ip", dir: s.key === "ip" && s.dir === "asc" ? "desc" : "asc" }))}
             >
               IP {sort.key === "ip" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
             </span>
             <span
-              className="sortable-col"
-              style={{ cursor: "pointer" }}
+              className="sortable-col device-cell"
               onClick={() => setSort((s) => ({ key: "mac", dir: s.key === "mac" && s.dir === "asc" ? "desc" : "asc" }))}
             >
               MAC {sort.key === "mac" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
             </span>
             <span
-              className="sortable-col"
-              style={{ cursor: "pointer" }}
+              className="sortable-col device-cell"
               onClick={() => setSort((s) => ({ key: "presence", dir: s.key === "presence" && s.dir === "asc" ? "desc" : "asc" }))}
             >
               Presence {sort.key === "presence" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
             </span>
-            <span>Interfaces</span>
-            <span></span>
+            <span className="device-cell">Interfaces</span>
+            <span className="device-cell device-action"></span>
           </div>
           {filtered.map((row) => (
             <div className="row plain device-row" key={row.id}>
-              <span>{row.name}</span>
-              <span className="muted">{row.ips.join(", ") || "-"}</span>
-              <span className="muted">{row.macs.join(", ") || "-"}</span>
-              <span className="pill">{row.presence}</span>
-              <span>{row.interfaces.join(", ") || "-"}</span>
-              <span>
+              <span className="device-cell" data-label="Name" title={row.name}>{row.name}</span>
+              <span className="device-cell muted" data-label="IP" title={row.ips.join(", ") || "-"}>{summarize(row.ips)}</span>
+              <span className="device-cell muted" data-label="MAC" title={row.macs.join(", ") || "-"}>{summarize(row.macs)}</span>
+              <span className="device-cell" data-label="Presence"><span className="pill">{row.presence}</span></span>
+              <span className="device-cell" data-label="Interfaces" title={row.interfaces.join(", ") || "-"}>{summarize(row.interfaces)}</span>
+              <span className="device-cell device-action" data-label="">
                 <button onClick={() => void wakeDevice(row)} disabled={wakeBusyId === row.id || !selectedAgentId}>
                   {wakeBusyId === row.id ? "Waking..." : "Wake"}
                 </button>

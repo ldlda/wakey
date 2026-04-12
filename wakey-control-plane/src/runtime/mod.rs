@@ -5,8 +5,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use axum::Router;
 use axum::response::Redirect;
-use axum::routing::{get, post};
 use axum::routing::get_service;
+use axum::routing::{get, post};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
 #[cfg(unix)]
@@ -25,9 +25,7 @@ use crate::ws;
 
 mod admin;
 mod process;
-pub use admin::{
-    issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats,
-};
+pub use admin::{issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats};
 pub use process::reload_daemon;
 use process::{remove_pid_file, write_pid_file};
 
@@ -55,7 +53,7 @@ pub enum AgentReply {
 
 fn public_api_routes() -> Router<AppState> {
     Router::new()
-    .route("/ui", get(|| async { Redirect::temporary("/ui/") }))
+        .route("/ui", get(|| async { Redirect::temporary("/ui/") }))
         .nest_service(
             "/ui/",
             get_service(
@@ -69,8 +67,14 @@ fn public_api_routes() -> Router<AppState> {
 
 fn control_api_routes() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/control/enroll-token", post(api::issue_enroll_token))
-        .route("/api/v1/control/enroll-tokens", get(api::list_enroll_tokens))
+        .route(
+            "/api/v1/control/enroll-token",
+            post(api::issue_enroll_token),
+        )
+        .route(
+            "/api/v1/control/enroll-tokens",
+            get(api::list_enroll_tokens),
+        )
         .route(
             "/api/v1/control/enroll-tokens/{token}",
             axum::routing::delete(api::revoke_enroll_token),
@@ -128,6 +132,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
+        let mut server = server;
         let mut hup = signal(SignalKind::hangup()).context("failed to install SIGHUP handler")?;
         let mut gc_tick = tokio::time::interval(Duration::from_secs(300));
         gc_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);

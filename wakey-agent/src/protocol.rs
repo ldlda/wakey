@@ -2,11 +2,11 @@ use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::IpAddr;
-use wakey_core::{
-    DeviceFilters, DeviceInventory, DeviceQuery, DhcpLeaseWithState, InterfaceSummary, NeighborEntry,
-    Status, WakeResult,
-};
 use wakey_core::parse::mac;
+use wakey_core::{
+    DeviceFilters, DeviceInventory, DeviceQuery, DhcpLeaseWithState, InterfaceSummary,
+    NeighborEntry, Status, WakeResult,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(String);

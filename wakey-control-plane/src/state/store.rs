@@ -25,7 +25,11 @@ const SEEDED_ENROLL_TOKEN_PREFIX: &[u8] = b"seeded_enroll_token:";
 const SCHEMA_VERSION: u32 = 1;
 
 impl Store {
-    pub async fn load_or_init(path: &Path, enroll_tokens: Vec<String>, seed_ttl: Duration) -> Result<Self> {
+    pub async fn load_or_init(
+        path: &Path,
+        enroll_tokens: Vec<String>,
+        seed_ttl: Duration,
+    ) -> Result<Self> {
         let db_path = path.to_path_buf();
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
@@ -38,7 +42,9 @@ impl Store {
         let enroll_tree = db
             .open_tree("enroll_tokens")
             .context("failed to open enroll_tokens tree")?;
-        let agents_tree = db.open_tree("agents").context("failed to open agents tree")?;
+        let agents_tree = db
+            .open_tree("agents")
+            .context("failed to open agents tree")?;
         let audit_events_tree = db
             .open_tree("audit_events")
             .context("failed to open audit_events tree")?;
@@ -92,13 +98,17 @@ impl Store {
             anyhow::bail!("invalid or already-used enroll token");
         };
 
-        let expires_at_unix = decode_expiry(raw_expiry.as_ref())
-            .context("failed decoding enroll token expiry")?;
+        let expires_at_unix =
+            decode_expiry(raw_expiry.as_ref()).context("failed decoding enroll token expiry")?;
         let now = now_unix();
         if expires_at_unix <= now {
             let _ = self.enroll_tokens.remove(enroll_token.as_bytes());
             self.flush().ok();
-            warn!(expires_at_unix, now_unix = now, "rejecting expired enroll token");
+            warn!(
+                expires_at_unix,
+                now_unix = now,
+                "rejecting expired enroll token"
+            );
             anyhow::bail!("enroll token has expired");
         }
 
@@ -112,7 +122,8 @@ impl Store {
         self.agents
             .insert(agent_id.as_bytes(), agent_token.as_bytes())
             .context("failed persisting agent credentials")?;
-        self.flush().context("failed flushing state db after enroll")?;
+        self.flush()
+            .context("failed flushing state db after enroll")?;
         info!(agent_id = %agent_id, "issued persistent agent credentials");
 
         Ok(IssuedAgent {
@@ -141,7 +152,8 @@ impl Store {
         let mut out = Vec::new();
         for item in self.enroll_tokens.iter() {
             let (token, value) = item.context("failed iterating enroll token tree")?;
-            let expires_at_unix = decode_expiry(value.as_ref()).context("failed decoding token expiry")?;
+            let expires_at_unix =
+                decode_expiry(value.as_ref()).context("failed decoding token expiry")?;
             let expired = expires_at_unix <= now;
             if !include_expired && expired {
                 continue;
@@ -169,7 +181,8 @@ impl Store {
             .context("failed removing enroll token")?
             .is_some();
         if removed {
-            self.flush().context("failed flushing db after enroll token revoke")?;
+            self.flush()
+                .context("failed flushing db after enroll token revoke")?;
         }
         Ok(removed)
     }
@@ -180,8 +193,8 @@ impl Store {
         let mut expired_enroll_token_count = 0usize;
         for item in self.enroll_tokens.iter() {
             let (_, value) = item.context("failed iterating enroll token tree")?;
-            let expires_at =
-                decode_expiry(value.as_ref()).context("failed decoding token expiry during stats")?;
+            let expires_at = decode_expiry(value.as_ref())
+                .context("failed decoding token expiry during stats")?;
             enroll_token_count = enroll_token_count.saturating_add(1);
             if expires_at <= now {
                 expired_enroll_token_count = expired_enroll_token_count.saturating_add(1);
@@ -372,7 +385,9 @@ impl Store {
             let (_, raw) = item.context("failed iterating alert transition tree")?;
             let transition: AlertTransition =
                 serde_json::from_slice(raw.as_ref()).context("failed decoding alert transition")?;
-            if let Some(since) = since_unix && transition.ts_unix < since {
+            if let Some(since) = since_unix
+                && transition.ts_unix < since
+            {
                 continue;
             }
             out.push(transition);
@@ -384,15 +399,11 @@ impl Store {
     }
 
     fn flush(&self) -> Result<()> {
-        self.meta
-            .flush()
-            .context("failed to flush meta tree")?;
+        self.meta.flush().context("failed to flush meta tree")?;
         self.enroll_tokens
             .flush()
             .context("failed to flush enroll token tree")?;
-        self.agents
-            .flush()
-            .context("failed to flush agents tree")?;
+        self.agents.flush().context("failed to flush agents tree")?;
         self.audit_events
             .flush()
             .context("failed to flush audit event tree")?;
@@ -406,7 +417,11 @@ impl Store {
         Ok(())
     }
 
-    fn seed_bootstrap_enroll_tokens(&self, enroll_tokens: &[String], seed_ttl: Duration) -> Result<()> {
+    fn seed_bootstrap_enroll_tokens(
+        &self,
+        enroll_tokens: &[String],
+        seed_ttl: Duration,
+    ) -> Result<()> {
         for token in enroll_tokens {
             let token = token.trim();
             if token.is_empty() {
@@ -414,21 +429,32 @@ impl Store {
             }
 
             let marker_key = seeded_enroll_token_key(token);
-            if self
-                .meta
-                .contains_key(&marker_key)
-                .with_context(|| format!("failed reading bootstrap marker in {}", self.db_path.display()))?
-            {
+            if self.meta.contains_key(&marker_key).with_context(|| {
+                format!(
+                    "failed reading bootstrap marker in {}",
+                    self.db_path.display()
+                )
+            })? {
                 continue;
             }
 
             let expires_at = now_unix().saturating_add(seed_ttl.as_secs().max(1));
             self.enroll_tokens
                 .insert(token.as_bytes(), &expires_at.to_le_bytes())
-                .with_context(|| format!("failed to seed enroll token into {}", self.db_path.display()))?;
+                .with_context(|| {
+                    format!(
+                        "failed to seed enroll token into {}",
+                        self.db_path.display()
+                    )
+                })?;
             self.meta
                 .insert(marker_key, &expires_at.to_le_bytes())
-                .with_context(|| format!("failed to persist bootstrap marker into {}", self.db_path.display()))?;
+                .with_context(|| {
+                    format!(
+                        "failed to persist bootstrap marker into {}",
+                        self.db_path.display()
+                    )
+                })?;
         }
         Ok(())
     }
@@ -475,8 +501,12 @@ impl Store {
                 self.meta
                     .insert(SCHEMA_VERSION_KEY, &SCHEMA_VERSION.to_le_bytes())
                     .context("failed writing schema version")?;
-                self.flush().context("failed flushing db after schema init")?;
-                info!(schema_version = SCHEMA_VERSION, "initialized state schema version");
+                self.flush()
+                    .context("failed flushing db after schema init")?;
+                info!(
+                    schema_version = SCHEMA_VERSION,
+                    "initialized state schema version"
+                );
             }
         }
         Ok(())
@@ -535,16 +565,24 @@ fn matches_audit_filter(event: &AuditEvent, filter: &AuditEventFilter) -> bool {
     {
         return false;
     }
-    if let Some(event_type) = filter.event_type.as_deref() && event.event_type != event_type {
+    if let Some(event_type) = filter.event_type.as_deref()
+        && event.event_type != event_type
+    {
         return false;
     }
-    if let Some(outcome) = filter.outcome.as_deref() && event.outcome != outcome {
+    if let Some(outcome) = filter.outcome.as_deref()
+        && event.outcome != outcome
+    {
         return false;
     }
-    if let Some(since_unix) = filter.since_unix && event.ts_unix < since_unix {
+    if let Some(since_unix) = filter.since_unix
+        && event.ts_unix < since_unix
+    {
         return false;
     }
-    if let Some(until_unix) = filter.until_unix && event.ts_unix > until_unix {
+    if let Some(until_unix) = filter.until_unix
+        && event.ts_unix > until_unix
+    {
         return false;
     }
 
@@ -559,7 +597,8 @@ mod tests {
     use super::Store;
 
     async fn make_store() -> (Store, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
         let db_path = dir.join("state.db");
         let store = Store::load_or_init(&db_path, Vec::new(), Duration::from_secs(60))
             .await
@@ -785,9 +824,10 @@ mod tests {
             .enroll("enr-bootstrap-once")
             .await
             .expect_err("bootstrap token should not resurrect after restart");
-        assert!(err
-            .to_string()
-            .contains("invalid or already-used enroll token"));
+        assert!(
+            err.to_string()
+                .contains("invalid or already-used enroll token")
+        );
 
         cleanup_dir(&dir);
     }

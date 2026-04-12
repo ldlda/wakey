@@ -168,33 +168,91 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
 }
 
 .device-row {
-  align-items: stretch;
-}
-
-.device-main {
-  min-width: 0;
-}
-
-.device-main strong {
-  display: inline-block;
-  margin-bottom: 0.25rem;
-}
-
-.device-meta {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(110px, 1.1fr) minmax(160px, 2fr) minmax(130px, 1.5fr) minmax(110px, 0.9fr) minmax(120px, 1fr) auto;
   align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.device-header {
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #091429;
+}
+
+.device-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sortable-col {
+  cursor: pointer;
+  user-select: none;
+}
+
+.device-action {
+  justify-self: end;
 }
 
 @media (max-width: 720px) {
-  .device-row {
-    flex-direction: column;
+  .device-header {
+    display: none;
   }
 
-  .device-meta {
-    justify-content: flex-start;
+  .device-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "name action"
+      "presence presence"
+      "ip ip"
+      "mac mac"
+      "interfaces interfaces";
+    align-items: start;
+  }
+
+  .device-row .device-cell {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+
+  .device-row .device-cell[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.1rem;
+  }
+
+  .device-row .device-cell[data-label="Name"] {
+    grid-area: name;
+  }
+
+  .device-row .device-cell[data-label="Presence"] {
+    grid-area: presence;
+  }
+
+  .device-row .device-cell[data-label="IP"] {
+    grid-area: ip;
+  }
+
+  .device-row .device-cell[data-label="MAC"] {
+    grid-area: mac;
+  }
+
+  .device-row .device-cell[data-label="Interfaces"] {
+    grid-area: interfaces;
+  }
+
+  .device-row .device-action {
+    grid-area: action;
+    justify-self: end;
   }
 
   .quick-wake {

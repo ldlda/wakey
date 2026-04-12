@@ -3,7 +3,9 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::api;
-use crate::cli::{IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeEnrollTokenArgs, StateStatsArgs};
+use crate::cli::{
+    IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeEnrollTokenArgs, StateStatsArgs,
+};
 use crate::config;
 use crate::state;
 
@@ -13,7 +15,10 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
     if let Some(url) = args.public_url {
         let base = config::normalize_public_url(&url);
         let ttl_seconds = settings.ttl.as_secs().max(1);
-        let endpoint = format!("{}?ttl_seconds={ttl_seconds}", config::issue_token_endpoint(&base));
+        let endpoint = format!(
+            "{}?ttl_seconds={ttl_seconds}",
+            config::issue_token_endpoint(&base)
+        );
         tracing::info!(endpoint = %endpoint, "requesting live enroll token from running control-plane daemon");
         let client = reqwest::Client::new();
 
@@ -50,7 +55,12 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
     tracing::info!(data_dir = %settings.data_dir.display(), state_file = %settings.state_file.display(), ttl_seconds = settings.ttl.as_secs(), "issuing enroll token via offline state file fallback");
     let store = state::Store::load_or_init(&settings.state_file, args.enroll_tokens, settings.ttl)
         .await
-        .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to initialize store {}",
+                settings.state_file.display()
+            )
+        })?;
     let issued = store.issue_enroll_token(settings.ttl).await?;
     println!("enroll_token={}", issued.enroll_token);
     println!("expires_at_unix={}", issued.expires_at_unix);
@@ -66,8 +76,7 @@ pub async fn list_enroll_tokens(args: ListEnrollTokensArgs) -> Result<()> {
     if let Some(base) = settings.public_url.as_deref() {
         let url = format!(
             "{}/api/v1/control/enroll-tokens?include_expired={}",
-            base,
-            args.include_expired
+            base, args.include_expired
         );
         let response = reqwest::get(&url)
             .await
@@ -100,9 +109,15 @@ pub async fn list_enroll_tokens(args: ListEnrollTokensArgs) -> Result<()> {
         return Ok(());
     }
 
-    let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
-        .await
-        .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
+    let store =
+        state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to initialize store {}",
+                    settings.state_file.display()
+                )
+            })?;
     let tokens = store.list_enroll_tokens(args.include_expired).await?;
     if args.json {
         println!(
@@ -146,9 +161,15 @@ pub async fn revoke_enroll_token(args: RevokeEnrollTokenArgs) -> Result<()> {
         return Ok(());
     }
 
-    let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
-        .await
-        .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
+    let store =
+        state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to initialize store {}",
+                    settings.state_file.display()
+                )
+            })?;
     let removed = store.revoke_enroll_token(&args.token).await?;
     println!("token={} revoked={}", args.token, removed);
     Ok(())
@@ -184,13 +205,22 @@ pub async fn state_stats(args: StateStatsArgs) -> Result<()> {
         println!("schema_version={}", body.schema_version);
         println!("agent_count={}", body.agent_count);
         println!("enroll_token_count={}", body.enroll_token_count);
-        println!("expired_enroll_token_count={}", body.expired_enroll_token_count);
+        println!(
+            "expired_enroll_token_count={}",
+            body.expired_enroll_token_count
+        );
         return Ok(());
     }
 
-    let store = state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
-        .await
-        .with_context(|| format!("failed to initialize store {}", settings.state_file.display()))?;
+    let store =
+        state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to initialize store {}",
+                    settings.state_file.display()
+                )
+            })?;
     let stats = store.stats().await?;
     if args.json {
         println!(
@@ -203,6 +233,9 @@ pub async fn state_stats(args: StateStatsArgs) -> Result<()> {
     println!("schema_version={}", stats.schema_version);
     println!("agent_count={}", stats.agent_count);
     println!("enroll_token_count={}", stats.enroll_token_count);
-    println!("expired_enroll_token_count={}", stats.expired_enroll_token_count);
+    println!(
+        "expired_enroll_token_count={}",
+        stats.expired_enroll_token_count
+    );
     Ok(())
 }

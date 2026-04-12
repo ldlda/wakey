@@ -18,7 +18,11 @@ struct EnrollResponse {
     server_url: Option<String>,
 }
 
-pub async fn enroll(server_url: &str, enroll_token: &str, config_path: &Path) -> Result<AgentConfig> {
+pub async fn enroll(
+    server_url: &str,
+    enroll_token: &str,
+    config_path: &Path,
+) -> Result<AgentConfig> {
     let server_url = normalize_server_url(server_url);
     let endpoint = format!("{server_url}/api/v1/agents/enroll");
     info!(endpoint = %endpoint, config_path = %config_path.display(), "starting agent enrollment");
@@ -68,7 +72,10 @@ mod tests {
     use std::net::{SocketAddr, TcpListener};
     use std::thread;
 
-    fn spawn_enroll_server(response_body: &'static str, status: &'static str) -> (String, thread::JoinHandle<()>) {
+    fn spawn_enroll_server(
+        response_body: &'static str,
+        status: &'static str,
+    ) -> (String, thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
         let addr: SocketAddr = listener.local_addr().expect("local addr");
         let handle = thread::spawn(move || {
@@ -103,7 +110,10 @@ mod tests {
 
     #[test]
     fn normalize_server_url_trims_slash() {
-        assert_eq!(normalize_server_url("https://example.com/"), "https://example.com");
+        assert_eq!(
+            normalize_server_url("https://example.com/"),
+            "https://example.com"
+        );
     }
 
     #[tokio::test]

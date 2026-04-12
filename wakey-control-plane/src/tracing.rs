@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::global;
+use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::{SdkTracerProvider, Tracer};
@@ -28,7 +28,10 @@ pub fn init(verbose: u8, telemetry: &TelemetryConfig) -> Result<()> {
                 .with(filter)
                 .with(fmt::layer().json())
                 .init();
-            tracing::info!(json_logs = telemetry.json_logs, "tracing initialized without otlp exporter");
+            tracing::info!(
+                json_logs = telemetry.json_logs,
+                "tracing initialized without otlp exporter"
+            );
         }
     } else if let Some(otel_layer) = otel {
         tracing_subscriber::registry()
@@ -42,7 +45,10 @@ pub fn init(verbose: u8, telemetry: &TelemetryConfig) -> Result<()> {
             .with(filter)
             .with(fmt::layer())
             .init();
-        tracing::info!(json_logs = telemetry.json_logs, "tracing initialized without otlp exporter");
+        tracing::info!(
+            json_logs = telemetry.json_logs,
+            "tracing initialized without otlp exporter"
+        );
     }
 
     Ok(())
@@ -50,14 +56,8 @@ pub fn init(verbose: u8, telemetry: &TelemetryConfig) -> Result<()> {
 
 fn build_otel_layer(
     telemetry: &TelemetryConfig,
-) -> Result<
-    Option<
-        tracing_opentelemetry::OpenTelemetryLayer<
-            tracing_subscriber::Registry,
-            Tracer,
-        >,
-    >,
-> {
+) -> Result<Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_subscriber::Registry, Tracer>>>
+{
     let Some(endpoint) = telemetry.otlp_endpoint.as_deref() else {
         return Ok(None);
     };

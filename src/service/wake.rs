@@ -89,7 +89,11 @@ fn broadcast_wake_targets_from_interfaces(
         anyhow::bail!("no broadcast-capable interfaces found");
     }
 
-    debug!(targets = targets.len(), interfaces = interfaces.len(), "built broadcast wake targets");
+    debug!(
+        targets = targets.len(),
+        interfaces = interfaces.len(),
+        "built broadcast wake targets"
+    );
     Ok(targets)
 }
 

@@ -3,8 +3,8 @@ mod config;
 mod dispatch;
 mod enroll;
 mod protocol;
-mod session;
 mod serve;
+mod session;
 mod tracing;
 
 use anyhow::Result;
@@ -29,7 +29,9 @@ async fn main() -> Result<()> {
             if args.reload_running {
                 match serve::reload_daemon(&args.pid_file) {
                     Ok(()) => println!("reload=signaled pid_file={}", args.pid_file.display()),
-                    Err(err) => ::tracing::warn!(error = %err, pid_file = %args.pid_file.display(), "enroll completed but daemon reload failed"),
+                    Err(err) => {
+                        ::tracing::warn!(error = %err, pid_file = %args.pid_file.display(), "enroll completed but daemon reload failed")
+                    }
                 }
             }
         }
@@ -58,7 +60,9 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
         server_url: args
             .server_url
             .unwrap_or_else(|| "https://control-plane.example.com".to_string()),
-        agent_id: args.agent_id.unwrap_or_else(|| "REPLACE_ME_AGENT_ID".to_string()),
+        agent_id: args
+            .agent_id
+            .unwrap_or_else(|| "REPLACE_ME_AGENT_ID".to_string()),
         agent_token: args
             .agent_token
             .unwrap_or_else(|| "REPLACE_ME_AGENT_TOKEN".to_string()),

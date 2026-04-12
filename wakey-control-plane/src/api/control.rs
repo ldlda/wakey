@@ -242,7 +242,11 @@ pub async fn revoke_enroll_token(
                     agent_id: None,
                     request_id: None,
                     event_type: "enroll_token_revoke".into(),
-                    outcome: if revoked { "ok".into() } else { "not_found".into() },
+                    outcome: if revoked {
+                        "ok".into()
+                    } else {
+                        "not_found".into()
+                    },
                     latency_ms: None,
                     message: if revoked {
                         "revoked enroll token".into()

@@ -20,7 +20,11 @@ pub async fn get_status(query: DeviceQuery) -> Result<StatusResponse> {
         .iter()
         .flat_map(device_to_status_rows)
         .collect();
-    debug!(rows = table.len(), devices = inventory.devices.len(), "built status response");
+    debug!(
+        rows = table.len(),
+        devices = inventory.devices.len(),
+        "built status response"
+    );
     Ok(Status {
         name: query.name,
         table,

@@ -25,12 +25,7 @@ pub fn render_leases_table(leases: &[DhcpLeaseWithState]) -> Table {
             Cell::new(lease.lease_line.ip.to_string()),
             Cell::new(lease.lease_line.mac.to_string()),
             Cell::new(lease.lease_line.name.clone().unwrap_or_default()),
-            Cell::new(
-                lease
-                    .nud_state
-                    .map(|v| v.to_string())
-                    .unwrap_or_default(),
-            ),
+            Cell::new(lease.nud_state.map(|v| v.to_string()).unwrap_or_default()),
         ]);
     }
     table
@@ -51,7 +46,15 @@ pub fn render_wake_table(result: &WakeResult) -> Table {
 
 pub fn render_devs_table(devs: &[InterfaceSummary]) -> Table {
     let mut table = base_table();
-    table.set_header(vec!["Ifname", "State", "MAC", "Family", "CIDR", "Broadcast", "Scope/Label"]);
+    table.set_header(vec![
+        "Ifname",
+        "State",
+        "MAC",
+        "Family",
+        "CIDR",
+        "Broadcast",
+        "Scope/Label",
+    ]);
 
     for dev in devs {
         if dev.addrs.is_empty() {
