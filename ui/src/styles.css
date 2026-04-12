@@ -138,6 +138,44 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
   font-size: 0.9rem;
 }
 
+.presence-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.filter-chip {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #0b1528;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: capitalize;
+}
+
+.filter-chip.active {
+  border-color: #6b84ad;
+  color: var(--text);
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.65rem;
+}
+
+.select-visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 .linkish {
   display: inline-block;
   margin-top: 0.25rem;
@@ -169,7 +207,7 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
 
 .device-row {
   display: grid;
-  grid-template-columns: minmax(110px, 1.1fr) minmax(160px, 2fr) minmax(130px, 1.5fr) minmax(110px, 0.9fr) minmax(120px, 1fr) auto;
+  grid-template-columns: 36px minmax(110px, 1.1fr) minmax(160px, 2fr) minmax(130px, 1.5fr) minmax(110px, 0.9fr) minmax(120px, 1fr) minmax(220px, auto);
   align-items: center;
   gap: 0.55rem;
 }
@@ -195,7 +233,22 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
 }
 
 .device-action {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.35rem;
   justify-self: end;
+}
+
+.device-select {
+  display: flex;
+  justify-content: center;
+}
+
+.mini-btn {
+  padding: 0.28rem 0.45rem;
+  font-size: 0.76rem;
+  line-height: 1.2;
 }
 
 @media (max-width: 720px) {
@@ -206,7 +259,8 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
   .device-row {
     grid-template-columns: 1fr auto;
     grid-template-areas:
-      "name action"
+      "select action"
+      "name name"
       "presence presence"
       "ip ip"
       "mac mac"
@@ -234,6 +288,10 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
     grid-area: name;
   }
 
+  .device-row .device-cell[data-label="Pick"] {
+    grid-area: select;
+  }
+
   .device-row .device-cell[data-label="Presence"] {
     grid-area: presence;
   }
@@ -253,6 +311,7 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
   .device-row .device-action {
     grid-area: action;
     justify-self: end;
+    justify-content: flex-end;
   }
 
   .quick-wake {

@@ -11,6 +11,7 @@ const sorters = {
 
 type SortKey = keyof typeof sorters;
 type SortDir = "asc" | "desc";
+type PresenceFilter = "all" | "online" | "likely_online" | "unknown";
 
 import { runCommand, type Agent } from "@/api";
 
@@ -40,6 +41,7 @@ type WakeEvent = {
 };
 
 const WAKE_HISTORY_KEY = "wakey_recent_wakes_v1";
+const PRESENCE_FILTERS: PresenceFilter[] = ["all", "online", "likely_online", "unknown"];
 
 function parseInventoryRows(payload: unknown): DeviceRow[] {
   if (!payload || typeof payload !== "object") return [];
@@ -167,28 +169,49 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
     }
     return { key: "name", dir: "asc" };
   }
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>(getSortFromUrl());
 
-  // Keep sort state in sync with URL
+  function getPresenceFromUrl(): PresenceFilter {
+    const params = new URLSearchParams(location.search);
+    const raw = params.get("presence");
+    return PRESENCE_FILTERS.includes(raw as PresenceFilter) ? (raw as PresenceFilter) : "all";
+  }
+
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>(getSortFromUrl());
+  const [presenceFilter, setPresenceFilter] = useState<PresenceFilter>(getPresenceFromUrl());
+
+  // Keep view state in sync with URL
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     params.set("sort", sort.key);
     params.set("dir", sort.dir);
-    navigate({ search: params.toString() }, { replace: true });
+    if (presenceFilter === "all") {
+      params.delete("presence");
+    } else {
+      params.set("presence", presenceFilter);
+    }
+    const nextSearch = params.toString();
+    if (nextSearch !== location.search.slice(1)) {
+      navigate({ search: nextSearch }, { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sort.key, sort.dir]);
+  }, [sort.key, sort.dir, presenceFilter, location.search]);
 
-  // Update sort state if URL changes (e.g., back/forward nav)
+  // Update state if URL changes (e.g., back/forward nav)
   useEffect(() => {
     setSort(getSortFromUrl());
+    setPresenceFilter(getPresenceFromUrl());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search]);
+
   const [rows, setRows] = useState<DeviceRow[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [wakeBusyId, setWakeBusyId] = useState("");
+  const [bulkWakeBusy, setBulkWakeBusy] = useState(false);
   const [quickWake, setQuickWake] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [copyStatus, setCopyStatus] = useState("");
   const [recentWakes, setRecentWakes] = useState<WakeEvent[]>([]);
   function appendWakeEvent(event: WakeEvent) {
     setRecentWakes((prev) => {
@@ -234,7 +257,7 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
     await wakeTarget(target, device.id);
   }
 
-  async function wakeTarget(target: string, busyId: string) {
+  async function wakeTarget(target: string, busyId: string, opts: { refresh: boolean; notify: boolean } = { refresh: true, notify: true }) {
     if (!target || !selectedAgentId) return;
     setWakeBusyId(busyId);
     try {
@@ -248,8 +271,8 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
         requestId: summary.requestId,
         detail: summary.detail,
       });
-      await loadInventory();
-      if (onAfterWake) await onAfterWake();
+      if (opts.refresh) await loadInventory();
+      if (opts.notify && onAfterWake) await onAfterWake();
     } catch (err) {
       appendWakeEvent({
         ts: Date.now(),
@@ -264,13 +287,57 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
     }
   }
 
+  async function wakeSelectedDevices() {
+    if (!selectedAgentId || bulkWakeBusy) return;
+    const selectedRows = filtered.filter((row) => selectedIds.includes(row.id));
+    if (!selectedRows.length) return;
+
+    setBulkWakeBusy(true);
+    try {
+      for (const row of selectedRows) {
+        const target = chooseWakeTarget(row);
+        if (!target) continue;
+        await wakeTarget(target, `bulk:${row.id}`, { refresh: false, notify: false });
+      }
+      await loadInventory();
+      if (onAfterWake) await onAfterWake();
+    } finally {
+      setBulkWakeBusy(false);
+      setWakeBusyId("");
+    }
+  }
+
+  async function copyValue(label: string, value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    try {
+      await navigator.clipboard.writeText(trimmed);
+      setCopyStatus(`Copied ${label}`);
+    } catch {
+      setCopyStatus(`Copy failed for ${label}`);
+    }
+  }
+
   useEffect(() => {
     void loadInventory();
   }, [selectedAgentId]);
 
+  useEffect(() => {
+    setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
+  }, [rows]);
+
+  useEffect(() => {
+    if (!copyStatus) return;
+    const timer = window.setTimeout(() => setCopyStatus(""), 1800);
+    return () => window.clearTimeout(timer);
+  }, [copyStatus]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let result = rows;
+    if (presenceFilter !== "all") {
+      result = result.filter((row) => row.presence === presenceFilter);
+    }
     if (q) {
       result = result.filter((row) =>
         row.name.toLowerCase().includes(q)
@@ -285,7 +352,29 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
     result = [...result].sort(sorter);
     if (sort.dir === "desc") result.reverse();
     return result;
-  }, [rows, query, sort]);
+  }, [rows, query, sort, presenceFilter]);
+
+  const selectedVisibleCount = filtered.filter((row) => selectedIds.includes(row.id)).length;
+  const allVisibleSelected = filtered.length > 0 && selectedVisibleCount === filtered.length;
+
+  function toggleRowSelection(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      if (checked) return prev.includes(id) ? prev : [...prev, id];
+      return prev.filter((v) => v !== id);
+    });
+  }
+
+  function toggleAllVisible(checked: boolean) {
+    if (!checked) {
+      setSelectedIds((prev) => prev.filter((id) => !filtered.some((row) => row.id === id)));
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const row of filtered) next.add(row.id);
+      return Array.from(next);
+    });
+  }
 
   return (
     <section className="two-col">
@@ -340,10 +429,59 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
           </button>
         </div>
 
+        <div className="presence-filters" role="group" aria-label="Filter by presence">
+          {PRESENCE_FILTERS.map((value) => (
+            <button
+              key={value}
+              className={`filter-chip ${presenceFilter === value ? "active" : ""}`}
+              onClick={() => setPresenceFilter(value)}
+              type="button"
+            >
+              {value === "all" ? "all" : value.replace("_", " ")}
+            </button>
+          ))}
+        </div>
+
+        <div className="bulk-actions">
+          <label className="select-visible">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              onChange={(e) => toggleAllVisible(e.target.checked)}
+              disabled={!filtered.length}
+            />
+            Select visible
+          </label>
+          <button
+            onClick={() => void wakeSelectedDevices()}
+            disabled={!selectedVisibleCount || !selectedAgentId || bulkWakeBusy}
+            type="button"
+          >
+            {bulkWakeBusy ? "Waking selected..." : `Wake selected (${selectedVisibleCount})`}
+          </button>
+          <button
+            onClick={() => setSelectedIds([])}
+            disabled={!selectedIds.length}
+            type="button"
+          >
+            Clear selection
+          </button>
+          {copyStatus && <span className="muted">{copyStatus}</span>}
+        </div>
+
         <p className="muted">Showing {filtered.length} of {rows.length}</p>
         {error && <pre className="error">{error}</pre>}
         <div className="list device-list">
           <div className="row plain device-row device-header">
+            <span className="device-cell device-select">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={(e) => toggleAllVisible(e.target.checked)}
+                disabled={!filtered.length}
+                aria-label="Select all visible devices"
+              />
+            </span>
             <span
               className="sortable-col device-cell"
               onClick={() => setSort((s) => ({ key: "name", dir: s.key === "name" && s.dir === "asc" ? "desc" : "asc" }))}
@@ -369,19 +507,30 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
               Presence {sort.key === "presence" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
             </span>
             <span className="device-cell">Interfaces</span>
-            <span className="device-cell device-action"></span>
+            <span className="device-cell device-action">Actions</span>
           </div>
           {filtered.map((row) => (
             <div className="row plain device-row" key={row.id}>
+              <span className="device-cell device-select" data-label="Pick">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(row.id)}
+                  onChange={(e) => toggleRowSelection(row.id, e.target.checked)}
+                  aria-label={`Select ${row.name}`}
+                />
+              </span>
               <span className="device-cell" data-label="Name" title={row.name}>{row.name}</span>
               <span className="device-cell muted" data-label="IP" title={row.ips.join(", ") || "-"}>{summarize(row.ips)}</span>
               <span className="device-cell muted" data-label="MAC" title={row.macs.join(", ") || "-"}>{summarize(row.macs)}</span>
               <span className="device-cell" data-label="Presence"><span className="pill">{row.presence}</span></span>
               <span className="device-cell" data-label="Interfaces" title={row.interfaces.join(", ") || "-"}>{summarize(row.interfaces)}</span>
               <span className="device-cell device-action" data-label="">
-                <button onClick={() => void wakeDevice(row)} disabled={wakeBusyId === row.id || !selectedAgentId}>
+                <button onClick={() => void wakeDevice(row)} disabled={wakeBusyId === row.id || !selectedAgentId || bulkWakeBusy}>
                   {wakeBusyId === row.id ? "Waking..." : "Wake"}
                 </button>
+                <button type="button" className="mini-btn" onClick={() => void copyValue("name", chooseWakeTarget(row))}>Copy name</button>
+                <button type="button" className="mini-btn" onClick={() => void copyValue("ip", row.ips[0] || "")}>Copy IP</button>
+                <button type="button" className="mini-btn" onClick={() => void copyValue("mac", row.macs[0] || "")}>Copy MAC</button>
               </span>
             </div>
           ))}
