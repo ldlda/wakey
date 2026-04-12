@@ -1,5 +1,16 @@
+
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+// Utility for sorting
+const sorters = {
+  name: (a: DeviceRow, b: DeviceRow) => a.name.localeCompare(b.name),
+  ip: (a: DeviceRow, b: DeviceRow) => (a.ips[0] || "").localeCompare(b.ips[0] || ""),
+  mac: (a: DeviceRow, b: DeviceRow) => (a.macs[0] || "").localeCompare(b.macs[0] || ""),
+  presence: (a: DeviceRow, b: DeviceRow) => a.presence.localeCompare(b.presence),
+};
+
+type SortKey = keyof typeof sorters;
+type SortDir = "asc" | "desc";
 
 import { runCommand, type Agent } from "@/api";
 
@@ -137,6 +148,35 @@ function saveHistory(history: WakeEvent[]) {
 }
 
 export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWake }: Props) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Parse sort state from URL
+  function getSortFromUrl(): { key: SortKey; dir: SortDir } {
+    const params = new URLSearchParams(location.search);
+    const key = params.get("sort") as SortKey;
+    const dir = params.get("dir") as SortDir;
+    if (key && dir && key in sorters && (dir === "asc" || dir === "desc")) {
+      return { key, dir };
+    }
+    return { key: "name", dir: "asc" };
+  }
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>(getSortFromUrl());
+
+  // Keep sort state in sync with URL
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    params.set("sort", sort.key);
+    params.set("dir", sort.dir);
+    navigate({ search: params.toString() }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sort.key, sort.dir]);
+
+  // Update sort state if URL changes (e.g., back/forward nav)
+  useEffect(() => {
+    setSort(getSortFromUrl());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
   const [rows, setRows] = useState<DeviceRow[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -224,15 +264,22 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((row) =>
-      row.name.toLowerCase().includes(q)
-      || row.presence.toLowerCase().includes(q)
-      || row.ips.some((v) => v.toLowerCase().includes(q))
-      || row.macs.some((v) => v.toLowerCase().includes(q))
-      || row.interfaces.some((v) => v.toLowerCase().includes(q)),
-    );
-  }, [rows, query]);
+    let result = rows;
+    if (q) {
+      result = result.filter((row) =>
+        row.name.toLowerCase().includes(q)
+        || row.presence.toLowerCase().includes(q)
+        || row.ips.some((v) => v.toLowerCase().includes(q))
+        || row.macs.some((v) => v.toLowerCase().includes(q))
+        || row.interfaces.some((v) => v.toLowerCase().includes(q)),
+      );
+    }
+    // Sort
+    const sorter = sorters[sort.key];
+    result = [...result].sort(sorter);
+    if (sort.dir === "desc") result.reverse();
+    return result;
+  }, [rows, query, sort]);
 
   return (
     <section className="two-col">
@@ -290,20 +337,50 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
         <p className="muted">Showing {filtered.length} of {rows.length}</p>
         {error && <pre className="error">{error}</pre>}
         <div className="list device-list">
+          <div className="row plain device-row device-header" style={{ fontWeight: 600 }}>
+            <span
+              className="sortable-col"
+              style={{ cursor: "pointer" }}
+              onClick={() => setSort((s) => ({ key: "name", dir: s.key === "name" && s.dir === "asc" ? "desc" : "asc" }))}
+            >
+              Name {sort.key === "name" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+            </span>
+            <span
+              className="sortable-col"
+              style={{ cursor: "pointer" }}
+              onClick={() => setSort((s) => ({ key: "ip", dir: s.key === "ip" && s.dir === "asc" ? "desc" : "asc" }))}
+            >
+              IP {sort.key === "ip" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+            </span>
+            <span
+              className="sortable-col"
+              style={{ cursor: "pointer" }}
+              onClick={() => setSort((s) => ({ key: "mac", dir: s.key === "mac" && s.dir === "asc" ? "desc" : "asc" }))}
+            >
+              MAC {sort.key === "mac" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+            </span>
+            <span
+              className="sortable-col"
+              style={{ cursor: "pointer" }}
+              onClick={() => setSort((s) => ({ key: "presence", dir: s.key === "presence" && s.dir === "asc" ? "desc" : "asc" }))}
+            >
+              Presence {sort.key === "presence" ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+            </span>
+            <span>Interfaces</span>
+            <span></span>
+          </div>
           {filtered.map((row) => (
             <div className="row plain device-row" key={row.id}>
-              <div className="device-main">
-                <strong>{row.name}</strong>
-                <div className="muted">{row.ips.join(", ") || "-"}</div>
-                <div className="muted">{row.macs.join(", ") || "-"}</div>
-              </div>
-              <div className="device-meta">
-                <span>{row.interfaces.join(", ") || "-"}</span>
-                <span className="pill">{row.presence}</span>
+              <span>{row.name}</span>
+              <span className="muted">{row.ips.join(", ") || "-"}</span>
+              <span className="muted">{row.macs.join(", ") || "-"}</span>
+              <span className="pill">{row.presence}</span>
+              <span>{row.interfaces.join(", ") || "-"}</span>
+              <span>
                 <button onClick={() => void wakeDevice(row)} disabled={wakeBusyId === row.id || !selectedAgentId}>
                   {wakeBusyId === row.id ? "Waking..." : "Wake"}
                 </button>
-              </div>
+              </span>
             </div>
           ))}
           {!filtered.length && <div className="empty">No devices found</div>}
