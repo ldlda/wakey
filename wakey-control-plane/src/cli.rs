@@ -7,6 +7,15 @@ pub const DEFAULT_PID_FILE: &str = "/var/lib/wakey-control-plane/wakey-control-p
 pub const DEFAULT_DATA_DIR: &str = "/var/lib/wakey-control-plane";
 pub const DEFAULT_CONFIG_FILE: &str = "/etc/wakey-control-plane/config.toml";
 
+#[derive(Args, Clone, Copy, Default)]
+pub struct AdminTargetArgs {
+    #[arg(long, conflicts_with = "offline")]
+    pub live: bool,
+
+    #[arg(long, conflicts_with = "live")]
+    pub offline: bool,
+}
+
 #[derive(Parser)]
 #[command(name = "wakey-control-plane")]
 #[command(version, about = "Control plane server for wakey-agent fleets")]
@@ -50,8 +59,8 @@ pub struct ServeArgs {
     #[arg(long)]
     pub state_file: Option<PathBuf>,
 
-    #[arg(long = "enroll-token")]
-    pub enroll_tokens: Vec<String>,
+    #[arg(long = "bootstrap-enroll-token", visible_alias = "enroll-token")]
+    pub bootstrap_enroll_tokens: Vec<String>,
 
     #[arg(long)]
     pub command_timeout_ms: Option<u64>,
@@ -95,8 +104,8 @@ pub struct InitConfigArgs {
     #[arg(long)]
     pub enroll_token_ttl_seconds: Option<u64>,
 
-    #[arg(long = "enroll-token")]
-    pub enroll_tokens: Vec<String>,
+    #[arg(long = "bootstrap-enroll-token", visible_alias = "enroll-token")]
+    pub bootstrap_enroll_tokens: Vec<String>,
 
     #[arg(long)]
     pub telemetry_otlp_endpoint: Option<String>,
@@ -122,14 +131,14 @@ pub struct IssueEnrollTokenArgs {
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
 
-    #[arg(long = "enroll-token")]
-    pub enroll_tokens: Vec<String>,
-
     #[arg(long)]
     pub public_url: Option<String>,
 
     #[arg(long)]
     pub ttl_seconds: Option<u64>,
+
+    #[command(flatten)]
+    pub target: AdminTargetArgs,
 }
 
 #[derive(Args)]
@@ -151,6 +160,9 @@ pub struct ListEnrollTokensArgs {
 
     #[arg(long)]
     pub json: bool,
+
+    #[command(flatten)]
+    pub target: AdminTargetArgs,
 }
 
 #[derive(Args)]
@@ -169,6 +181,9 @@ pub struct RevokeEnrollTokenArgs {
 
     #[arg(long)]
     pub token: String,
+
+    #[command(flatten)]
+    pub target: AdminTargetArgs,
 }
 
 #[derive(Args)]
@@ -187,6 +202,9 @@ pub struct StateStatsArgs {
 
     #[arg(long)]
     pub json: bool,
+
+    #[command(flatten)]
+    pub target: AdminTargetArgs,
 }
 
 #[derive(Args)]

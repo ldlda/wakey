@@ -98,7 +98,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
 
     let store = state::Store::load_or_init(
         &daemon.state_file,
-        daemon.enroll_tokens.clone(),
+        daemon.bootstrap_enroll_tokens.clone(),
         daemon.enroll_token_ttl,
     )
     .await

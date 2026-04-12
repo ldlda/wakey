@@ -5,7 +5,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::cli::{
-    IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeEnrollTokenArgs, ServeArgs, StateStatsArgs,
+    AdminTargetArgs, IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeEnrollTokenArgs, ServeArgs,
+    StateStatsArgs,
 };
 use crate::config::types::{
     DaemonConfig, FileConfig, FileTelemetryConfig, IssueTokenSettings, StateAccessSettings,
@@ -72,10 +73,10 @@ impl DaemonConfig {
             .unwrap_or_else(|| PathBuf::from("wakey-control-plane.pid"));
         let pid_file = resolve_path(&data_dir, pid_file_raw);
 
-        let enroll_tokens = if args.enroll_tokens.is_empty() {
-            file.enroll_tokens.unwrap_or_default()
+        let bootstrap_enroll_tokens = if args.bootstrap_enroll_tokens.is_empty() {
+            file.bootstrap_enroll_tokens.unwrap_or_default()
         } else {
-            args.enroll_tokens.clone()
+            args.bootstrap_enroll_tokens.clone()
         };
 
         let telemetry = resolve_telemetry(file.telemetry);
@@ -88,7 +89,7 @@ impl DaemonConfig {
             command_timeout,
             enroll_token_ttl,
             pid_file,
-            enroll_tokens,
+            bootstrap_enroll_tokens,
             telemetry,
         })
     }
@@ -120,6 +121,7 @@ pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<Issue
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
+        &args.target,
     )?;
 
     let ttl = Duration::from_secs(
@@ -132,6 +134,7 @@ pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<Issue
     Ok(IssueTokenSettings {
         data_dir: state.data_dir,
         state_file: state.state_file,
+        public_url: state.public_url,
         ttl,
     })
 }
@@ -144,6 +147,7 @@ pub fn resolve_list_enroll_token_settings(
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
+        &args.target,
     )
 }
 
@@ -155,6 +159,7 @@ pub fn resolve_revoke_enroll_token_settings(
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
+        &args.target,
     )
 }
 
@@ -164,6 +169,7 @@ pub fn resolve_state_stats_settings(args: &StateStatsArgs) -> Result<StateAccess
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
+        &args.target,
     )
 }
 
@@ -176,6 +182,19 @@ pub(crate) fn load_file_config(path: &Path) -> Result<FileConfig> {
         .with_context(|| format!("failed to read config file {}", path.display()))?;
     toml::from_str::<FileConfig>(&raw)
         .with_context(|| format!("failed to parse config file {}", path.display()))
+}
+
+fn resolve_admin_public_url(
+    mode: &AdminTargetArgs,
+    config_public_url: Option<String>,
+) -> Result<Option<String>> {
+    match (mode.live, mode.offline) {
+        (true, false) => config_public_url
+            .ok_or_else(|| anyhow::anyhow!("--live requires --public-url or a configured public_url"))
+            .map(Some),
+        (false, true) => Ok(None),
+        _ => Ok(config_public_url),
+    }
 }
 
 fn resolve_telemetry(file: Option<FileTelemetryConfig>) -> TelemetryConfig {
@@ -205,6 +224,7 @@ fn resolve_state_access(
     cli_data_dir: Option<PathBuf>,
     cli_state_file: Option<PathBuf>,
     cli_public_url: Option<String>,
+    mode: &AdminTargetArgs,
 ) -> Result<StateAccessSettings> {
     let file = load_file_config(config_file)?;
 
@@ -219,9 +239,10 @@ fn resolve_state_access(
             .unwrap_or_else(|| PathBuf::from("state.db")),
     );
 
-    let public_url = cli_public_url
+    let resolved_public_url = cli_public_url
         .or(file.public_url)
         .map(|url| normalize_public_url(&url));
+    let public_url = resolve_admin_public_url(mode, resolved_public_url)?;
 
     Ok(StateAccessSettings {
         data_dir,

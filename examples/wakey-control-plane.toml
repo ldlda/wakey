@@ -1,10 +1,10 @@
 data_dir = "/var/lib/wakey-control-plane"
 bind = "0.0.0.0:8080"
 public_url = "http://127.0.0.1:8080"
-state_file = "/var/lib/wakey-control-plane/state.db"
+state_file = "state.db"
 command_timeout_ms = 30000
 enroll_token_ttl_seconds = 86400
-pid_file = "/var/lib/wakey-control-plane/wakey-control-plane.pid"
+pid_file = "wakey-control-plane.pid"
 
 [telemetry]
 service_name = "wakey-control-plane"

@@ -12,8 +12,7 @@ use crate::state;
 pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
     let settings = config::resolve_issue_token_settings(&args)?;
 
-    if let Some(url) = args.public_url {
-        let base = config::normalize_public_url(&url);
+    if let Some(base) = settings.public_url.as_deref() {
         let ttl_seconds = settings.ttl.as_secs().max(1);
         let endpoint = format!(
             "{}?ttl_seconds={ttl_seconds}",
@@ -53,7 +52,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
     }
 
     tracing::info!(data_dir = %settings.data_dir.display(), state_file = %settings.state_file.display(), ttl_seconds = settings.ttl.as_secs(), "issuing enroll token via offline state file fallback");
-    let store = state::Store::load_or_init(&settings.state_file, args.enroll_tokens, settings.ttl)
+    let store = state::Store::load_or_init(&settings.state_file, Vec::new(), settings.ttl)
         .await
         .with_context(|| {
             format!(

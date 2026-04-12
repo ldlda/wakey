@@ -50,7 +50,7 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<()> {
         command_timeout_ms: args.command_timeout_ms.unwrap_or(30_000).max(1),
         enroll_token_ttl_seconds: args.enroll_token_ttl_seconds.unwrap_or(86_400).max(1),
         pid_file,
-        enroll_tokens: args.enroll_tokens.clone(),
+        bootstrap_enroll_tokens: args.bootstrap_enroll_tokens.clone(),
         telemetry: WritableTelemetry {
             otlp_endpoint: args.telemetry_otlp_endpoint.clone(),
             service_name: args
@@ -86,7 +86,7 @@ pub fn bootstrap_config_if_missing(args: &ServeArgs) -> Result<bool> {
         pid_file: args.pid_file.clone(),
         command_timeout_ms: args.command_timeout_ms,
         enroll_token_ttl_seconds: args.enroll_token_ttl_seconds,
-        enroll_tokens: args.enroll_tokens.clone(),
+        bootstrap_enroll_tokens: args.bootstrap_enroll_tokens.clone(),
         telemetry_otlp_endpoint: None,
         telemetry_service_name: None,
         telemetry_json_logs: false,
