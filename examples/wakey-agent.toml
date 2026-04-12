@@ -1,0 +1,5 @@
+server_url = "https://control-plane.example.com"
+agent_id = "REPLACE_ME_AGENT_ID"
+agent_token = "REPLACE_ME_AGENT_TOKEN"
+reconnect_base_ms = 1000
+reconnect_max_ms = 30000
