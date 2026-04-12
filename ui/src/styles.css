@@ -123,6 +123,27 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
   font-size: 0.9rem;
 }
 
+.quick-wake {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  align-items: end;
+  margin-top: 0.65rem;
+}
+
+.quick-wake label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.linkish {
+  display: inline-block;
+  margin-top: 0.25rem;
+  text-decoration: underline;
+}
+
 .list { display: grid; gap: 0.4rem; margin-top: 0.55rem; }
 .row {
   display: flex;
@@ -174,6 +195,10 @@ input, select { width: 100%; padding: 0.45rem 0.55rem; }
 
   .device-meta {
     justify-content: flex-start;
+  }
+
+  .quick-wake {
+    grid-template-columns: 1fr;
   }
 }
 .empty { color: var(--muted); padding: 0.35rem 0.2rem; }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { runCommand, type Agent } from "@/api";
 
@@ -80,16 +81,25 @@ function parseWakeSummary(response: unknown): { outcome: string; requestId: stri
   }
 
   const entries = Array.isArray(result.result) ? result.result : [];
-  const statuses = entries
+  const targetOutcomes = entries
     .map((row) => {
       if (!row || typeof row !== "object") return "";
-      const statusRow = (row as Record<string, unknown>).status as Record<string, unknown> | undefined;
-      return typeof statusRow?.kind === "string" ? statusRow.kind : "";
+      const rowObj = row as Record<string, unknown>;
+      const statusRaw = rowObj.status;
+      const status =
+        typeof statusRaw === "string"
+          ? statusRaw
+          : (typeof (statusRaw as Record<string, unknown> | undefined)?.kind === "string"
+              ? String((statusRaw as Record<string, unknown>).kind)
+              : "unknown");
+      const ip = typeof rowObj.ip === "string" ? rowObj.ip : "?";
+      const mac = typeof rowObj.mac === "string" ? rowObj.mac : "?";
+      return `${status}(${ip}/${mac})`;
     })
     .filter(Boolean);
 
-  const detail = statuses.length ? statuses.join(", ") : "wake dispatched";
-  const failed = statuses.some((s) => s === "error" || s === "incomplete");
+  const detail = targetOutcomes.length ? targetOutcomes.join(", ") : "wake dispatched";
+  const failed = targetOutcomes.some((s) => s.startsWith("incomplete") || s.startsWith("nonexistent_address") || s.startsWith("wrong_size"));
   return { outcome: failed ? "error" : "ok", requestId, detail };
 }
 
@@ -132,7 +142,16 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [wakeBusyId, setWakeBusyId] = useState("");
+  const [quickWake, setQuickWake] = useState("");
   const [recentWakes, setRecentWakes] = useState<WakeEvent[]>([]);
+  function appendWakeEvent(event: WakeEvent) {
+    setRecentWakes((prev) => {
+      const next = [event, ...prev].slice(0, 20);
+      saveHistory(next);
+      return next;
+    });
+  }
+
 
   useEffect(() => {
     setRecentWakes(loadHistory());
@@ -166,40 +185,34 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
 
   async function wakeDevice(device: DeviceRow) {
     const target = chooseWakeTarget(device);
+    await wakeTarget(target, device.id);
+  }
+
+  async function wakeTarget(target: string, busyId: string) {
     if (!target || !selectedAgentId) return;
-    setWakeBusyId(device.id);
+    setWakeBusyId(busyId);
     try {
       const response = await runCommand(selectedAgentId, "wake", target);
       const summary = parseWakeSummary(response);
-      const next: WakeEvent[] = [
-        {
-          ts: Date.now(),
-          target,
-          agentId: selectedAgentId,
-          outcome: summary.outcome,
-          requestId: summary.requestId,
-          detail: summary.detail,
-        },
-        ...recentWakes,
-      ].slice(0, 20);
-      setRecentWakes(next);
-      saveHistory(next);
+      appendWakeEvent({
+        ts: Date.now(),
+        target,
+        agentId: selectedAgentId,
+        outcome: summary.outcome,
+        requestId: summary.requestId,
+        detail: summary.detail,
+      });
       await loadInventory();
       if (onAfterWake) await onAfterWake();
     } catch (err) {
-      const next: WakeEvent[] = [
-        {
-          ts: Date.now(),
-          target,
-          agentId: selectedAgentId,
-          outcome: "error",
-          requestId: "",
-          detail: String(err),
-        },
-        ...recentWakes,
-      ].slice(0, 20);
-      setRecentWakes(next);
-      saveHistory(next);
+      appendWakeEvent({
+        ts: Date.now(),
+        target,
+        agentId: selectedAgentId,
+        outcome: "error",
+        requestId: "",
+        detail: String(err),
+      });
     } finally {
       setWakeBusyId("");
     }
@@ -257,6 +270,23 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
           </label>
         </div>
 
+        <div className="quick-wake">
+          <label>
+            Quick Wake (name, IP, or MAC)
+            <input
+              value={quickWake}
+              onChange={(e) => setQuickWake(e.target.value)}
+              placeholder="bedroom-pc or aa:bb:cc:dd:ee:ff"
+            />
+          </label>
+          <button
+            onClick={() => void wakeTarget(quickWake.trim(), "quick")}
+            disabled={!selectedAgentId || !quickWake.trim() || wakeBusyId === "quick"}
+          >
+            {wakeBusyId === "quick" ? "Waking..." : "Wake target"}
+          </button>
+        </div>
+
         <p className="muted">Showing {filtered.length} of {rows.length}</p>
         {error && <pre className="error">{error}</pre>}
         <div className="list device-list">
@@ -299,6 +329,14 @@ export function DevicesPage({ agents, selectedAgentId, onSelectAgent, onAfterWak
                 <strong>{event.target}</strong>
                 <div className="muted">{new Date(event.ts).toLocaleString()} on {event.agentId}</div>
                 <div className="muted">{event.detail}</div>
+                {event.requestId && (
+                  <Link
+                    className="muted linkish"
+                    to={`/audit?q=${encodeURIComponent(event.requestId)}`}
+                  >
+                    View related audit ({event.requestId})
+                  </Link>
+                )}
               </div>
               <span className={`pill ${event.outcome === "ok" ? "ready" : "error"}`}>
                 {event.outcome}

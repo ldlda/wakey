@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import type { AuditEvent } from "@/api";
 
@@ -8,9 +9,14 @@ type Props = {
 };
 
 export function AuditPage({ events, onRefresh }: Props) {
-  const [eventType, setEventType] = useState("all");
-  const [outcome, setOutcome] = useState("all");
-  const [needle, setNeedle] = useState("");
+  const [searchParams] = useSearchParams();
+  const initialEventType = searchParams.get("event_type") || "all";
+  const initialOutcome = searchParams.get("outcome") || "all";
+  const initialNeedle = searchParams.get("q") || "";
+
+  const [eventType, setEventType] = useState(initialEventType);
+  const [outcome, setOutcome] = useState(initialOutcome);
+  const [needle, setNeedle] = useState(initialNeedle);
 
   const eventTypes = useMemo(
     () => ["all", ...Array.from(new Set(events.map((e) => e.event_type))).sort()],
