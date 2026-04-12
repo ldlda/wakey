@@ -4,6 +4,9 @@ use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::trace::{SdkTracerProvider, Tracer};
+use time::UtcOffset;
+use time::format_description::well_known::Rfc3339;
+use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::TelemetryConfig;
@@ -20,13 +23,13 @@ pub fn init(verbose: u8, telemetry: &TelemetryConfig) -> Result<()> {
             tracing_subscriber::registry()
                 .with(otel_layer)
                 .with(filter)
-                .with(fmt::layer().json())
+                .with(fmt::layer().json().with_timer(local_offset_timer()))
                 .init();
             tracing::info!(endpoint = ?telemetry.otlp_endpoint, json_logs = telemetry.json_logs, "tracing initialized with otlp exporter");
         } else {
             tracing_subscriber::registry()
                 .with(filter)
-                .with(fmt::layer().json())
+                .with(fmt::layer().json().with_timer(local_offset_timer()))
                 .init();
             tracing::info!(
                 json_logs = telemetry.json_logs,
@@ -37,13 +40,13 @@ pub fn init(verbose: u8, telemetry: &TelemetryConfig) -> Result<()> {
         tracing_subscriber::registry()
             .with(otel_layer)
             .with(filter)
-            .with(fmt::layer())
+            .with(fmt::layer().with_timer(local_offset_timer()))
             .init();
         tracing::info!(endpoint = ?telemetry.otlp_endpoint, json_logs = telemetry.json_logs, "tracing initialized with otlp exporter");
     } else {
         tracing_subscriber::registry()
             .with(filter)
-            .with(fmt::layer())
+            .with(fmt::layer().with_timer(local_offset_timer()))
             .init();
         tracing::info!(
             json_logs = telemetry.json_logs,
@@ -88,4 +91,9 @@ fn default_filter(verbose: u8) -> &'static str {
         1 => "wakey_control_plane=debug",
         _ => "wakey_control_plane=trace",
     }
+}
+
+fn local_offset_timer() -> OffsetTime<Rfc3339> {
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    OffsetTime::new(offset, Rfc3339)
 }

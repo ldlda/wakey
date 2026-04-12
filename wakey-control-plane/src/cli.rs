@@ -71,7 +71,7 @@ pub struct ServeArgs {
     #[arg(long)]
     pub pid_file: Option<PathBuf>,
 
-    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    #[arg(long, visible_alias="config", default_value = DEFAULT_CONFIG_FILE)]
     pub config_file: PathBuf,
 
     #[arg(long)]

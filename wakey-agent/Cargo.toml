@@ -27,7 +27,8 @@ tokio = { version = "1", features = [
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 toml = "0.8"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
+time = { version = "0.3", features = ["formatting", "local-offset"] }
 url = "2"
 wakey = { path = "..", registry = "gitea" }
 wakey-core = { path = "../wakey-core", registry = "gitea" }
