@@ -49,11 +49,11 @@ pub struct EnrollArgs {
     /// One-time or short-lived enroll token provided by the control plane.
     #[arg(long)]
     pub enroll_token: String,
-    /// Path to the agent config file to write.
+    /// Path to the agent config file to write (overwritten on successful enroll).
     #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
 
-    /// Reload a running daemon after writing config.
+    /// Reload a running daemon after writing config so the new config takes effect immediately.
     #[arg(long)]
     pub reload_running: bool,
 

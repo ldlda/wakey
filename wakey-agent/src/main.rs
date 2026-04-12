@@ -26,6 +26,7 @@ async fn main() -> Result<()> {
             let config = enroll::enroll(&args.server_url, &args.enroll_token, &args.config).await?;
             println!("agent_id={}", config.agent_id);
             println!("config={}", args.config.display());
+            println!("config_write=updated");
             if args.reload_running {
                 match serve::reload_daemon(&args.pid_file) {
                     Ok(()) => println!("reload=signaled pid_file={}", args.pid_file.display()),
@@ -33,6 +34,13 @@ async fn main() -> Result<()> {
                         ::tracing::warn!(error = %err, pid_file = %args.pid_file.display(), "enroll completed but daemon reload failed")
                     }
                 }
+            } else {
+                println!("reload=not_requested");
+                println!("runtime_config=unchanged_until_reload_or_restart");
+                println!(
+                    "next=wakey-agent reload --pid-file {}  # or restart wakey-agent",
+                    args.pid_file.display()
+                );
             }
         }
         Command::InitConfig(args) => init_config(args)?,

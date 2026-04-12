@@ -9,7 +9,8 @@ use crate::{config, session};
 pub async fn serve(args: ServeArgs) -> Result<()> {
     if !args.config.exists() {
         anyhow::bail!(
-            "agent config {} not found. Run `wakey-agent enroll --server-url <url> --enroll-token <token>` or `wakey-agent init-config --config {}` first",
+            "agent config {} not found. Run `wakey-agent enroll --server-url <url> --enroll-token <token> --config {}` or `wakey-agent init-config --config {}` first",
+            args.config.display(),
             args.config.display(),
             args.config.display()
         );
