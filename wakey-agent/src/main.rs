@@ -36,7 +36,6 @@ async fn main() -> Result<()> {
             }
         }
         Command::InitConfig(args) => {
-            ::tracing::info!(config = %args.config.display(), force = args.force, "wakey-agent command: init-config");
             init_config(args)?
         }
         Command::Reload(args) => {
@@ -49,11 +48,17 @@ async fn main() -> Result<()> {
 }
 
 fn init_config(args: InitConfigArgs) -> Result<()> {
-    if args.config.exists() && !args.force {
-        anyhow::bail!(
-            "config {} already exists; re-run with --force to overwrite",
-            args.config.display()
-        );
+    if args.stdout && args.config.is_some() {
+        anyhow::bail!("--stdout cannot be used with --config");
+    }
+
+    if let Some(config) = &args.config {
+        if config.exists() && !args.force {
+            anyhow::bail!(
+                "config {} already exists; re-run with --force to overwrite",
+                config.display()
+            );
+        }
     }
 
     let cfg = config::AgentConfig {
@@ -70,8 +75,13 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
         reconnect_max_ms: 30_000,
     };
 
-    config::save_config(&args.config, &cfg)?;
-    println!("config={}", args.config.display());
-    println!("next=wakey-agent serve --config {}", args.config.display());
+    if let Some(path) = &args.config {
+        config::save_config(path, &cfg)?;
+        println!("config={}", path.display());
+        println!("next=wakey-agent serve --config {}", path.display());
+    } else {
+        let rendered = toml::to_string_pretty(&cfg)?;
+        print!("{}", rendered);
+    }
     Ok(())
 }

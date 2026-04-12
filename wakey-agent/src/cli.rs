@@ -64,9 +64,13 @@ pub struct EnrollArgs {
 
 #[derive(Args)]
 pub struct InitConfigArgs {
-    /// Path to the agent config file to write.
-    #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
-    pub config: PathBuf,
+    /// Path to the agent config file to write. If omitted, config is printed to stdout.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
+    /// Print config to stdout.
+    #[arg(long, conflicts_with = "config")]
+    pub stdout: bool,
 
     /// Base HTTPS URL of the control plane.
     #[arg(long)]

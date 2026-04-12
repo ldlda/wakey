@@ -6,12 +6,18 @@ use crate::cli::{InitConfigArgs, ServeArgs};
 use crate::config::resolve::{normalize_public_url, resolve_path};
 use crate::config::types::{WritableConfig, WritableTelemetry};
 
-pub fn write_init_config(args: &InitConfigArgs) -> Result<()> {
-    if args.config_file.exists() && !args.force {
-        anyhow::bail!(
-            "config {} already exists; re-run with --force to overwrite",
-            args.config_file.display()
-        );
+pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
+    if args.stdout && args.config_file.is_some() {
+        anyhow::bail!("--stdout cannot be used with --config-file");
+    }
+
+    if let Some(config_file) = &args.config_file {
+        if config_file.exists() && !args.force {
+            anyhow::bail!(
+                "config {} already exists; re-run with --force to overwrite",
+                config_file.display()
+            );
+        }
     }
 
     let bind = args.bind.unwrap_or_else(|| {
@@ -61,15 +67,21 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<()> {
         },
     };
 
-    if let Some(parent) = args.config_file.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create config dir {}", parent.display()))?;
+    let rendered = toml::to_string_pretty(&body).context("failed to render config template")?;
+
+    if let Some(config_file) = &args.config_file {
+        if let Some(parent) = config_file.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create config dir {}", parent.display()))?;
+        }
+
+        std::fs::write(config_file, rendered)
+            .with_context(|| format!("failed to write config {}", config_file.display()))?;
+        return Ok(Some(config_file.clone()));
     }
 
-    let rendered = toml::to_string_pretty(&body).context("failed to render config template")?;
-    std::fs::write(&args.config_file, rendered)
-        .with_context(|| format!("failed to write config {}", args.config_file.display()))?;
-    Ok(())
+    print!("{}", rendered);
+    Ok(None)
 }
 
 pub fn bootstrap_config_if_missing(args: &ServeArgs) -> Result<bool> {
@@ -78,7 +90,8 @@ pub fn bootstrap_config_if_missing(args: &ServeArgs) -> Result<bool> {
     }
 
     let init = InitConfigArgs {
-        config_file: args.config_file.clone(),
+        config_file: Some(args.config_file.clone()),
+        stdout: false,
         data_dir: args.data_dir.clone(),
         bind: args.bind,
         public_url: args.public_url.clone(),

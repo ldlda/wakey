@@ -16,7 +16,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
         let ttl_seconds = settings.ttl.as_secs().max(1);
         let endpoint = format!(
             "{}?ttl_seconds={ttl_seconds}",
-            config::issue_token_endpoint(&base)
+            config::issue_token_endpoint(base)
         );
         tracing::info!(endpoint = %endpoint, "requesting live enroll token from running control-plane daemon");
         let client = reqwest::Client::new();

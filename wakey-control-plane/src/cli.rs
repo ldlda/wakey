@@ -31,7 +31,7 @@ pub struct Cli {
 pub enum Command {
     /// Run the control-plane daemon.
     Serve(ServeArgs),
-    /// Write a control-plane config scaffold.
+    /// Render a control-plane config scaffold.
     InitConfig(InitConfigArgs),
     /// Create a new enroll token for provisioning a router.
     IssueEnrollToken(IssueEnrollTokenArgs),
@@ -80,8 +80,11 @@ pub struct ServeArgs {
 
 #[derive(Args, Clone)]
 pub struct InitConfigArgs {
-    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
-    pub config_file: PathBuf,
+    #[arg(long = "config-file", alias = "config")]
+    pub config_file: Option<PathBuf>,
+
+    #[arg(long, conflicts_with = "config_file")]
+    pub stdout: bool,
 
     #[arg(long)]
     pub data_dir: Option<PathBuf>,
