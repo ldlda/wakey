@@ -77,7 +77,7 @@ pub async fn run_command(
 
     let tx = {
         let sessions = state.sessions.read().await;
-        sessions.get(&agent_id).cloned()
+        sessions.get(&agent_id).map(|session| session.tx.clone())
     }
     .ok_or_else(|| {
         warn!("command rejected: agent not connected");

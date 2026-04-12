@@ -10,7 +10,7 @@ use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{ErrorPayload, RequestId, ServerMessage};
 
-use crate::runtime::{AgentReply, AppState};
+use crate::runtime::{AgentReply, AgentSession, AppState};
 use crate::state::AuditEventInput;
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +89,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
                 if let Err(err) = process_agent_text(
                     &state,
                     &tx,
+                    &connection_id,
                     &mut authed_agent_id,
                     &mut hello_at,
                     connected_at,
@@ -114,7 +115,14 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
 
     if let Some(agent_id) = authed_agent_id {
         info!(agent_id = %agent_id, "agent disconnected");
-        state.sessions.write().await.remove(&agent_id);
+        let mut sessions = state.sessions.write().await;
+        let should_remove = sessions
+            .get(&agent_id)
+            .map(|session| session.connection_id == connection_id)
+            .unwrap_or(false);
+        if should_remove {
+            sessions.remove(&agent_id);
+        }
         if let Err(err) = state
             .store
             .append_audit_event(AuditEventInput {
@@ -141,6 +149,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
 async fn process_agent_text(
     state: &AppState,
     tx: &mpsc::UnboundedSender<ServerMessage>,
+    connection_id: &str,
     authed_agent_id: &mut Option<String>,
     hello_at: &mut Option<Instant>,
     connected_at: Instant,
@@ -196,7 +205,13 @@ async fn process_agent_text(
                 .sessions
                 .write()
                 .await
-                .insert(agent_id.clone(), tx.clone());
+                .insert(
+                    agent_id.clone(),
+                    AgentSession {
+                        connection_id: connection_id.to_string(),
+                        tx: tx.clone(),
+                    },
+                );
             *authed_agent_id = Some(agent_id.clone());
             info!(agent_id = %agent_id, connect_to_auth_ms, hello_to_auth_ms = hello_to_auth_ms.unwrap_or(0), "agent authenticated");
             if let Err(err) = state
@@ -224,12 +239,14 @@ async fn process_agent_text(
             if authed_agent_id.as_deref() != Some(agent_id.as_str()) {
                 anyhow::bail!("heartbeat for unauthenticated or mismatched agent");
             }
+            ensure_current_session(state, &agent_id, connection_id).await?;
             debug!(agent_id = %agent_id, "heartbeat received");
         }
         IncomingClientMessage::Result { request_id, result } => {
-            if authed_agent_id.is_none() {
-                anyhow::bail!("result before auth");
-            }
+            let agent_id = authed_agent_id
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("result before auth"))?;
+            ensure_current_session(state, agent_id, connection_id).await?;
             let key = request_id.as_str().to_string();
             if let Some(waiter) = state.pending.lock().await.remove(&key) {
                 let _ = waiter.send(AgentReply::Result(result));
@@ -238,9 +255,10 @@ async fn process_agent_text(
             }
         }
         IncomingClientMessage::Error { request_id, error } => {
-            if authed_agent_id.is_none() {
-                anyhow::bail!("error before auth");
-            }
+            let agent_id = authed_agent_id
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("error before auth"))?;
+            ensure_current_session(state, agent_id, connection_id).await?;
             let key = request_id.as_str().to_string();
             if let Some(waiter) = state.pending.lock().await.remove(&key) {
                 let _ = waiter.send(AgentReply::Error(error));
@@ -255,4 +273,54 @@ async fn process_agent_text(
 
 fn now_duration_ms(duration: std::time::Duration) -> u64 {
     duration.as_millis() as u64
+}
+
+async fn ensure_current_session(state: &AppState, agent_id: &str, connection_id: &str) -> Result<()> {
+    let sessions = state.sessions.read().await;
+    if is_current_session(&sessions, agent_id, connection_id) {
+        Ok(())
+    } else if sessions.contains_key(agent_id) {
+        anyhow::bail!("stale agent session")
+    } else {
+        anyhow::bail!("agent session not registered")
+    }
+}
+
+fn is_current_session(
+    sessions: &std::collections::HashMap<String, AgentSession>,
+    agent_id: &str,
+    connection_id: &str,
+) -> bool {
+    sessions
+        .get(agent_id)
+        .map(|session| session.connection_id == connection_id)
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use tokio::sync::mpsc;
+
+    use crate::runtime::AgentSession;
+
+    use super::is_current_session;
+
+    #[test]
+    fn current_session_check_rejects_stale_connection_ids() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut sessions = HashMap::new();
+        sessions.insert(
+            "agent-a".to_string(),
+            AgentSession {
+                connection_id: "conn-new".to_string(),
+                tx,
+            },
+        );
+
+        assert!(is_current_session(&sessions, "agent-a", "conn-new"));
+        assert!(!is_current_session(&sessions, "agent-a", "conn-old"));
+        assert!(!is_current_session(&sessions, "agent-b", "conn-new"));
+    }
 }

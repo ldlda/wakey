@@ -21,6 +21,7 @@ pub struct Store {
 }
 
 const SCHEMA_VERSION_KEY: &[u8] = b"schema_version";
+const SEEDED_ENROLL_TOKEN_PREFIX: &[u8] = b"seeded_enroll_token:";
 const SCHEMA_VERSION: u32 = 1;
 
 impl Store {
@@ -60,17 +61,7 @@ impl Store {
 
         store.ensure_schema_version()?;
 
-        for token in enroll_tokens {
-            let token = token.trim();
-            if token.is_empty() {
-                continue;
-            }
-            let expires_at = now_unix().saturating_add(seed_ttl.as_secs().max(1));
-            store
-                .enroll_tokens
-                .insert(token.as_bytes(), &expires_at.to_le_bytes())
-                .with_context(|| format!("failed to seed enroll token into {}", store.db_path.display()))?;
-        }
+        store.seed_bootstrap_enroll_tokens(&enroll_tokens, seed_ttl)?;
 
         store.gc_expired_enroll_tokens_inner()?;
 
@@ -206,10 +197,12 @@ impl Store {
         })
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub async fn gc_expired_enroll_tokens(&self) -> Result<u64> {
         self.gc_expired_enroll_tokens_inner()
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub async fn reload_from_disk(&self) -> Result<()> {
         // sled is durable and read-through; explicit reload is a no-op.
         info!(path = %self.db_path.display(), "reload requested; sled backend does not require in-memory reload");
@@ -391,6 +384,9 @@ impl Store {
     }
 
     fn flush(&self) -> Result<()> {
+        self.meta
+            .flush()
+            .context("failed to flush meta tree")?;
         self.enroll_tokens
             .flush()
             .context("failed to flush enroll token tree")?;
@@ -407,6 +403,33 @@ impl Store {
             .flush()
             .context("failed to flush alert transitions tree")?;
         debug!(path = %self.db_path.display(), "flushed sled state db");
+        Ok(())
+    }
+
+    fn seed_bootstrap_enroll_tokens(&self, enroll_tokens: &[String], seed_ttl: Duration) -> Result<()> {
+        for token in enroll_tokens {
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+
+            let marker_key = seeded_enroll_token_key(token);
+            if self
+                .meta
+                .contains_key(&marker_key)
+                .with_context(|| format!("failed reading bootstrap marker in {}", self.db_path.display()))?
+            {
+                continue;
+            }
+
+            let expires_at = now_unix().saturating_add(seed_ttl.as_secs().max(1));
+            self.enroll_tokens
+                .insert(token.as_bytes(), &expires_at.to_le_bytes())
+                .with_context(|| format!("failed to seed enroll token into {}", self.db_path.display()))?;
+            self.meta
+                .insert(marker_key, &expires_at.to_le_bytes())
+                .with_context(|| format!("failed to persist bootstrap marker into {}", self.db_path.display()))?;
+        }
         Ok(())
     }
 
@@ -492,6 +515,13 @@ fn decode_schema(raw: &[u8]) -> Result<u32> {
     let mut arr = [0u8; 4];
     arr.copy_from_slice(raw);
     Ok(u32::from_le_bytes(arr))
+}
+
+fn seeded_enroll_token_key(token: &str) -> Vec<u8> {
+    let mut key = Vec::with_capacity(SEEDED_ENROLL_TOKEN_PREFIX.len() + token.len());
+    key.extend_from_slice(SEEDED_ENROLL_TOKEN_PREFIX);
+    key.extend_from_slice(token.as_bytes());
+    key
 }
 
 fn matches_audit_filter(event: &AuditEvent, filter: &AuditEventFilter) -> bool {
@@ -718,6 +748,47 @@ mod tests {
             .await
             .expect("history should load");
         assert!(history.len() >= 2);
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn bootstrap_seed_tokens_are_not_reseeded_after_consumption() {
+        let dir =
+            std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
+        let db_path = dir.join("state.db");
+
+        let first = Store::load_or_init(
+            &db_path,
+            vec!["enr-bootstrap-once".to_string()],
+            Duration::from_secs(60),
+        )
+        .await
+        .expect("initial store should initialize");
+
+        let issued = first
+            .enroll("enr-bootstrap-once")
+            .await
+            .expect("bootstrap token should enroll once");
+        assert!(!issued.agent_id.is_empty());
+
+        drop(first);
+
+        let second = Store::load_or_init(
+            &db_path,
+            vec!["enr-bootstrap-once".to_string()],
+            Duration::from_secs(60),
+        )
+        .await
+        .expect("reloaded store should initialize");
+
+        let err = second
+            .enroll("enr-bootstrap-once")
+            .await
+            .expect_err("bootstrap token should not resurrect after restart");
+        assert!(err
+            .to_string()
+            .contains("invalid or already-used enroll token"));
+
         cleanup_dir(&dir);
     }
 }

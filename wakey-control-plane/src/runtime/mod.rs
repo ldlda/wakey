@@ -9,10 +9,13 @@ use axum::routing::{get, post};
 use axum::routing::get_service;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
+#[cfg(unix)]
 use tokio::time::MissedTickBehavior;
 use tower_http::services::ServeDir;
 use tower_http::services::ServeFile;
-use tracing::{info, warn};
+use tracing::info;
+#[cfg(unix)]
+use tracing::warn;
 use wakey_agent::protocol::{ErrorPayload, ServerMessage};
 
 use crate::api;
@@ -32,11 +35,17 @@ use process::{remove_pid_file, write_pid_file};
 #[derive(Clone)]
 pub struct AppState {
     pub store: Arc<state::Store>,
-    pub sessions: Arc<RwLock<HashMap<String, mpsc::UnboundedSender<ServerMessage>>>>,
+    pub sessions: Arc<RwLock<HashMap<String, AgentSession>>>,
     pub pending: Arc<Mutex<HashMap<String, oneshot::Sender<AgentReply>>>>,
     pub public_url: String,
     pub command_timeout: Duration,
     pub enroll_token_ttl: Duration,
+}
+
+#[derive(Clone)]
+pub struct AgentSession {
+    pub connection_id: String,
+    pub tx: mpsc::UnboundedSender<ServerMessage>,
 }
 
 pub enum AgentReply {
@@ -110,7 +119,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
 
     info!(bind = %daemon.bind, data_dir = %daemon.data_dir.display(), pid_file = %daemon.pid_file.display(), state_file = %daemon.state_file.display(), "starting control-plane server");
     let listener = TcpListener::bind(daemon.bind).await?;
-    let mut server = tokio::spawn(async move {
+    let server = tokio::spawn(async move {
         axum::serve(listener, app)
             .await
             .context("control-plane server exited unexpectedly")
