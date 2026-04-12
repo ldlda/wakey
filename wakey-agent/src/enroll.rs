@@ -1,10 +1,15 @@
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
-use crate::config::{AgentConfig, save_config};
+use crate::config::{AgentConfig, save_config_with_backup};
+
+pub struct EnrollOutcome {
+    pub config: AgentConfig,
+    pub backup_path: Option<PathBuf>,
+}
 
 #[derive(Debug, Serialize)]
 struct EnrollRequest<'a> {
@@ -22,7 +27,7 @@ pub async fn enroll(
     server_url: &str,
     enroll_token: &str,
     config_path: &Path,
-) -> Result<AgentConfig> {
+) -> Result<EnrollOutcome> {
     let server_url = normalize_server_url(server_url);
     let endpoint = format!("{server_url}/api/v1/agents/enroll");
     info!(endpoint = %endpoint, config_path = %config_path.display(), "starting agent enrollment");
@@ -56,9 +61,12 @@ pub async fn enroll(
         reconnect_base_ms: 1_000,
         reconnect_max_ms: 30_000,
     };
-    save_config(config_path, &config)?;
+    let backup_path = save_config_with_backup(config_path, &config)?;
     info!(agent_id = %config.agent_id, config_path = %config_path.display(), "agent enrollment succeeded and config was written");
-    Ok(config)
+    Ok(EnrollOutcome {
+        config,
+        backup_path,
+    })
 }
 
 pub fn normalize_server_url(server_url: &str) -> String {
@@ -131,13 +139,15 @@ mod tests {
         ));
         let path = dir.join("config.toml");
 
-        let config = enroll(&server_url, "enroll-abc", &path)
+        let outcome = enroll(&server_url, "enroll-abc", &path)
             .await
             .expect("enroll should succeed");
+        let config = outcome.config;
 
         assert_eq!(config.agent_id, "agent-123");
         assert_eq!(config.agent_token, "token-xyz");
         assert_eq!(config.server_url, "https://control.example.com");
+        assert!(outcome.backup_path.is_none());
 
         let persisted = crate::config::load_config(&path).expect("load persisted config");
         assert_eq!(persisted, config);

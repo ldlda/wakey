@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/wakey-agent/config.toml";
 
@@ -44,12 +44,53 @@ pub fn load_config(path: &Path) -> Result<AgentConfig> {
 }
 
 pub fn save_config(path: &Path, config: &AgentConfig) -> Result<()> {
+    let content = toml::to_string_pretty(config).context("failed to serialize agent config")?;
+    write_config_atomically(path, &content)
+}
+
+pub fn save_config_with_backup(path: &Path, config: &AgentConfig) -> Result<Option<PathBuf>> {
+    let backup = if path.exists() {
+        Some(snapshot_existing_config(path)?)
+    } else {
+        None
+    };
+    save_config(path, config)?;
+    Ok(backup)
+}
+
+pub fn restore_backup(path: &Path, backup_path: &Path) -> Result<()> {
+    let content = std::fs::read_to_string(backup_path)
+        .with_context(|| format!("failed to read config backup {}", backup_path.display()))?;
+    write_config_atomically(path, &content)
+}
+
+fn snapshot_existing_config(path: &Path) -> Result<PathBuf> {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("config.toml");
+    let backup_name = format!("{file_name}.bak.{ts}");
+    let backup_path = path.with_file_name(backup_name);
+    std::fs::copy(path, &backup_path).with_context(|| {
+        format!(
+            "failed to create config backup {} from {}",
+            backup_path.display(),
+            path.display()
+        )
+    })?;
+    Ok(backup_path)
+}
+
+fn write_config_atomically(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create config dir {}", parent.display()))?;
     }
 
-    let content = toml::to_string_pretty(config).context("failed to serialize agent config")?;
     let tmp = path.with_extension("toml.tmp");
     std::fs::write(&tmp, content)
         .with_context(|| format!("failed to write temp config {}", tmp.display()))?;

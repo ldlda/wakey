@@ -23,15 +23,41 @@ async fn main() -> Result<()> {
         }
         Command::Enroll(args) => {
             ::tracing::info!(server_url = %args.server_url, config = %args.config.display(), "wakey-agent command: enroll");
-            let config = enroll::enroll(&args.server_url, &args.enroll_token, &args.config).await?;
-            println!("agent_id={}", config.agent_id);
+            let outcome =
+                enroll::enroll(&args.server_url, &args.enroll_token, &args.config).await?;
+            println!("agent_id={}", outcome.config.agent_id);
             println!("config={}", args.config.display());
             println!("config_write=updated");
+            if let Some(backup_path) = &outcome.backup_path {
+                println!("config_backup={}", backup_path.display());
+            }
             if args.reload_running {
                 match serve::reload_daemon(&args.pid_file) {
                     Ok(()) => println!("reload=signaled pid_file={}", args.pid_file.display()),
                     Err(err) => {
-                        ::tracing::warn!(error = %err, pid_file = %args.pid_file.display(), "enroll completed but daemon reload failed")
+                        ::tracing::warn!(error = %err, pid_file = %args.pid_file.display(), "enroll completed but daemon reload failed");
+                        if let Some(backup_path) = &outcome.backup_path {
+                            match config::restore_backup(&args.config, backup_path) {
+                                Ok(()) => {
+                                    println!("rollback=restored backup={}", backup_path.display());
+                                    anyhow::bail!(
+                                        "reload failed after enroll; restored previous config from {}",
+                                        backup_path.display()
+                                    );
+                                }
+                                Err(restore_err) => {
+                                    anyhow::bail!(
+                                        "reload failed after enroll and rollback failed: reload_error={}, rollback_error={}",
+                                        err,
+                                        restore_err
+                                    );
+                                }
+                            }
+                        } else {
+                            anyhow::bail!(
+                                "reload failed after enroll; no previous config backup was available"
+                            );
+                        }
                     }
                 }
             } else {
