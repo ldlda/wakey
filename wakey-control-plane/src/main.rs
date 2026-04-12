@@ -32,7 +32,10 @@ async fn main() -> Result<()> {
         Command::InitConfig(args) => {
             if let Some(path) = config::write_init_config(&args)? {
                 println!("config={}", path.display());
-                println!("next=wakey-control-plane serve --config-file {}", path.display());
+                println!(
+                    "next=wakey-control-plane serve --config-file {}",
+                    path.display()
+                );
             }
             Ok(())
         }

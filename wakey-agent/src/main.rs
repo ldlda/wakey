@@ -35,9 +35,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Command::InitConfig(args) => {
-            init_config(args)?
-        }
+        Command::InitConfig(args) => init_config(args)?,
         Command::Reload(args) => {
             ::tracing::info!(pid_file = %args.pid_file.display(), "wakey-agent command: reload");
             serve::reload_daemon(&args.pid_file)?
@@ -52,13 +50,14 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
         anyhow::bail!("--stdout cannot be used with --config");
     }
 
-    if let Some(config) = &args.config {
-        if config.exists() && !args.force {
-            anyhow::bail!(
-                "config {} already exists; re-run with --force to overwrite",
-                config.display()
-            );
-        }
+    if let Some(config) = &args.config
+        && config.exists()
+        && !args.force
+    {
+        anyhow::bail!(
+            "config {} already exists; re-run with --force to overwrite",
+            config.display()
+        );
     }
 
     let cfg = config::AgentConfig {

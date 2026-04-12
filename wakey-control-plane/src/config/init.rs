@@ -11,13 +11,14 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         anyhow::bail!("--stdout cannot be used with --config-file");
     }
 
-    if let Some(config_file) = &args.config_file {
-        if config_file.exists() && !args.force {
-            anyhow::bail!(
-                "config {} already exists; re-run with --force to overwrite",
-                config_file.display()
-            );
-        }
+    if let Some(config_file) = &args.config_file
+        && config_file.exists()
+        && !args.force
+    {
+        anyhow::bail!(
+            "config {} already exists; re-run with --force to overwrite",
+            config_file.display()
+        );
     }
 
     let bind = args.bind.unwrap_or_else(|| {

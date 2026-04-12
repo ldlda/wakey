@@ -190,7 +190,9 @@ fn resolve_admin_public_url(
 ) -> Result<Option<String>> {
     match (mode.live, mode.offline) {
         (true, false) => config_public_url
-            .ok_or_else(|| anyhow::anyhow!("--live requires --public-url or a configured public_url"))
+            .ok_or_else(|| {
+                anyhow::anyhow!("--live requires --public-url or a configured public_url")
+            })
             .map(Some),
         (false, true) => Ok(None),
         _ => Ok(config_public_url),
