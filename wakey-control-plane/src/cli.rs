@@ -73,6 +73,9 @@ pub struct ServeArgs {
     #[arg(long)]
     pub pid_file: Option<PathBuf>,
 
+    #[arg(long)]
+    pub ui_dist_dir: Option<PathBuf>,
+
     #[arg(long, visible_alias="config", default_value = DEFAULT_CONFIG_FILE)]
     pub config_file: PathBuf,
 
@@ -102,6 +105,9 @@ pub struct InitConfigArgs {
 
     #[arg(long)]
     pub pid_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub ui_dist_dir: Option<PathBuf>,
 
     #[arg(long)]
     pub command_timeout_ms: Option<u64>,

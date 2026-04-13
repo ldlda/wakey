@@ -49,6 +49,11 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         .unwrap_or_else(|| PathBuf::from("wakey-control-plane.pid"));
     let pid_file = resolve_path(&data_dir, pid_file_raw);
 
+    let ui_dist_dir = args
+        .ui_dist_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("ui/dist"));
+
     let body = WritableConfig {
         data_dir,
         bind: bind.to_string(),
@@ -57,6 +62,7 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         command_timeout_ms: args.command_timeout_ms.unwrap_or(30_000).max(1),
         enroll_token_ttl_seconds: args.enroll_token_ttl_seconds.unwrap_or(86_400).max(1),
         pid_file,
+        ui_dist_dir,
         bootstrap_enroll_tokens: args.bootstrap_enroll_tokens.clone(),
         telemetry: WritableTelemetry {
             otlp_endpoint: args.telemetry_otlp_endpoint.clone(),
@@ -98,6 +104,7 @@ pub fn bootstrap_config_if_missing(args: &ServeArgs) -> Result<bool> {
         public_url: args.public_url.clone(),
         state_file: args.state_file.clone(),
         pid_file: args.pid_file.clone(),
+        ui_dist_dir: args.ui_dist_dir.clone(),
         command_timeout_ms: args.command_timeout_ms,
         enroll_token_ttl_seconds: args.enroll_token_ttl_seconds,
         bootstrap_enroll_tokens: args.bootstrap_enroll_tokens.clone(),

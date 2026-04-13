@@ -57,14 +57,14 @@ pub enum AgentReply {
     Error(ErrorPayload),
 }
 
-fn public_api_routes() -> Router<AppState> {
+fn public_api_routes(ui_dist_dir: std::path::PathBuf) -> Router<AppState> {
+    let index_file = ui_dist_dir.join("index.html");
+
     Router::new()
         .route("/ui", get(|| async { Redirect::temporary("/ui/") }))
         .nest_service(
             "/ui/",
-            get_service(
-                ServeDir::new("ui/dist").not_found_service(ServeFile::new("ui/dist/index.html")),
-            ),
+            get_service(ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(index_file))),
         )
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
@@ -131,11 +131,11 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     // - public_api_routes: intended internet-facing agent endpoints
     // - control_api_routes: intended admin-only endpoints behind Access
     let app = Router::new()
-        .merge(public_api_routes())
+        .merge(public_api_routes(daemon.ui_dist_dir.clone()))
         .merge(control_api_routes())
         .with_state(app_state.clone());
 
-    info!(bind = %daemon.bind, data_dir = %daemon.data_dir.display(), pid_file = %daemon.pid_file.display(), state_file = %daemon.state_file.display(), "starting control-plane server");
+    info!(bind = %daemon.bind, data_dir = %daemon.data_dir.display(), pid_file = %daemon.pid_file.display(), state_file = %daemon.state_file.display(), ui_dist_dir = %daemon.ui_dist_dir.display(), "starting control-plane server");
     let listener = TcpListener::bind(daemon.bind).await?;
     let server = tokio::spawn(async move {
         axum::serve(listener, app)

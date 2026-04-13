@@ -1,0 +1,17 @@
+[Unit]
+Description=Wakey Control Plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wakey
+Group=wakey
+WorkingDirectory=/opt/wakey
+ExecStart=/opt/wakey/bin/wakey-control-plane serve --config-file /etc/wakey-control-plane/config.toml
+Restart=on-failure
+RestartSec=2
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=multi-user.target

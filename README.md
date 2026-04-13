@@ -120,6 +120,7 @@ bind = "0.0.0.0:8080"
 public_url = "https://cp.example.com"
 state_file = "state.db"
 pid_file = "wakey-control-plane.pid"
+ui_dist_dir = "/opt/wakey/ui/dist"
 command_timeout_ms = 30000
 enroll_token_ttl_seconds = 86400
 
@@ -229,7 +230,9 @@ This keeps edge policy and app routing aligned as features grow.
 
 ## UI (Initial Shell)
 
-Control-plane serves the built Operator UI at `/ui/` from `ui/dist`.
+Control-plane serves the built Operator UI at `/ui/` from `ui_dist_dir`
+(defaults to `ui/dist`). Configure this in
+`/etc/wakey-control-plane/config.toml` or pass `--ui-dist-dir` to `serve`.
 
 Build UI assets before starting control-plane:
 
@@ -240,6 +243,40 @@ pnpm build
 ```
 
 Then start control-plane and open `/ui/` on the same host/port.
+
+## VPS Deploy (Manual Updates)
+
+Suggested layout on VPS:
+
+- `/opt/wakey/bin/wakey-control-plane`
+- `/opt/wakey/ui/dist/*`
+- `/etc/wakey-control-plane/config.toml` with `ui_dist_dir = "/opt/wakey/ui/dist"`
+
+Use the provided unit template:
+
+- `deploy/systemd/wakey-cc.service`
+
+Install on VPS:
+
+```sh
+sudo install -m 0644 deploy/systemd/wakey-cc.service /etc/systemd/system/wakey-cc.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now wakey-cc.service
+```
+
+Manual update helper for VPS:
+
+```sh
+chmod +x scripts/update_wakey_cc.sh
+cd /opt/wakey
+WAKEY_CC_VERSION=v0.1.0 WAKEY_CC_TARGET=x86_64-unknown-linux-gnu \
+  sudo -E ./scripts/update_wakey_cc.sh
+```
+
+The update tarball is expected to contain:
+
+- `bin/wakey-control-plane`
+- `ui/dist/index.html` (plus `ui/dist/assets/*`)
 
 ## CLI
 

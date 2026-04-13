@@ -73,6 +73,12 @@ impl DaemonConfig {
             .unwrap_or_else(|| PathBuf::from("wakey-control-plane.pid"));
         let pid_file = resolve_path(&data_dir, pid_file_raw);
 
+        let ui_dist_dir = args
+            .ui_dist_dir
+            .clone()
+            .or(file.ui_dist_dir)
+            .unwrap_or_else(|| PathBuf::from("ui/dist"));
+
         let bootstrap_enroll_tokens = if args.bootstrap_enroll_tokens.is_empty() {
             file.bootstrap_enroll_tokens.unwrap_or_default()
         } else {
@@ -89,6 +95,7 @@ impl DaemonConfig {
             command_timeout,
             enroll_token_ttl,
             pid_file,
+            ui_dist_dir,
             bootstrap_enroll_tokens,
             telemetry,
         })

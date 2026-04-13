@@ -44,8 +44,27 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
   - `./scripts/dev_push.ps1 -Pass <password> [-HostName <ip>] [-RemotePath </root/.bin/wakey>] [-Restart] [-Quiet]`
   - Uploads to `<RemotePath>.tmp` then atomically moves into place; `-Restart` restarts the service; `-Quiet` silences MOTD.
 - `package_rootfs.ps1` — Produces `dist/wakey-rootfs-<version>-<target>.tgz` with `/root/.bin/wakey` and `/etc/init.d/*`.
+- `update_wakey_cc.sh` — Linux VPS updater for control-plane bundles; extracts into the selected directory (default: current directory) and restarts `wakey-cc.service`.
+- `package_wakey_cc_bundle.sh` — Produces `dist/wakey-cc-<version>-<target>.tgz` with `bin/wakey-control-plane`, `ui/dist/*`, updater script, and systemd template.
 - `publish.ps1` — Optional version bump + build + tag (and `cargo publish` only if you pass `-Publish`).
 - `test_remote.ps1` — Build ARM Linux test binaries locally, upload them to the router, and run them there.
+
+## VPS updater (control-plane)
+
+```sh
+chmod +x ./scripts/update_wakey_cc.sh
+cd /opt/wakey
+WAKEY_CC_VERSION=v0.1.0 WAKEY_CC_TARGET=x86_64-unknown-linux-gnu \
+  sudo -E ./scripts/update_wakey_cc.sh
+```
+
+Expected tarball layout:
+
+- `bin/wakey-control-plane`
+- `ui/dist/index.html`
+- `ui/dist/assets/*`
+- `scripts/update_wakey_cc.sh`
+- `deploy/systemd/wakey-cc.service`
 
 ## Remote test runner
 

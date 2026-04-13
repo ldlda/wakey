@@ -3106,7 +3106,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "macaddr",
  "serde",
@@ -3117,7 +3117,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-linux"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "futures",
