@@ -32,11 +32,6 @@ pub struct IssueEnrollTokenQuery {
     pub ttl_seconds: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ListEnrollTokenQuery {
-    pub include_expired: Option<bool>,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnrollTokenStatus {
     pub enroll_token: String,
@@ -200,10 +195,8 @@ pub async fn issue_enroll_token(
 
 pub async fn list_enroll_tokens(
     State(state): State<AppState>,
-    Query(query): Query<ListEnrollTokenQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let include_expired = query.include_expired.unwrap_or(false);
-    match state.store.list_enroll_tokens(include_expired).await {
+    match state.store.list_enroll_tokens().await {
         Ok(tokens) => {
             if let Err(err) = state
                 .store
@@ -217,7 +210,6 @@ pub async fn list_enroll_tokens(
                     latency_ms: None,
                     message: "listed enroll tokens".into(),
                     metadata: serde_json::json!({
-                        "include_expired": include_expired,
                         "count": tokens.len(),
                     }),
                 })

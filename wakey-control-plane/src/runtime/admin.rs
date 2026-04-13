@@ -74,10 +74,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
 pub async fn list_enroll_tokens(args: ListEnrollTokensArgs) -> Result<()> {
     let settings = config::resolve_list_enroll_token_settings(&args)?;
     if let Some(base) = settings.public_url.as_deref() {
-        let url = format!(
-            "{}/api/v1/control/enroll-tokens?include_expired={}",
-            base, args.include_expired
-        );
+        let url = format!("{}/api/v1/control/enroll-tokens", base);
         let response = reqwest::get(&url)
             .await
             .with_context(|| format!("failed to call {url}"))?;
@@ -118,7 +115,7 @@ pub async fn list_enroll_tokens(args: ListEnrollTokensArgs) -> Result<()> {
                     settings.state_file.display()
                 )
             })?;
-    let tokens = store.list_enroll_tokens(args.include_expired).await?;
+    let tokens = store.list_enroll_tokens().await?;
     if args.json {
         println!(
             "{}",

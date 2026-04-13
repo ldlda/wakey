@@ -100,7 +100,7 @@ wakey-control-plane state-stats
 List/revoke enroll tokens from CLI:
 
 ```sh
-wakey-control-plane list-enroll-tokens --include-expired
+wakey-control-plane list-enroll-tokens
 wakey-control-plane revoke-enroll-token --token enr-...
 wakey-control-plane revoke-agent --agent-id agent-...
 ```
@@ -108,7 +108,7 @@ wakey-control-plane revoke-agent --agent-id agent-...
 Machine-readable output is available:
 
 ```sh
-wakey-control-plane list-enroll-tokens --include-expired --json
+wakey-control-plane list-enroll-tokens --json
 wakey-control-plane state-stats --json
 ```
 
@@ -189,7 +189,7 @@ During daemon control/state operations:
 Control-plane admin API includes token management endpoints:
 
 - `POST /api/v1/control/enroll-token?ttl_seconds=<n>`
-- `GET /api/v1/control/enroll-tokens?include_expired=true|false`
+- `GET /api/v1/control/enroll-tokens`
 - `DELETE /api/v1/control/enroll-tokens/{token}`
 - `GET /api/v1/control/audit/events?agent_id=<id>&event_type=<type>&limit=<n>`
 - `GET /api/v1/control/alerts?lookback_seconds=900`

@@ -161,9 +161,6 @@ pub struct ListEnrollTokensArgs {
     pub public_url: Option<String>,
 
     #[arg(long)]
-    pub include_expired: bool,
-
-    #[arg(long)]
     pub json: bool,
 
     #[command(flatten)]

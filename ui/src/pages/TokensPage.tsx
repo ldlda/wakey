@@ -10,13 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 function formatUnix(unix: number): string {
   return new Date(unix * 1000).toLocaleString();
@@ -24,7 +17,6 @@ function formatUnix(unix: number): string {
 
 export function TokensPage() {
   const [tokens, setTokens] = useState<EnrollTokenStatus[]>([]);
-  const [includeExpired, setIncludeExpired] = useState(false);
   const [ttlSeconds, setTtlSeconds] = useState("86400");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -39,7 +31,7 @@ export function TokensPage() {
     setBusy(true);
     setError("");
     try {
-      const next = await fetchEnrollTokens(includeExpired);
+      const next = await fetchEnrollTokens();
       setTokens(next);
     } catch (err) {
       setError(String(err));
@@ -85,7 +77,7 @@ export function TokensPage() {
 
   useEffect(() => {
     void load();
-  }, [includeExpired]);
+  }, []);
 
   return (
     <section className="grid gap-3 xl:grid-cols-2">
@@ -102,21 +94,6 @@ export function TokensPage() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          <label className="grid gap-1 text-sm text-muted-foreground">
-            <span>Include expired</span>
-            <Select
-              value={includeExpired ? "yes" : "no"}
-              onValueChange={(value) => setIncludeExpired(value === "yes")}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Choose option" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="no">No</SelectItem>
-                <SelectItem value="yes">Yes</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
           <p className="text-sm text-muted-foreground">
             {activeCount} active, {tokens.length} shown
           </p>

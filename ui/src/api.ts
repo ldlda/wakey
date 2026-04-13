@@ -111,12 +111,8 @@ export function fetchAudit(limit = 50): Promise<AuditEvent[]> {
   return request<AuditEvent[]>(`/api/v1/control/audit/events?limit=${limit}`);
 }
 
-export function fetchEnrollTokens(
-  includeExpired = false,
-): Promise<EnrollTokenStatus[]> {
-  return request<EnrollTokenStatus[]>(
-    `/api/v1/control/enroll-tokens?include_expired=${includeExpired ? "true" : "false"}`,
-  );
+export function fetchEnrollTokens(): Promise<EnrollTokenStatus[]> {
+  return request<EnrollTokenStatus[]>(`/api/v1/control/enroll-tokens`);
 }
 
 export function issueEnrollToken(

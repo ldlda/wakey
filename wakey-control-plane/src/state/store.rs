@@ -152,7 +152,7 @@ impl Store {
         })
     }
 
-    pub async fn list_enroll_tokens(&self, include_expired: bool) -> Result<Vec<EnrollTokenInfo>> {
+    pub async fn list_enroll_tokens(&self) -> Result<Vec<EnrollTokenInfo>> {
         let now = now_unix();
         let mut out = Vec::new();
         for item in self.enroll_tokens.iter() {
@@ -160,9 +160,6 @@ impl Store {
             let expires_at_unix =
                 decode_expiry(value.as_ref()).context("failed decoding token expiry")?;
             let expired = expires_at_unix <= now;
-            if !include_expired && expired {
-                continue;
-            }
             let enroll_token =
                 String::from_utf8(token.to_vec()).context("invalid utf-8 enroll token in db")?;
             out.push(EnrollTokenInfo {
@@ -836,9 +833,11 @@ mod tests {
         assert!(cleared);
 
         let listed = store.list_agents_with_nicknames().await;
-        assert!(listed
-            .iter()
-            .any(|(id, name)| id == &issued.agent_id && name.is_none()));
+        assert!(
+            listed
+                .iter()
+                .any(|(id, name)| id == &issued.agent_id && name.is_none())
+        );
 
         cleanup_dir(&dir);
     }
