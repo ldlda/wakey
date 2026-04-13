@@ -2,8 +2,7 @@ use anyhow::Result;
 use tracing::{debug, info, instrument};
 
 use crate::protocol::{
-    AgentCommand, CommandResult, DevsRequest, InventoryRequest, LeasesRequest, StatusRequest,
-    WakeRequest,
+    AgentCommand, CommandResult, DevsRequest, InventoryRequest, LeasesRequest, WakeRequest,
 };
 
 #[instrument(skip_all)]
@@ -11,28 +10,11 @@ pub async fn dispatch_command(command: AgentCommand) -> Result<CommandResult> {
     let kind = command_kind(&command);
     info!(command = %kind, "dispatching command into local wakey services");
     match command {
-        AgentCommand::Status(req) => dispatch_status(req).await,
         AgentCommand::Leases(req) => dispatch_leases(req).await,
         AgentCommand::Devs(req) => dispatch_devs(req).await,
         AgentCommand::Inventory(req) => dispatch_inventory(req).await,
         AgentCommand::Wake(req) => dispatch_wake(req).await,
     }
-}
-
-async fn dispatch_status(req: StatusRequest) -> Result<CommandResult> {
-    let query = req.into_device_query();
-    let status = if query.name.is_some()
-        && query.filter.ips.is_empty()
-        && query.filter.devs.is_empty()
-        && query.filter.nuds.is_empty()
-        && query.filter.macs.is_empty()
-    {
-        wakey::get_status_for_input(query.name.clone().unwrap_or_default()).await?
-    } else {
-        wakey::get_status(query).await?
-    };
-    debug!(devices = status.devices.len(), "dispatched status command");
-    Ok(CommandResult::Status(status))
 }
 
 async fn dispatch_leases(req: LeasesRequest) -> Result<CommandResult> {
@@ -90,7 +72,6 @@ async fn dispatch_wake(req: WakeRequest) -> Result<CommandResult> {
 
 fn command_kind(command: &AgentCommand) -> &'static str {
     match command {
-        AgentCommand::Status(_) => "status",
         AgentCommand::Leases(_) => "leases",
         AgentCommand::Devs(_) => "devs",
         AgentCommand::Inventory(_) => "inventory",

@@ -5,31 +5,42 @@ use wakey_core::{DeviceInventory, DhcpLeaseWithState, InterfaceSummary, WakeResu
 pub fn render_status_table(status: &DeviceInventory) -> Table {
     let mut table = base_table();
     table.set_header(vec!["Name", "IP", "MAC", "Presence", "Interfaces"]);
-    for row in &status.devices {
-        table.add_row(vec![
-            Cell::new(
-                row.names
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "(unnamed)".into()),
-            ),
-            Cell::new(
-                row.ips
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
-            Cell::new(
-                row.macs
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
-            Cell::new(format!("{:?}", row.presence)),
-            Cell::new(row.interfaces.join(", ")),
-        ]);
+    for device in &status.devices {
+        let name = device
+            .names
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "(unnamed)".into());
+        let ips: Vec<String> = if device.ips.is_empty() {
+            vec![String::new()]
+        } else {
+            device.ips.iter().map(ToString::to_string).collect()
+        };
+        let macs: Vec<String> = if device.macs.is_empty() {
+            vec![String::new()]
+        } else {
+            device.macs.iter().map(ToString::to_string).collect()
+        };
+        let interfaces: Vec<String> = if device.interfaces.is_empty() {
+            vec![String::new()]
+        } else {
+            device.interfaces.clone()
+        };
+
+        let row_count = ips.len().max(macs.len()).max(interfaces.len());
+        for idx in 0..row_count {
+            table.add_row(vec![
+                Cell::new(if idx == 0 { name.as_str() } else { "" }),
+                Cell::new(ips.get(idx).cloned().unwrap_or_default()),
+                Cell::new(macs.get(idx).cloned().unwrap_or_default()),
+                Cell::new(if idx == 0 {
+                    format!("{:?}", device.presence)
+                } else {
+                    String::new()
+                }),
+                Cell::new(interfaces.get(idx).cloned().unwrap_or_default()),
+            ]);
+        }
     }
     table
 }

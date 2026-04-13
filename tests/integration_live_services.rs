@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use wakey::{broadcast_wake_targets, get_interface_summaries, get_status, get_status_for_input};
+use wakey::{broadcast_wake_targets, get_interface_summaries, inventory, resolve_query};
 use wakey_core::{DeviceFilters, DeviceQuery};
 
 #[tokio::test]
@@ -17,22 +17,22 @@ async fn interfaces_real_router_prints_interface_summaries() -> anyhow::Result<(
 
 #[tokio::test]
 #[ignore = "runs against live router data; use on-device or via scripts/test_remote.ps1"]
-async fn status_real_router_default_query_returns_rows_or_empty_cleanly() -> anyhow::Result<()> {
-    let status = get_status(DeviceQuery::default()).await?;
-    println!("{}", serde_json::to_string_pretty(&status)?);
+async fn inventory_real_router_default_query_returns_rows_or_empty_cleanly() -> anyhow::Result<()> {
+    let inv = inventory(DeviceQuery::default()).await?;
+    println!("{}", serde_json::to_string_pretty(&inv)?);
     Ok(())
 }
 
 #[tokio::test]
 #[ignore = "runs against live router data; use on-device or via scripts/test_remote.ps1"]
-async fn status_real_router_for_interface_filter_succeeds() -> anyhow::Result<()> {
+async fn inventory_real_router_for_interface_filter_succeeds() -> anyhow::Result<()> {
     let interfaces = get_interface_summaries().await?;
     let first = interfaces
         .first()
         .map(|iface| iface.ifname.clone())
         .expect("expected at least one interface");
 
-    let status = get_status(DeviceQuery {
+    let inv = inventory(DeviceQuery {
         name: None,
         filter: DeviceFilters {
             devs: vec![first.clone()],
@@ -42,22 +42,22 @@ async fn status_real_router_for_interface_filter_succeeds() -> anyhow::Result<()
     .await?;
 
     println!("filtered dev: {first}");
-    println!("{}", serde_json::to_string_pretty(&status)?);
+    println!("{}", serde_json::to_string_pretty(&inv)?);
     Ok(())
 }
 
 #[tokio::test]
 #[ignore = "runs against live router data; use on-device or via scripts/test_remote.ps1"]
-async fn status_real_router_string_input_for_interface_succeeds() -> anyhow::Result<()> {
+async fn inventory_real_router_string_input_for_interface_succeeds() -> anyhow::Result<()> {
     let interfaces = get_interface_summaries().await?;
     let first = interfaces
         .first()
         .map(|iface| iface.ifname.clone())
         .expect("expected at least one interface");
 
-    let status = get_status_for_input(first.clone()).await?;
+    let inv = inventory(resolve_query(first.clone()).await?).await?;
     println!("selector: {first}");
-    println!("{}", serde_json::to_string_pretty(&status)?);
+    println!("{}", serde_json::to_string_pretty(&inv)?);
     Ok(())
 }
 

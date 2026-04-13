@@ -24,8 +24,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Show device status rows from neighbor/device data.
-    Status(StatusArgs),
+    /// Show merged device inventory rows.
+    Inventory(InventoryArgs),
     /// Show DHCP leases, optionally enriched with current neighbor state.
     Leases(LeasesArgs),
     /// Send Wake-on-LAN packets from a query or explicit MAC/IP pair.
@@ -70,12 +70,12 @@ pub struct WakeArgs {
 
 #[derive(Args)]
 #[command(after_long_help = "Examples:
-  wakey status bedroom-pc
-  wakey status --mac aa:bb:cc:dd:ee:ff
-  wakey status --dev br-lan --nud reachable
+    wakey inventory bedroom-pc
+    wakey inventory --mac aa:bb:cc:dd:ee:ff
+    wakey inventory --dev br-lan --nud reachable
 
 If only the positional query is provided, it is treated as free-form input and resolved through the smart selector path.")]
-pub struct StatusArgs {
+pub struct InventoryArgs {
     /// Free-form device query.
     pub query: Option<String>,
     /// Explicit name/text filter.
@@ -138,21 +138,12 @@ pub async fn run(cli: Cli) -> Result<()> {
     init_tracing(cli.verbose);
 
     match cli.command {
-        Command::Status(args) => {
+        Command::Inventory(args) => {
             let as_json = args.json;
-            let query = status_args_to_query(args);
+            let query = inventory_args_to_query(args);
             let selected_name = query.name.clone();
-            debug!(?query, json = as_json, "dispatching status command");
-            let status = if query.name.is_some()
-                && query.filter.ips.is_empty()
-                && query.filter.devs.is_empty()
-                && query.filter.nuds.is_empty()
-                && query.filter.macs.is_empty()
-            {
-                wakey::get_status_for_input(query.name.clone().unwrap_or_default()).await?
-            } else {
-                wakey::get_status(query).await?
-            };
+            debug!(?query, json = as_json, "dispatching inventory command");
+            let status = wakey::inventory(query).await?;
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
@@ -216,7 +207,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-fn status_args_to_query(args: StatusArgs) -> DeviceQuery {
+fn inventory_args_to_query(args: InventoryArgs) -> DeviceQuery {
     if let Some(query) = args.query.as_ref()
         && args.name.is_none()
         && args.ips.is_empty()

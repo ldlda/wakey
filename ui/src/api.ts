@@ -39,7 +39,7 @@ export type AuditEvent = {
   metadata: Record<string, unknown>;
 };
 
-export type CommandKind = "status" | "devs" | "leases" | "inventory" | "wake";
+export type CommandKind = "devs" | "leases" | "inventory" | "wake";
 
 export type EnrollTokenStatus = {
   enroll_token: string;
@@ -126,19 +126,6 @@ export function runCommand(agentId: string, kind: CommandKind, query: string): P
 function buildCommandPayload(kind: CommandKind, query: string): { command: Record<string, unknown> } {
   if (kind === "devs") {
     return { command: { kind: "devs", dev: null, up_only: false } };
-  }
-  if (kind === "status") {
-    return {
-      command: {
-        kind: "status",
-        query: query || null,
-        name: null,
-        ips: [],
-        devs: [],
-        nuds: [],
-        macs: [],
-      },
-    };
   }
   if (kind === "leases") {
     return { command: { kind: "leases", include_state: true } };

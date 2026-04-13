@@ -67,48 +67,6 @@ pub struct ErrorPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StatusRequest {
-    pub query: Option<String>,
-    pub name: Option<String>,
-    #[serde(default)]
-    pub ips: Vec<IpAddr>,
-    #[serde(default)]
-    pub devs: Vec<String>,
-    #[serde(default)]
-    pub nuds: Vec<wakey_core::NeighborState>,
-    #[serde(default)]
-    #[serde(with = "mac::vec_mac")]
-    pub macs: Vec<MacAddr>,
-}
-
-impl StatusRequest {
-    pub fn into_device_query(self) -> DeviceQuery {
-        if let Some(query) = self.query.as_ref()
-            && self.name.is_none()
-            && self.ips.is_empty()
-            && self.devs.is_empty()
-            && self.nuds.is_empty()
-            && self.macs.is_empty()
-        {
-            return DeviceQuery {
-                name: Some(query.clone()),
-                ..Default::default()
-            };
-        }
-
-        DeviceQuery {
-            name: self.name.or(self.query),
-            filter: DeviceFilters {
-                ips: self.ips,
-                devs: self.devs,
-                nuds: self.nuds,
-                macs: self.macs,
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LeasesRequest {
     #[serde(default)]
     pub include_state: bool,
@@ -138,15 +96,41 @@ pub struct InventoryRequest {
 
 impl InventoryRequest {
     pub fn into_device_query(self) -> DeviceQuery {
-        StatusRequest {
-            query: self.query,
-            name: self.name,
-            ips: self.ips,
-            devs: self.devs,
-            nuds: self.nuds,
-            macs: self.macs,
-        }
-        .into_device_query()
+        into_device_query(
+            self.query, self.name, self.ips, self.devs, self.nuds, self.macs,
+        )
+    }
+}
+
+fn into_device_query(
+    query: Option<String>,
+    name: Option<String>,
+    ips: Vec<IpAddr>,
+    devs: Vec<String>,
+    nuds: Vec<wakey_core::NeighborState>,
+    macs: Vec<MacAddr>,
+) -> DeviceQuery {
+    if let Some(q) = query.as_ref()
+        && name.is_none()
+        && ips.is_empty()
+        && devs.is_empty()
+        && nuds.is_empty()
+        && macs.is_empty()
+    {
+        return DeviceQuery {
+            name: Some(q.clone()),
+            ..Default::default()
+        };
+    }
+
+    DeviceQuery {
+        name: name.or(query),
+        filter: DeviceFilters {
+            ips,
+            devs,
+            nuds,
+            macs,
+        },
     }
 }
 
@@ -163,7 +147,6 @@ pub struct WakeRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentCommand {
-    Status(StatusRequest),
     Leases(LeasesRequest),
     Devs(DevsRequest),
     Inventory(InventoryRequest),
@@ -173,7 +156,6 @@ pub enum AgentCommand {
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CommandResult {
-    Status(DeviceInventory),
     Leases { rows: Vec<DhcpLeaseWithState> },
     Devs { rows: Vec<InterfaceSummary> },
     Inventory(DeviceInventory),

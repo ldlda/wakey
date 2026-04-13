@@ -264,7 +264,6 @@ pub async fn run_command(
 
 fn command_kind(command: &AgentCommand) -> &'static str {
     match command {
-        AgentCommand::Status(_) => "status",
         AgentCommand::Leases(_) => "leases",
         AgentCommand::Devs(_) => "devs",
         AgentCommand::Inventory(_) => "inventory",

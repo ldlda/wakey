@@ -50,7 +50,6 @@ export function CommandsPage({ agents, selectedAgentId, onSelectAgent, onAfterCo
           Command
           <select value={kind} onChange={(e) => setKind(e.target.value as CommandKind)}>
             <option value="devs">devs</option>
-            <option value="status">status</option>
             <option value="leases">leases</option>
             <option value="inventory">inventory</option>
             <option value="wake">wake</option>
