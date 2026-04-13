@@ -139,6 +139,15 @@
 
   .device-row .device-cell[data-label="Pick"] {
     grid-area: select;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding-top: 0.15rem;
+  }
+
+  .device-row .device-cell[data-label="Pick"]::before {
+    display: none;
+    content: "";
   }
 
   .device-row .device-cell[data-label="Presence"] {

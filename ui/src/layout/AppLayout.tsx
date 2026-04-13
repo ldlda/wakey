@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { Moon, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -50,11 +51,21 @@ export function AppLayout() {
           type="button"
           variant="outline"
           size="sm"
+          className="fixed right-3 top-3 z-50 size-9 rounded-full p-0 sm:static sm:size-auto sm:rounded-md sm:px-3 sm:py-2"
+          aria-label={theme === "dark" ? "Switch to light" : "Switch to dark"}
+          title={theme === "dark" ? "Switch to light" : "Switch to dark"}
           onClick={() =>
             setTheme((current) => (current === "dark" ? "light" : "dark"))
           }
         >
-          {theme === "dark" ? "Switch to light" : "Switch to dark"}
+          {theme === "dark" ? (
+            <Sun className="size-4" aria-hidden />
+          ) : (
+            <Moon className="size-4" aria-hidden />
+          )}
+          <span className="hidden sm:inline">
+            {theme === "dark" ? "Switch to light" : "Switch to dark"}
+          </span>
         </Button>
       </header>
 
