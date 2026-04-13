@@ -9,6 +9,7 @@ on:
 
 jobs:
   build:
+    # My Machine has arm-musl stuff - or else i have to use cross :(
     runs-on: [self-hosted, linux, fedora, wsl, release]
     steps:
       - name: Checkout
@@ -19,7 +20,8 @@ jobs:
         run: |
           rustc -V
           cargo -V
-          rustup target add armv7-unknown-linux-musleabihf
+          rustup target add armv7-unknown-linux-musleabihf 
+        # x86_64-unknown-linux-gnu86_64-pc-windows-msvc aarch64-unknown-linux-gnu
 
       - name: Cache cargo
         uses: actions/cache@v4

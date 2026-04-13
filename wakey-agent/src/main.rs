@@ -22,9 +22,21 @@ async fn main() -> Result<()> {
             serve::serve(args).await?
         }
         Command::Enroll(args) => {
-            ::tracing::info!(server_url = %args.server_url, config = %args.config.display(), "wakey-agent command: enroll");
+            let resolved_server_url = if let Some(server_url) = args.server_url.as_deref() {
+                server_url.to_string()
+            } else {
+                match config::load_config(&args.config) {
+                    Ok(cfg) => cfg.server_url,
+                    Err(_) => anyhow::bail!(
+                        "missing control-plane URL: pass --server-url or provide server_url in {}",
+                        args.config.display()
+                    ),
+                }
+            };
+
+            ::tracing::info!(server_url = %resolved_server_url, config = %args.config.display(), "wakey-agent command: enroll");
             let outcome =
-                enroll::enroll(&args.server_url, &args.enroll_token, &args.config).await?;
+                enroll::enroll(&resolved_server_url, &args.enroll_token, &args.config).await?;
             println!("agent_id={}", outcome.config.agent_id);
             println!("config={}", args.config.display());
             println!("config_write=updated");

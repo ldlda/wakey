@@ -44,10 +44,16 @@ pub struct ServeArgs {
 #[derive(Args)]
 pub struct EnrollArgs {
     /// Base HTTPS URL of the control plane.
+    ///
+    /// Resolution order:
+    /// 1) `--server-url` flag
+    /// 2) existing `server_url` value in `--config`
+    ///
+    /// If neither source is available, enroll exits with an error.
     #[arg(long)]
-    pub server_url: String,
+    pub server_url: Option<String>,
     /// One-time or short-lived enroll token provided by the control plane.
-    #[arg(long)]
+    #[arg(long, short = 't', visible_alias = "token")]
     pub enroll_token: String,
     /// Path to the agent config file to write (overwritten on successful enroll).
     #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
