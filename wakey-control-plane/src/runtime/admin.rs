@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 
 use crate::api;
 use crate::cli::{
-    IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeEnrollTokenArgs, StateStatsArgs,
+    IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeAgentArgs, RevokeEnrollTokenArgs,
+    StateStatsArgs,
 };
 use crate::config;
 use crate::state;
@@ -171,6 +172,46 @@ pub async fn revoke_enroll_token(args: RevokeEnrollTokenArgs) -> Result<()> {
             })?;
     let removed = store.revoke_enroll_token(&args.token).await?;
     println!("token={} revoked={}", args.token, removed);
+    Ok(())
+}
+
+pub async fn revoke_agent(args: RevokeAgentArgs) -> Result<()> {
+    let settings = config::resolve_revoke_agent_settings(&args)?;
+    if let Some(base) = settings.public_url.as_deref() {
+        let url = format!("{}/api/v1/control/agents/{}", base, args.agent_id);
+        let client = reqwest::Client::new();
+        let response = client
+            .delete(&url)
+            .send()
+            .await
+            .with_context(|| format!("failed to call {url}"))?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable error body>".to_string());
+            anyhow::bail!("live revoke-agent failed with {status}: {body}");
+        }
+        let body: api::RevokeAgentResponse = response
+            .json()
+            .await
+            .context("failed to decode revoke-agent response")?;
+        println!("agent_id={} revoked={}", body.agent_id, body.revoked);
+        return Ok(());
+    }
+
+    let store =
+        state::Store::load_or_init(&settings.state_file, Vec::new(), Duration::from_secs(1))
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to initialize store {}",
+                    settings.state_file.display()
+                )
+            })?;
+    let removed = store.revoke_agent(&args.agent_id).await?;
+    println!("agent_id={} revoked={}", args.agent_id, removed);
     Ok(())
 }
 

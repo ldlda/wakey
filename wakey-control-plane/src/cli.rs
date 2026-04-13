@@ -39,6 +39,8 @@ pub enum Command {
     ListEnrollTokens(ListEnrollTokensArgs),
     /// Revoke a specific enroll token.
     RevokeEnrollToken(RevokeEnrollTokenArgs),
+    /// Revoke an enrolled agent's persistent credentials.
+    RevokeAgent(RevokeAgentArgs),
     /// Print state backend stats.
     StateStats(StateStatsArgs),
     /// Send SIGHUP to an already-running daemon.
@@ -184,6 +186,27 @@ pub struct RevokeEnrollTokenArgs {
 
     #[arg(long)]
     pub token: String,
+
+    #[command(flatten)]
+    pub target: AdminTargetArgs,
+}
+
+#[derive(Args)]
+pub struct RevokeAgentArgs {
+    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    pub config_file: PathBuf,
+
+    #[arg(long)]
+    pub state_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub data_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    pub public_url: Option<String>,
+
+    #[arg(long)]
+    pub agent_id: String,
 
     #[command(flatten)]
     pub target: AdminTargetArgs,

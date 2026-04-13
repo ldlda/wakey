@@ -57,6 +57,11 @@ export type RevokeEnrollTokenResponse = {
   revoked: boolean;
 };
 
+export type RevokeAgentResponse = {
+  agent_id: string;
+  revoked: boolean;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -119,6 +124,13 @@ export function revokeEnrollToken(
 ): Promise<RevokeEnrollTokenResponse> {
   return request<RevokeEnrollTokenResponse>(
     `/api/v1/control/enroll-tokens/${encodeURIComponent(token)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function revokeAgent(agentId: string): Promise<RevokeAgentResponse> {
+  return request<RevokeAgentResponse>(
+    `/api/v1/control/agents/${encodeURIComponent(agentId)}`,
     { method: "DELETE" },
   );
 }

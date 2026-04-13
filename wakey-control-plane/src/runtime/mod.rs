@@ -26,6 +26,7 @@ use crate::ws;
 mod admin;
 mod process;
 pub use admin::{issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats};
+pub use admin::revoke_agent;
 pub use process::reload_daemon;
 use process::{remove_pid_file, write_pid_file};
 
@@ -85,6 +86,10 @@ fn control_api_routes() -> Router<AppState> {
         .route("/api/v1/control/alerts/history", get(api::alert_history))
         .route("/api/v1/control/alerts/ws", get(api::alerts_stream))
         .route("/api/v1/control/agents", get(api::list_agents))
+        .route(
+            "/api/v1/control/agents/{agent_id}",
+            axum::routing::delete(api::revoke_agent),
+        )
         .route(
             "/api/v1/control/agents/{agent_id}/command",
             post(api::run_command),

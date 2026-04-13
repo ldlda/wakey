@@ -51,6 +51,12 @@ pub struct RevokeEnrollTokenResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct RevokeAgentResponse {
+    pub agent_id: String,
+    pub revoked: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StateStatsResponse {
     pub db_path: String,
     pub schema_version: u32,
@@ -269,6 +275,56 @@ pub async fn revoke_enroll_token(
             Err(json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "revoke_enroll_token_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
+pub async fn revoke_agent(
+    State(state): State<AppState>,
+    AxumPath(agent_id): AxumPath<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    match state.store.revoke_agent(&agent_id).await {
+        Ok(revoked) => {
+            if revoked {
+                // Remove any active session so this credential is also cut off at runtime.
+                state.sessions.write().await.remove(&agent_id);
+            }
+
+            if let Err(err) = state
+                .store
+                .append_audit_event(AuditEventInput {
+                    actor_type: "admin_api".into(),
+                    actor_id: None,
+                    agent_id: Some(agent_id.clone()),
+                    request_id: None,
+                    event_type: "agent_revoke".into(),
+                    outcome: if revoked {
+                        "ok".into()
+                    } else {
+                        "not_found".into()
+                    },
+                    latency_ms: None,
+                    message: if revoked {
+                        "revoked agent credentials".into()
+                    } else {
+                        "agent credentials not found".into()
+                    },
+                    metadata: serde_json::json!({ "agent_id": agent_id }),
+                })
+                .await
+            {
+                warn!(error = %err, "failed to append audit event for agent revoke");
+            }
+
+            Ok((StatusCode::OK, Json(RevokeAgentResponse { agent_id, revoked })))
+        }
+        Err(err) => {
+            warn!(error = %err, "failed to revoke agent credentials");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "revoke_agent_failed",
                 &err.to_string(),
             ))
         }

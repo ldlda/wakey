@@ -10,6 +10,7 @@ import {
   fetchAlertHistory,
   fetchAlerts,
   fetchAudit,
+  revokeAgent,
 } from "@/api";
 import { AppLayout } from "@/layout/AppLayout";
 import { AgentsPage } from "@/pages/AgentsPage";
@@ -47,7 +48,12 @@ export function App() {
       setAlerts(nextAlerts);
       setHistory(nextHistory);
       setAudit(nextAudit);
-      if (!selectedAgentId && nextAgents[0]) {
+      if (!nextAgents.length) {
+        setSelectedAgentId("");
+      } else if (
+        !selectedAgentId ||
+        !nextAgents.some((agent) => agent.agent_id === selectedAgentId)
+      ) {
         setSelectedAgentId(nextAgents[0].agent_id);
       }
       setState("ready");
@@ -55,6 +61,12 @@ export function App() {
       setState("error");
       setError(String(err));
     }
+  }
+
+  async function onRevokeAgent(agentId: string): Promise<boolean> {
+    const result = await revokeAgent(agentId);
+    await loadAll();
+    return result.revoked;
   }
 
   async function refreshAlertsAndHistory() {
@@ -132,6 +144,7 @@ export function App() {
                 agents={agents}
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={setSelectedAgentId}
+                onRevokeAgent={onRevokeAgent}
               />
             }
           />

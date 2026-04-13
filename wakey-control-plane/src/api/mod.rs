@@ -10,8 +10,9 @@ pub use alerts::{active_alerts, alert_history, alerts_stream};
 pub use audit::list_audit_events;
 pub use commands::{list_agents, run_command};
 pub use control::{
-    EnrollTokenStatus, IssueEnrollTokenResponse, RevokeEnrollTokenResponse, StateStatsResponse,
-    enroll, healthz, issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats,
+    EnrollTokenStatus, IssueEnrollTokenResponse, RevokeAgentResponse, RevokeEnrollTokenResponse,
+    StateStatsResponse, enroll, healthz, issue_enroll_token, list_enroll_tokens, revoke_agent,
+    revoke_enroll_token, state_stats,
 };
 
 pub fn json_error(

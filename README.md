@@ -102,6 +102,7 @@ List/revoke enroll tokens from CLI:
 ```sh
 wakey-control-plane list-enroll-tokens --include-expired
 wakey-control-plane revoke-enroll-token --token enr-...
+wakey-control-plane revoke-agent --agent-id agent-...
 ```
 
 Machine-readable output is available:
@@ -194,6 +195,7 @@ Control-plane admin API includes token management endpoints:
 - `GET /api/v1/control/alerts?lookback_seconds=900`
 - `GET /api/v1/control/alerts/history?since_unix=<ts>&limit=<n>`
 - `GET /api/v1/control/alerts/ws` (websocket snapshots + recent transitions)
+- `DELETE /api/v1/control/agents/{agent_id}`
 
 If commands still appear silent, verify both processes are running with `-v`
 and that `RUST_LOG` is not overriding to a stricter level.

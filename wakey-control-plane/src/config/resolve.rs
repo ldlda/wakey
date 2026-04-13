@@ -5,8 +5,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use crate::cli::{
-    AdminTargetArgs, IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeEnrollTokenArgs, ServeArgs,
-    StateStatsArgs,
+    AdminTargetArgs, IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeAgentArgs,
+    RevokeEnrollTokenArgs, ServeArgs, StateStatsArgs,
 };
 use crate::config::types::{
     DaemonConfig, FileConfig, FileTelemetryConfig, IssueTokenSettings, StateAccessSettings,
@@ -154,6 +154,16 @@ pub fn resolve_list_enroll_token_settings(
 pub fn resolve_revoke_enroll_token_settings(
     args: &RevokeEnrollTokenArgs,
 ) -> Result<StateAccessSettings> {
+    resolve_state_access(
+        &args.config_file,
+        args.data_dir.clone(),
+        args.state_file.clone(),
+        args.public_url.clone(),
+        &args.target,
+    )
+}
+
+pub fn resolve_revoke_agent_settings(args: &RevokeAgentArgs) -> Result<StateAccessSettings> {
     resolve_state_access(
         &args.config_file,
         args.data_dir.clone(),

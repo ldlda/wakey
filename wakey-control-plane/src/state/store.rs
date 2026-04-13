@@ -187,6 +187,19 @@ impl Store {
         Ok(removed)
     }
 
+    pub async fn revoke_agent(&self, agent_id: &str) -> Result<bool> {
+        let removed = self
+            .agents
+            .remove(agent_id.as_bytes())
+            .context("failed removing agent credentials")?
+            .is_some();
+        if removed {
+            self.flush()
+                .context("failed flushing db after agent revoke")?;
+        }
+        Ok(removed)
+    }
+
     pub async fn stats(&self) -> Result<StateStats> {
         let now = now_unix();
         let mut enroll_token_count = 0usize;
@@ -691,6 +704,46 @@ mod tests {
         assert_eq!(stats.agent_count, 1);
         assert_eq!(stats.enroll_token_count, 2);
         assert_eq!(stats.expired_enroll_token_count, 1);
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn revoke_agent_removes_credentials() {
+        let (store, dir) = make_store().await;
+
+        store
+            .enroll_tokens
+            .insert(b"enr-revoke-agent-test", &(u64::MAX - 10).to_le_bytes())
+            .expect("insert should succeed");
+
+        let issued = store
+            .enroll("enr-revoke-agent-test")
+            .await
+            .expect("enroll should succeed");
+
+        assert!(
+            store
+                .verify_agent_token(&issued.agent_id, &issued.agent_token)
+                .await
+        );
+
+        let removed = store
+            .revoke_agent(&issued.agent_id)
+            .await
+            .expect("revoke should succeed");
+        assert!(removed);
+        assert!(
+            !store
+                .verify_agent_token(&issued.agent_id, &issued.agent_token)
+                .await
+        );
+
+        let removed_again = store
+            .revoke_agent(&issued.agent_id)
+            .await
+            .expect("second revoke should succeed");
+        assert!(!removed_again);
+
         cleanup_dir(&dir);
     }
 

@@ -51,6 +51,10 @@ async fn main() -> Result<()> {
             tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
             runtime::revoke_enroll_token(args).await
         }
+        Command::RevokeAgent(args) => {
+            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
+            runtime::revoke_agent(args).await
+        }
         Command::StateStats(args) => {
             tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
             runtime::state_stats(args).await
