@@ -123,11 +123,25 @@
   }
   body {
     @apply bg-background text-foreground;
-    background-image: radial-gradient(
-      circle at 20% 10%,
-      color-mix(in oklab, var(--primary) 12%, var(--background)) 0%,
-      var(--background) 45%
-    );
+    background-color: var(--background);
+    background-image:
+      radial-gradient(
+        1200px 700px at 15% -10%,
+        color-mix(in oklab, var(--primary) 15%, var(--background)) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        900px 600px at 85% 0%,
+        color-mix(in oklab, var(--accent) 12%, var(--background)) 0%,
+        transparent 58%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--background) 85%, var(--foreground) 15%) 0%,
+        var(--background) 45%
+      );
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
     margin: 0;
   }
   html {

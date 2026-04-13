@@ -213,11 +213,37 @@ export function DevicesPage({
   async function copyValue(label: string, value: string) {
     const trimmed = value.trim();
     if (!trimmed) return;
+
+    async function copyWithFallback(text: string) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.top = "0";
+      textarea.style.left = "0";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      if (!ok) throw new Error("fallback-copy-failed");
+    }
+
     try {
-      await navigator.clipboard.writeText(trimmed);
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(trimmed);
+      } else {
+        await copyWithFallback(trimmed);
+      }
       setCopyStatus(`Copied ${label}`);
     } catch {
-      setCopyStatus(`Copy failed for ${label}`);
+      try {
+        await copyWithFallback(trimmed);
+        setCopyStatus(`Copied ${label}`);
+      } catch {
+        setCopyStatus(`Copy failed for ${label}`);
+      }
     }
   }
 
@@ -288,8 +314,8 @@ export function DevicesPage({
   }
 
   return (
-    <section className="grid gap-3 xl:grid-cols-[2fr_1fr]">
-      <Card>
+    <section className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
+      <Card className="min-w-0">
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle>Devices</CardTitle>
           <Button
@@ -303,8 +329,8 @@ export function DevicesPage({
         </CardHeader>
 
         <CardContent>
-          <div className="mt-2 grid gap-2 sm:grid-cols-3">
-            <label className="grid gap-1 text-sm text-muted-foreground">
+          <div className="mt-2 grid gap-2 md:grid-cols-3">
+            <label className="grid min-w-0 gap-1 text-sm text-muted-foreground">
               <span>Agent</span>
               <Select
                 value={selectedAgentId}
@@ -312,7 +338,7 @@ export function DevicesPage({
                   if (value) onSelectAgent(value);
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="w-full min-w-0">
                   <SelectValue placeholder="Select agent" />
                 </SelectTrigger>
                 <SelectContent>
@@ -326,9 +352,10 @@ export function DevicesPage({
               </Select>
             </label>
 
-            <label className="grid gap-1 text-sm text-muted-foreground sm:col-span-2">
+            <label className="grid min-w-0 gap-1 text-sm text-muted-foreground md:col-span-2">
               <span>Search</span>
               <Input
+                className="w-full min-w-0"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="name, ip, mac, interface"

@@ -1,5 +1,12 @@
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import type { DeviceRow, SortDir } from "@/pages/devices/types";
 import {
   chooseWakeTarget,
@@ -129,33 +136,40 @@ export function DeviceInventoryTable({
                 wakeBusyId === row.id || !selectedAgentId || bulkWakeBusy
               }
               size="sm"
+              className="device-btn"
             >
               {wakeBusyId === row.id ? "Waking..." : "Wake"}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={() => onCopyValue("name", chooseWakeTarget(row))}
-            >
-              Copy name
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={() => onCopyValue("ip", row.ips[0] || "")}
-            >
-              Copy IP
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={() => onCopyValue("mac", row.macs[0] || "")}
-            >
-              Copy MAC
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                  "device-copy-trigger",
+                )}
+              >
+                Copy
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-32">
+                <DropdownMenuItem
+                  onClick={() => onCopyValue("target", chooseWakeTarget(row))}
+                >
+                  Copy target
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onCopyValue("name", row.name)}>
+                  Copy name
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => onCopyValue("ip", row.ips[0] || "")}
+                >
+                  Copy IP
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => onCopyValue("mac", row.macs[0] || "")}
+                >
+                  Copy MAC
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </span>
         </div>
       ))}

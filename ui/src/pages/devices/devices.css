@@ -44,15 +44,19 @@
 
 .device-list {
   margin-top: 0.8rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 .device-row {
   display: grid;
   grid-template-columns:
     36px minmax(110px, 1.1fr) minmax(160px, 2fr) minmax(130px, 1.5fr)
-    minmax(110px, 0.9fr) minmax(120px, 1fr) minmax(220px, auto);
+    minmax(100px, 0.85fr) minmax(100px, 0.9fr) minmax(170px, max-content);
   align-items: center;
-  gap: 0.55rem;
+  column-gap: 0.4rem;
+  row-gap: 0.55rem;
+  min-width: 980px;
 }
 
 .device-header {
@@ -77,9 +81,17 @@
 .device-action {
   display: flex;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.35rem;
   justify-self: end;
+}
+
+.device-btn {
+  min-width: 4.25rem;
+}
+
+.device-copy-trigger {
+  min-width: 6.2rem;
 }
 
 .device-select {
@@ -102,6 +114,7 @@
       "mac mac"
       "interfaces interfaces";
     align-items: start;
+    min-width: 0;
   }
 
   .device-row .device-cell {
@@ -148,6 +161,7 @@
     grid-area: action;
     justify-self: end;
     justify-content: flex-end;
+    flex-wrap: wrap;
   }
 
   .quick-wake {
