@@ -30,6 +30,7 @@ import {
   sorters,
   type SortKey,
 } from "@/pages/devices/utils";
+import "@/pages/devices/devices.css";
 
 type Props = {
   agents: Agent[];

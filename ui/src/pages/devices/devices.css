@@ -1,0 +1,157 @@
+.quick-wake {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+  align-items: end;
+  margin-top: 0.65rem;
+}
+
+.quick-wake label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.presence-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.65rem;
+}
+
+.select-visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.linkish {
+  display: inline-block;
+  margin-top: 0.25rem;
+  text-decoration: underline;
+}
+
+.device-list {
+  margin-top: 0.8rem;
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns:
+    36px minmax(110px, 1.1fr) minmax(160px, 2fr) minmax(130px, 1.5fr)
+    minmax(110px, 0.9fr) minmax(120px, 1fr) minmax(220px, auto);
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.device-header {
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-strong);
+}
+
+.device-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sortable-col {
+  cursor: pointer;
+  user-select: none;
+}
+
+.device-action {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-self: end;
+}
+
+.device-select {
+  display: flex;
+  justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .device-header {
+    display: none;
+  }
+
+  .device-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "select action"
+      "name name"
+      "presence presence"
+      "ip ip"
+      "mac mac"
+      "interfaces interfaces";
+    align-items: start;
+  }
+
+  .device-row .device-cell {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+
+  .device-row .device-cell[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.1rem;
+  }
+
+  .device-row .device-cell[data-label="Name"] {
+    grid-area: name;
+  }
+
+  .device-row .device-cell[data-label="Pick"] {
+    grid-area: select;
+  }
+
+  .device-row .device-cell[data-label="Presence"] {
+    grid-area: presence;
+  }
+
+  .device-row .device-cell[data-label="IP"] {
+    grid-area: ip;
+  }
+
+  .device-row .device-cell[data-label="MAC"] {
+    grid-area: mac;
+  }
+
+  .device-row .device-cell[data-label="Interfaces"] {
+    grid-area: interfaces;
+  }
+
+  .device-row .device-action {
+    grid-area: action;
+    justify-self: end;
+    justify-content: flex-end;
+  }
+
+  .quick-wake {
+    grid-template-columns: 1fr;
+  }
+}
