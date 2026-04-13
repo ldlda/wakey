@@ -196,6 +196,7 @@ Control-plane admin API includes token management endpoints:
 - `GET /api/v1/control/alerts/history?since_unix=<ts>&limit=<n>`
 - `GET /api/v1/control/alerts/ws` (websocket snapshots + recent transitions)
 - `DELETE /api/v1/control/agents/{agent_id}`
+- `PATCH /api/v1/control/agents/{agent_id}/nickname`
 
 If commands still appear silent, verify both processes are running with `-v`
 and that `RUST_LOG` is not overriding to a stricter level.

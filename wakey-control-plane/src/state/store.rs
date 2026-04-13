@@ -15,6 +15,7 @@ pub struct Store {
     meta: sled::Tree,
     enroll_tokens: sled::Tree,
     agents: sled::Tree,
+    agent_meta: sled::Tree,
     audit_events: sled::Tree,
     active_alerts: sled::Tree,
     alert_transitions: sled::Tree,
@@ -45,6 +46,9 @@ impl Store {
         let agents_tree = db
             .open_tree("agents")
             .context("failed to open agents tree")?;
+        let agent_meta_tree = db
+            .open_tree("agent_meta")
+            .context("failed to open agent_meta tree")?;
         let audit_events_tree = db
             .open_tree("audit_events")
             .context("failed to open audit_events tree")?;
@@ -60,6 +64,7 @@ impl Store {
             meta: meta_tree,
             enroll_tokens: enroll_tree,
             agents: agents_tree,
+            agent_meta: agent_meta_tree,
             audit_events: audit_events_tree,
             active_alerts: active_alerts_tree,
             alert_transitions: alert_transitions_tree,
@@ -194,10 +199,37 @@ impl Store {
             .context("failed removing agent credentials")?
             .is_some();
         if removed {
+            let _ = self.agent_meta.remove(agent_id.as_bytes());
             self.flush()
                 .context("failed flushing db after agent revoke")?;
         }
         Ok(removed)
+    }
+
+    pub async fn set_agent_nickname(&self, agent_id: &str, nickname: Option<&str>) -> Result<bool> {
+        if !self
+            .agents
+            .contains_key(agent_id.as_bytes())
+            .context("failed checking agent existence")?
+        {
+            return Ok(false);
+        }
+
+        let normalized = nickname.map(str::trim).filter(|v| !v.is_empty());
+        if let Some(value) = normalized {
+            self.agent_meta
+                .insert(agent_id.as_bytes(), value.as_bytes())
+                .context("failed persisting agent nickname")?;
+        } else {
+            let _ = self
+                .agent_meta
+                .remove(agent_id.as_bytes())
+                .context("failed clearing agent nickname")?;
+        }
+
+        self.flush()
+            .context("failed flushing db after nickname update")?;
+        Ok(true)
     }
 
     pub async fn stats(&self) -> Result<StateStats> {
@@ -254,6 +286,28 @@ impl Store {
             .filter_map(|(key, _)| String::from_utf8(key.to_vec()).ok())
             .collect::<Vec<_>>();
         out.sort();
+        out
+    }
+
+    pub async fn list_agents_with_nicknames(&self) -> Vec<(String, Option<String>)> {
+        let mut out = self
+            .agents
+            .iter()
+            .filter_map(|item| item.ok())
+            .filter_map(|(key, _)| String::from_utf8(key.to_vec()).ok())
+            .map(|agent_id| {
+                let nickname = self
+                    .agent_meta
+                    .get(agent_id.as_bytes())
+                    .ok()
+                    .flatten()
+                    .and_then(|v| String::from_utf8(v.to_vec()).ok())
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty());
+                (agent_id, nickname)
+            })
+            .collect::<Vec<_>>();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }
 
@@ -417,6 +471,9 @@ impl Store {
             .flush()
             .context("failed to flush enroll token tree")?;
         self.agents.flush().context("failed to flush agents tree")?;
+        self.agent_meta
+            .flush()
+            .context("failed to flush agent_meta tree")?;
         self.audit_events
             .flush()
             .context("failed to flush audit event tree")?;
@@ -743,6 +800,45 @@ mod tests {
             .await
             .expect("second revoke should succeed");
         assert!(!removed_again);
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn nickname_set_and_clear_roundtrip() {
+        let (store, dir) = make_store().await;
+
+        store
+            .enroll_tokens
+            .insert(b"enr-nickname-test", &(u64::MAX - 10).to_le_bytes())
+            .expect("insert should succeed");
+
+        let issued = store
+            .enroll("enr-nickname-test")
+            .await
+            .expect("enroll should succeed");
+
+        let updated = store
+            .set_agent_nickname(&issued.agent_id, Some("kitchen-router"))
+            .await
+            .expect("nickname set should succeed");
+        assert!(updated);
+
+        let listed = store.list_agents_with_nicknames().await;
+        assert!(listed.iter().any(|(id, name)| {
+            id == &issued.agent_id && name.as_deref() == Some("kitchen-router")
+        }));
+
+        let cleared = store
+            .set_agent_nickname(&issued.agent_id, None)
+            .await
+            .expect("nickname clear should succeed");
+        assert!(cleared);
+
+        let listed = store.list_agents_with_nicknames().await;
+        assert!(listed
+            .iter()
+            .any(|(id, name)| id == &issued.agent_id && name.is_none()));
 
         cleanup_dir(&dir);
     }

@@ -44,6 +44,11 @@ export function DevicesPage({
   onSelectAgent,
   onAfterWake,
 }: Props) {
+  function displayAgentLabel(agent: Agent): string {
+    const nickname = agent.nickname?.trim();
+    return nickname ? nickname : agent.agent_id;
+  }
+
   const selectedAgent = agents.find(
     (agent) => agent.agent_id === selectedAgentId,
   );
@@ -351,7 +356,9 @@ export function DevicesPage({
                     ) : null}
                     <span className="min-w-0 truncate">
                       {selectedAgentId
-                        ? selectedAgentId
+                        ? selectedAgent
+                          ? displayAgentLabel(selectedAgent)
+                          : selectedAgentId
                         : "Select connected agent"}
                     </span>
                     {selectedAgent ? (
@@ -378,7 +385,7 @@ export function DevicesPage({
                           aria-hidden
                         />
                         <span className="min-w-0 truncate">
-                          {agent.agent_id}
+                          {displayAgentLabel(agent)}
                         </span>
                         <span className="shrink-0 text-xs text-muted-foreground">
                           {agent.connected ? "connected" : "offline"}

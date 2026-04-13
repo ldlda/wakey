@@ -26,6 +26,11 @@ export function CommandsPage({
   onSelectAgent,
   onAfterCommand,
 }: Props) {
+  function displayAgentLabel(agent: Agent): string {
+    const nickname = agent.nickname?.trim();
+    return nickname ? nickname : agent.agent_id;
+  }
+
   const [kind, setKind] = useState<CommandKind>("devs");
   const [query, setQuery] = useState("");
   const [output, setOutput] = useState("Select agent and run a command");
@@ -77,7 +82,9 @@ export function CommandsPage({
                         className={`size-2 shrink-0 rounded-full ${agent.connected ? "bg-emerald-500" : "bg-zinc-400"}`}
                         aria-hidden
                       />
-                      <span className="min-w-0 truncate">{agent.agent_id}</span>
+                      <span className="min-w-0 truncate">
+                        {displayAgentLabel(agent)}
+                      </span>
                       <span className="shrink-0 text-xs text-muted-foreground">
                         {agent.connected ? "connected" : "offline"}
                       </span>

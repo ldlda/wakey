@@ -56,6 +56,18 @@ pub struct RevokeAgentResponse {
     pub revoked: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SetAgentNicknameRequest {
+    pub nickname: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetAgentNicknameResponse {
+    pub agent_id: String,
+    pub nickname: Option<String>,
+    pub updated: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StateStatsResponse {
     pub db_path: String,
@@ -330,6 +342,73 @@ pub async fn revoke_agent(
             Err(json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "revoke_agent_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
+pub async fn set_agent_nickname(
+    State(state): State<AppState>,
+    AxumPath(agent_id): AxumPath<String>,
+    Json(req): Json<SetAgentNicknameRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let normalized = req
+        .nickname
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned);
+
+    match state
+        .store
+        .set_agent_nickname(&agent_id, normalized.as_deref())
+        .await
+    {
+        Ok(updated) => {
+            if let Err(err) = state
+                .store
+                .append_audit_event(AuditEventInput {
+                    actor_type: "admin_api".into(),
+                    actor_id: None,
+                    agent_id: Some(agent_id.clone()),
+                    request_id: None,
+                    event_type: "agent_nickname_set".into(),
+                    outcome: if updated {
+                        "ok".into()
+                    } else {
+                        "not_found".into()
+                    },
+                    latency_ms: None,
+                    message: if updated {
+                        "updated agent nickname".into()
+                    } else {
+                        "agent not found for nickname update".into()
+                    },
+                    metadata: serde_json::json!({
+                        "agent_id": agent_id,
+                        "nickname": normalized,
+                    }),
+                })
+                .await
+            {
+                warn!(error = %err, "failed to append audit event for nickname set");
+            }
+
+            Ok((
+                StatusCode::OK,
+                Json(SetAgentNicknameResponse {
+                    agent_id,
+                    nickname: normalized,
+                    updated,
+                }),
+            ))
+        }
+        Err(err) => {
+            warn!(error = %err, "failed to update agent nickname");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "set_agent_nickname_failed",
                 &err.to_string(),
             ))
         }

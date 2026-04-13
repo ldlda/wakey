@@ -96,6 +96,10 @@ fn control_api_routes() -> Router<AppState> {
             axum::routing::delete(api::revoke_agent),
         )
         .route(
+            "/api/v1/control/agents/{agent_id}/nickname",
+            axum::routing::patch(api::set_agent_nickname),
+        )
+        .route(
             "/api/v1/control/agents/{agent_id}/command",
             post(api::run_command),
         )

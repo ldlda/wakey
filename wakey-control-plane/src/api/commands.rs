@@ -16,6 +16,7 @@ use crate::state::AuditEventInput;
 pub struct AgentStatus {
     pub agent_id: String,
     pub connected: bool,
+    pub nickname: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,14 +38,15 @@ pub struct RelayCommandResponse {
 pub async fn list_agents(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let enrolled = state.store.list_agents().await;
+    let enrolled = state.store.list_agents_with_nicknames().await;
     let sessions = state.sessions.read().await;
 
     let agents = enrolled
         .into_iter()
-        .map(|agent_id| AgentStatus {
+        .map(|(agent_id, nickname)| AgentStatus {
             connected: sessions.contains_key(&agent_id),
             agent_id,
+            nickname,
         })
         .collect::<Vec<_>>();
 

@@ -11,6 +11,7 @@ import {
   fetchAlerts,
   fetchAudit,
   revokeAgent,
+  setAgentNickname,
 } from "@/api";
 import { AppLayout } from "@/layout/AppLayout";
 import { AgentsPage } from "@/pages/AgentsPage";
@@ -71,6 +72,15 @@ export function App() {
     const result = await revokeAgent(agentId);
     await loadAll();
     return result.revoked;
+  }
+
+  async function onSetAgentNickname(
+    agentId: string,
+    nickname: string | null,
+  ): Promise<boolean> {
+    const result = await setAgentNickname(agentId, nickname);
+    await loadAll();
+    return result.updated;
   }
 
   async function refreshAlertsAndHistory() {
@@ -149,6 +159,7 @@ export function App() {
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={setSelectedAgentId}
                 onRevokeAgent={onRevokeAgent}
+                onSetAgentNickname={onSetAgentNickname}
               />
             }
           />

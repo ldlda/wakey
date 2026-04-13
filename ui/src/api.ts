@@ -1,4 +1,8 @@
-export type Agent = { agent_id: string; connected: boolean };
+export type Agent = {
+  agent_id: string;
+  connected: boolean;
+  nickname?: string | null;
+};
 
 export type Alert = {
   alert_id: string;
@@ -60,6 +64,12 @@ export type RevokeEnrollTokenResponse = {
 export type RevokeAgentResponse = {
   agent_id: string;
   revoked: boolean;
+};
+
+export type SetAgentNicknameResponse = {
+  agent_id: string;
+  nickname: string | null;
+  updated: boolean;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -131,6 +141,20 @@ export function revokeAgent(agentId: string): Promise<RevokeAgentResponse> {
   return request<RevokeAgentResponse>(
     `/api/v1/control/agents/${encodeURIComponent(agentId)}`,
     { method: "DELETE" },
+  );
+}
+
+export function setAgentNickname(
+  agentId: string,
+  nickname: string | null,
+): Promise<SetAgentNicknameResponse> {
+  const normalized = nickname?.trim() ?? "";
+  return request<SetAgentNicknameResponse>(
+    `/api/v1/control/agents/${encodeURIComponent(agentId)}/nickname`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ nickname: normalized ? normalized : null }),
+    },
   );
 }
 
