@@ -8,9 +8,9 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
-use wakey_agent::protocol::{ErrorPayload, RequestId, ServerMessage};
+use wakey_agent::protocol::{ErrorPayload, RequestId};
 
-use crate::runtime::{AgentReply, AgentSession, AppState};
+use crate::runtime::{AgentReply, AgentSession, AppState, SessionEvent};
 use crate::state::AuditEventInput;
 
 #[derive(Debug, Deserialize)]
@@ -48,20 +48,28 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
     let connected_at = Instant::now();
 
     let (mut write, mut read) = socket.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<SessionEvent>();
 
     let writer = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            let encoded = match serde_json::to_string(&msg) {
-                Ok(s) => s,
-                Err(err) => {
-                    warn!(error = %err, "failed to encode server websocket message");
-                    continue;
+        while let Some(event) = rx.recv().await {
+            match event {
+                SessionEvent::Close => {
+                    let _ = write.send(Message::Close(None)).await;
+                    break;
                 }
-            };
-            if let Err(err) = write.send(Message::Text(encoded.into())).await {
-                warn!(error = %err, "failed to send websocket message");
-                break;
+                SessionEvent::Message(msg) => {
+                    let encoded = match serde_json::to_string(&msg) {
+                        Ok(s) => s,
+                        Err(err) => {
+                            warn!(error = %err, "failed to encode server websocket message");
+                            continue;
+                        }
+                    };
+                    if let Err(err) = write.send(Message::Text(encoded.into())).await {
+                        warn!(error = %err, "failed to send websocket message");
+                        break;
+                    }
+                }
             }
         }
         debug!("websocket writer loop ended");
@@ -148,7 +156,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
 
 async fn process_agent_text(
     state: &AppState,
-    tx: &mpsc::UnboundedSender<ServerMessage>,
+    tx: &mpsc::UnboundedSender<SessionEvent>,
     connection_id: &str,
     authed_agent_id: &mut Option<String>,
     hello_at: &mut Option<Instant>,

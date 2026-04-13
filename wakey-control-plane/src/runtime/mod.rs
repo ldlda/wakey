@@ -25,8 +25,8 @@ use crate::ws;
 
 mod admin;
 mod process;
-pub use admin::{issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats};
 pub use admin::revoke_agent;
+pub use admin::{issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats};
 pub use process::reload_daemon;
 use process::{remove_pid_file, write_pid_file};
 
@@ -44,7 +44,12 @@ pub struct AppState {
 #[derive(Clone)]
 pub struct AgentSession {
     pub connection_id: String,
-    pub tx: mpsc::UnboundedSender<ServerMessage>,
+    pub tx: mpsc::UnboundedSender<SessionEvent>,
+}
+#[derive(Clone)]
+pub enum SessionEvent {
+    Message(ServerMessage),
+    Close,
 }
 
 pub enum AgentReply {

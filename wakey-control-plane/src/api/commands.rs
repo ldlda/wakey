@@ -9,7 +9,7 @@ use uuid::Uuid;
 use wakey_agent::protocol::{AgentCommand, ErrorPayload, RequestId, ServerMessage};
 
 use crate::api::json_error;
-use crate::runtime::{AgentReply, AppState};
+use crate::runtime::{AgentReply, AppState, SessionEvent};
 use crate::state::AuditEventInput;
 
 #[derive(Debug, Serialize)]
@@ -114,10 +114,10 @@ pub async fn run_command(
         warn!(error = %err, "failed to append audit event for command dispatch");
     }
 
-    if let Err(err) = tx.send(ServerMessage::Command {
+    if let Err(err) = tx.send(SessionEvent::Message(ServerMessage::Command {
         request_id,
         command: req.command,
-    }) {
+    })) {
         state.pending.lock().await.remove(&request_id_string);
         warn!(error = %err, "failed sending command to agent session");
         if let Err(audit_err) = state

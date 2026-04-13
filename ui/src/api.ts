@@ -72,12 +72,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    let detail = "";
+    const raw = await res.text();
+    let detail = raw;
     try {
-      detail = JSON.stringify(await res.json(), null, 2);
-    } catch {
-      detail = await res.text();
-    }
+      detail = JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {}
     throw new Error(`${res.status} ${res.statusText}\n${detail}`);
   }
 

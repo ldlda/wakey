@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::api::json_error;
-use crate::runtime::AppState;
+use crate::runtime::{AppState, SessionEvent};
 use crate::state::AuditEventInput;
 
 #[derive(Debug, Deserialize)]
@@ -288,8 +288,10 @@ pub async fn revoke_agent(
     match state.store.revoke_agent(&agent_id).await {
         Ok(revoked) => {
             if revoked {
-                // Remove any active session so this credential is also cut off at runtime.
-                state.sessions.write().await.remove(&agent_id);
+                // Request a graceful websocket close, then remove session from active map.
+                if let Some(session) = state.sessions.write().await.remove(&agent_id) {
+                    let _ = session.tx.send(SessionEvent::Close);
+                }
             }
 
             if let Err(err) = state
@@ -318,7 +320,10 @@ pub async fn revoke_agent(
                 warn!(error = %err, "failed to append audit event for agent revoke");
             }
 
-            Ok((StatusCode::OK, Json(RevokeAgentResponse { agent_id, revoked })))
+            Ok((
+                StatusCode::OK,
+                Json(RevokeAgentResponse { agent_id, revoked }),
+            ))
         }
         Err(err) => {
             warn!(error = %err, "failed to revoke agent credentials");
