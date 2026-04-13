@@ -9,7 +9,7 @@ pub use interfaces::{get_interface_summaries, get_interface_summary, get_ips, li
 pub use inventory::{inventory, merge_devices, resolve_devices};
 pub use leases::{get_leases, leases_without_state};
 pub use query::{query_to_device_query, resolve_query, resolve_selector};
-pub use status::{StatusResponse, device_to_status_rows, get_status, get_status_for_input};
+pub use status::{StatusResponse, get_status, get_status_for_input};
 pub use wake::{
     broadcast_wake_targets, resolve_wake_targets, wake_explicit, wake_from_query, wake_targets,
 };

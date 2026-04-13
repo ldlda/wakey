@@ -2,11 +2,10 @@ pub mod service;
 pub mod utils;
 
 pub use service::{
-    StatusResponse, broadcast_wake_targets, device_to_status_rows, get_interface_summaries,
-    get_interface_summary, get_ips, get_leases, get_status, get_status_for_input, inventory,
-    leases_without_state, list_interfaces, merge_devices, query_to_device_query, resolve_devices,
-    resolve_query, resolve_selector, resolve_wake_targets, wake_explicit, wake_from_query,
-    wake_targets,
+    StatusResponse, broadcast_wake_targets, get_interface_summaries, get_interface_summary,
+    get_ips, get_leases, get_status, get_status_for_input, inventory, leases_without_state,
+    list_interfaces, merge_devices, query_to_device_query, resolve_devices, resolve_query,
+    resolve_selector, resolve_wake_targets, wake_explicit, wake_from_query, wake_targets,
 };
 
 #[cfg(test)]

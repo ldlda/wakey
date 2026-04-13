@@ -31,7 +31,7 @@ async fn dispatch_status(req: StatusRequest) -> Result<CommandResult> {
     } else {
         wakey::get_status(query).await?
     };
-    debug!(rows = status.table.len(), "dispatched status command");
+    debug!(devices = status.devices.len(), "dispatched status command");
     Ok(CommandResult::Status(status))
 }
 

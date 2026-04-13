@@ -1,16 +1,34 @@
 use chrono::{DateTime, Local};
 use comfy_table::{Cell, ContentArrangement, Table, presets::UTF8_FULL};
-use wakey_core::{DhcpLeaseWithState, InterfaceSummary, Status, WakeResult};
+use wakey_core::{DeviceInventory, DhcpLeaseWithState, InterfaceSummary, WakeResult};
 
-pub fn render_status_table(status: &Status<wakey_core::NeighborEntry>) -> Table {
+pub fn render_status_table(status: &DeviceInventory) -> Table {
     let mut table = base_table();
-    table.set_header(vec!["IP", "MAC", "Dev", "State"]);
-    for row in &status.table {
+    table.set_header(vec!["Name", "IP", "MAC", "Presence", "Interfaces"]);
+    for row in &status.devices {
         table.add_row(vec![
-            Cell::new(row.ip.to_string()),
-            Cell::new(row.mac.map(|v| v.to_string()).unwrap_or_default()),
-            Cell::new(row.dev.clone().unwrap_or_default()),
-            Cell::new(row.state.to_string()),
+            Cell::new(
+                row.names
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "(unnamed)".into()),
+            ),
+            Cell::new(
+                row.ips
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            Cell::new(
+                row.macs
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            Cell::new(format!("{:?}", row.presence)),
+            Cell::new(row.interfaces.join(", ")),
         ]);
     }
     table

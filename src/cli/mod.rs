@@ -141,6 +141,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Status(args) => {
             let as_json = args.json;
             let query = status_args_to_query(args);
+            let selected_name = query.name.clone();
             debug!(?query, json = as_json, "dispatching status command");
             let status = if query.name.is_some()
                 && query.filter.ips.is_empty()
@@ -155,7 +156,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             if as_json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
-                if let Some(name) = &status.name {
+                if let Some(name) = &selected_name {
                     println!("name: {name}");
                 }
                 println!("{}", table::render_status_table(&status));

@@ -4,8 +4,7 @@ use std::fmt;
 use std::net::IpAddr;
 use wakey_core::parse::mac;
 use wakey_core::{
-    DeviceFilters, DeviceInventory, DeviceQuery, DhcpLeaseWithState, InterfaceSummary,
-    NeighborEntry, Status, WakeResult,
+    DeviceFilters, DeviceInventory, DeviceQuery, DhcpLeaseWithState, InterfaceSummary, WakeResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -174,7 +173,7 @@ pub enum AgentCommand {
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CommandResult {
-    Status(Status<NeighborEntry>),
+    Status(DeviceInventory),
     Leases { rows: Vec<DhcpLeaseWithState> },
     Devs { rows: Vec<InterfaceSummary> },
     Inventory(DeviceInventory),
