@@ -48,13 +48,17 @@ export function App() {
       setAlerts(nextAlerts);
       setHistory(nextHistory);
       setAudit(nextAudit);
+      const firstConnectedAgentId =
+        nextAgents.find((agent) => agent.connected)?.agent_id ?? "";
       if (!nextAgents.length) {
         setSelectedAgentId("");
       } else if (
         !selectedAgentId ||
-        !nextAgents.some((agent) => agent.agent_id === selectedAgentId)
+        !nextAgents.some(
+          (agent) => agent.agent_id === selectedAgentId && agent.connected,
+        )
       ) {
-        setSelectedAgentId(nextAgents[0].agent_id);
+        setSelectedAgentId(firstConnectedAgentId);
       }
       setState("ready");
     } catch (err) {

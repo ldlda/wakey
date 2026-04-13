@@ -38,17 +38,15 @@ type Props = {
   onAfterWake?: () => Promise<void>;
 };
 
-function middleEllipsis(value: string, head = 16, tail = 10): string {
-  if (value.length <= head + tail + 3) return value;
-  return `${value.slice(0, head)}...${value.slice(-tail)}`;
-}
-
 export function DevicesPage({
   agents,
   selectedAgentId,
   onSelectAgent,
   onAfterWake,
 }: Props) {
+  const selectedAgent = agents.find(
+    (agent) => agent.agent_id === selectedAgentId,
+  );
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -124,8 +122,9 @@ export function DevicesPage({
   }, []);
 
   useEffect(() => {
-    if (!selectedAgentId && agents[0]) {
-      onSelectAgent(agents[0].agent_id);
+    if (!selectedAgentId) {
+      const firstConnected = agents.find((agent) => agent.connected);
+      if (firstConnected) onSelectAgent(firstConnected.agent_id);
     }
   }, [selectedAgentId, agents, onSelectAgent]);
 
@@ -343,10 +342,23 @@ export function DevicesPage({
                 }}
               >
                 <SelectTrigger className="w-full min-w-0">
-                  <span className="min-w-0 flex-1 truncate text-start">
-                    {selectedAgentId
-                      ? middleEllipsis(selectedAgentId)
-                      : "Select agent"}
+                  <span className="flex min-w-0 flex-1 items-center gap-2 text-start">
+                    {selectedAgent ? (
+                      <span
+                        className={`size-2 shrink-0 rounded-full ${selectedAgent.connected ? "bg-emerald-500" : "bg-zinc-400"}`}
+                        aria-hidden
+                      />
+                    ) : null}
+                    <span className="min-w-0 truncate">
+                      {selectedAgentId
+                        ? selectedAgentId
+                        : "Select connected agent"}
+                    </span>
+                    {selectedAgent ? (
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {selectedAgent.connected ? "connected" : "offline"}
+                      </span>
+                    ) : null}
                   </span>
                 </SelectTrigger>
                 <SelectContent
@@ -358,8 +370,20 @@ export function DevicesPage({
                       key={agent.agent_id}
                       value={agent.agent_id}
                       className="pe-10"
+                      disabled={!agent.connected}
                     >
-                      {middleEllipsis(agent.agent_id, 14, 8)}
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <span
+                          className={`size-2 shrink-0 rounded-full ${agent.connected ? "bg-emerald-500" : "bg-zinc-400"}`}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 truncate">
+                          {agent.agent_id}
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {agent.connected ? "connected" : "offline"}
+                        </span>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

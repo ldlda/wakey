@@ -67,9 +67,21 @@ export function CommandsPage({
               </SelectTrigger>
               <SelectContent>
                 {agents.map((agent) => (
-                  <SelectItem key={agent.agent_id} value={agent.agent_id}>
-                    {agent.agent_id} (
-                    {agent.connected ? "connected" : "offline"})
+                  <SelectItem
+                    key={agent.agent_id}
+                    value={agent.agent_id}
+                    disabled={!agent.connected}
+                  >
+                    <span className="flex min-w-0 flex-1 items-center gap-2">
+                      <span
+                        className={`size-2 shrink-0 rounded-full ${agent.connected ? "bg-emerald-500" : "bg-zinc-400"}`}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 truncate">{agent.agent_id}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {agent.connected ? "connected" : "offline"}
+                      </span>
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
