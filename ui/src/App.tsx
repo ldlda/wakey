@@ -36,12 +36,13 @@ export function App() {
     setState("loading");
     setError("");
     try {
-      const [nextAgents, nextAlerts, nextHistory, nextAudit] = await Promise.all([
-        fetchAgents(),
-        fetchAlerts(),
-        fetchAlertHistory(20),
-        fetchAudit(30),
-      ]);
+      const [nextAgents, nextAlerts, nextHistory, nextAudit] =
+        await Promise.all([
+          fetchAgents(),
+          fetchAlerts(),
+          fetchAlertHistory(20),
+          fetchAudit(30),
+        ]);
       setAgents(nextAgents);
       setAlerts(nextAlerts);
       setHistory(nextHistory);
@@ -57,7 +58,10 @@ export function App() {
   }
 
   async function refreshAlertsAndHistory() {
-    const [nextAlerts, nextHistory] = await Promise.all([fetchAlerts(), fetchAlertHistory(20)]);
+    const [nextAlerts, nextHistory] = await Promise.all([
+      fetchAlerts(),
+      fetchAlertHistory(20),
+    ]);
     setAlerts(nextAlerts);
     setHistory(nextHistory);
   }
@@ -144,7 +148,12 @@ export function App() {
           />
           <Route
             path="audit"
-            element={<AuditPage events={audit} onRefresh={() => fetchAudit(30).then(setAudit)} />}
+            element={
+              <AuditPage
+                events={audit}
+                onRefresh={() => fetchAudit(30).then(setAudit)}
+              />
+            }
           />
           <Route
             path="alerts"

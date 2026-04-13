@@ -19,7 +19,10 @@ export function AuditPage({ events, onRefresh }: Props) {
   const [needle, setNeedle] = useState(initialNeedle);
 
   const eventTypes = useMemo(
-    () => ["all", ...Array.from(new Set(events.map((e) => e.event_type))).sort()],
+    () => [
+      "all",
+      ...Array.from(new Set(events.map((e) => e.event_type))).sort(),
+    ],
     [events],
   );
 
@@ -35,11 +38,12 @@ export function AuditPage({ events, onRefresh }: Props) {
       if (outcome !== "all" && e.outcome !== outcome) return false;
       if (!q) return true;
       return (
-        e.message.toLowerCase().includes(q)
-        || e.event_type.toLowerCase().includes(q)
-        || e.outcome.toLowerCase().includes(q)
-        || (e.actor_id || "").toLowerCase().includes(q)
-        || (e.agent_id || "").toLowerCase().includes(q)
+        e.message.toLowerCase().includes(q) ||
+        e.event_type.toLowerCase().includes(q) ||
+        e.outcome.toLowerCase().includes(q) ||
+        e.request_id?.toLowerCase().includes(q) || // why does the one flow from devicespage use this
+        (e.actor_id || "").toLowerCase().includes(q) ||
+        (e.agent_id || "").toLowerCase().includes(q)
       );
     });
   }, [events, eventType, outcome, needle]);
@@ -53,9 +57,14 @@ export function AuditPage({ events, onRefresh }: Props) {
       <div className="grid-3 compact">
         <label>
           Event type
-          <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
+          <select
+            value={eventType}
+            onChange={(e) => setEventType(e.target.value)}
+          >
             {eventTypes.map((v) => (
-              <option key={v} value={v}>{v}</option>
+              <option key={v} value={v}>
+                {v}
+              </option>
             ))}
           </select>
         </label>
@@ -63,16 +72,24 @@ export function AuditPage({ events, onRefresh }: Props) {
           Outcome
           <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
             {outcomes.map((v) => (
-              <option key={v} value={v}>{v}</option>
+              <option key={v} value={v}>
+                {v}
+              </option>
             ))}
           </select>
         </label>
         <label>
           Search
-          <input value={needle} onChange={(e) => setNeedle(e.target.value)} placeholder="message, agent, actor" />
+          <input
+            value={needle}
+            onChange={(e) => setNeedle(e.target.value)}
+            placeholder="message, agent, actor"
+          />
         </label>
       </div>
-      <p className="muted">Showing {filtered.length} of {events.length}</p>
+      <p className="muted">
+        Showing {filtered.length} of {events.length}
+      </p>
       <pre className="output">{JSON.stringify(filtered, null, 2)}</pre>
     </section>
   );

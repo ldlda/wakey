@@ -28,23 +28,26 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
   );
 
   const filteredAlerts = useMemo(
-    () => alerts.filter((a) => (
-      (severity === "all" || a.severity === severity)
-      && (status === "all" || a.status === status)
-      && (kind === "all" || a.kind === kind)
-    )),
+    () =>
+      alerts.filter(
+        (a) =>
+          (severity === "all" || a.severity === severity) &&
+          (status === "all" || a.status === status) &&
+          (kind === "all" || a.kind === kind),
+      ),
     [alerts, severity, status, kind],
   );
 
   const filteredTransitions = useMemo(() => {
     const q = transitionQ.trim().toLowerCase();
     if (!q) return transitions;
-    return transitions.filter((t) => (
-      t.kind.toLowerCase().includes(q)
-      || t.to_status.toLowerCase().includes(q)
-      || t.message.toLowerCase().includes(q)
-      || (t.agent_id || "").toLowerCase().includes(q)
-    ));
+    return transitions.filter(
+      (t) =>
+        t.kind.toLowerCase().includes(q) ||
+        t.to_status.toLowerCase().includes(q) ||
+        t.message.toLowerCase().includes(q) ||
+        (t.agent_id || "").toLowerCase().includes(q),
+    );
   }, [transitions, transitionQ]);
 
   return (
@@ -57,9 +60,14 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
         <div className="grid-3 compact">
           <label>
             Severity
-            <select value={severity} onChange={(e) => setSeverity(e.target.value)}>
+            <select
+              value={severity}
+              onChange={(e) => setSeverity(e.target.value)}
+            >
               {severities.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v}>
+                  {v}
+                </option>
               ))}
             </select>
           </label>
@@ -67,7 +75,9 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
             Status
             <select value={status} onChange={(e) => setStatus(e.target.value)}>
               {statuses.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v}>
+                  {v}
+                </option>
               ))}
             </select>
           </label>
@@ -75,20 +85,29 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
             Kind
             <select value={kind} onChange={(e) => setKind(e.target.value)}>
               {kinds.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v}>
+                  {v}
+                </option>
               ))}
             </select>
           </label>
         </div>
-        <p className="muted">Showing {filteredAlerts.length} of {alerts.length}</p>
+        <p className="muted">
+          Showing {filteredAlerts.length} of {alerts.length}
+        </p>
         <div className="list">
           {filteredAlerts.map((alert) => (
             <div className="row plain" key={alert.alert_id}>
-              <span>{alert.kind}{alert.agent_id ? ` (${alert.agent_id})` : ""}</span>
+              <span>
+                {alert.kind}
+                {alert.agent_id ? ` (${alert.agent_id})` : ""}
+              </span>
               <span>{alert.severity}</span>
             </div>
           ))}
-          {!filteredAlerts.length && <div className="empty">No active alerts</div>}
+          {!filteredAlerts.length && (
+            <div className="empty">No active alerts</div>
+          )}
         </div>
       </div>
 
@@ -105,7 +124,9 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
             placeholder="kind, status, message, agent"
           />
         </label>
-        <pre className="output small">{JSON.stringify(filteredTransitions, null, 2)}</pre>
+        <pre className="output small">
+          {JSON.stringify(filteredTransitions, null, 2)}
+        </pre>
       </div>
     </section>
   );

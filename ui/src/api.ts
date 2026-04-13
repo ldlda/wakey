@@ -88,42 +88,60 @@ export function fetchAlerts(): Promise<Alert[]> {
 }
 
 export function fetchAlertHistory(limit = 50): Promise<AlertTransition[]> {
-  return request<AlertTransition[]>(`/api/v1/control/alerts/history?limit=${limit}`);
+  return request<AlertTransition[]>(
+    `/api/v1/control/alerts/history?limit=${limit}`,
+  );
 }
 
 export function fetchAudit(limit = 50): Promise<AuditEvent[]> {
   return request<AuditEvent[]>(`/api/v1/control/audit/events?limit=${limit}`);
 }
 
-export function fetchEnrollTokens(includeExpired = false): Promise<EnrollTokenStatus[]> {
+export function fetchEnrollTokens(
+  includeExpired = false,
+): Promise<EnrollTokenStatus[]> {
   return request<EnrollTokenStatus[]>(
     `/api/v1/control/enroll-tokens?include_expired=${includeExpired ? "true" : "false"}`,
   );
 }
 
-export function issueEnrollToken(ttlSeconds: number): Promise<IssueEnrollTokenResponse> {
+export function issueEnrollToken(
+  ttlSeconds: number,
+): Promise<IssueEnrollTokenResponse> {
   return request<IssueEnrollTokenResponse>(
     `/api/v1/control/enroll-token?ttl_seconds=${Math.max(1, Math.floor(ttlSeconds))}`,
     { method: "POST" },
   );
 }
 
-export function revokeEnrollToken(token: string): Promise<RevokeEnrollTokenResponse> {
+export function revokeEnrollToken(
+  token: string,
+): Promise<RevokeEnrollTokenResponse> {
   return request<RevokeEnrollTokenResponse>(
     `/api/v1/control/enroll-tokens/${encodeURIComponent(token)}`,
     { method: "DELETE" },
   );
 }
 
-export function runCommand(agentId: string, kind: CommandKind, query: string): Promise<unknown> {
+export function runCommand(
+  agentId: string,
+  kind: CommandKind,
+  query: string,
+): Promise<unknown> {
   const payload = buildCommandPayload(kind, query);
-  return request(`/api/v1/control/agents/${encodeURIComponent(agentId)}/command`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return request(
+    `/api/v1/control/agents/${encodeURIComponent(agentId)}/command`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
-function buildCommandPayload(kind: CommandKind, query: string): { command: Record<string, unknown> } {
+function buildCommandPayload(
+  kind: CommandKind,
+  query: string,
+): { command: Record<string, unknown> } {
   if (kind === "devs") {
     return { command: { kind: "devs", dev: null, up_only: false } };
   }

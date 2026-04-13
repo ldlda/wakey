@@ -16,8 +16,8 @@ function sourcemapEnabled(): boolean {
 }
 
 const ReactCompilerConfig = {
-  target: '18',
-  runtimeModule: 'react-compiler-runtime', // Redirects the missing specifier
+  target: "18",
+  runtimeModule: "react-compiler-runtime", // Redirects the missing specifier
 };
 
 export default defineConfig({

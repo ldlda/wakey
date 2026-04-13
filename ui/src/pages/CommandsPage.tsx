@@ -9,7 +9,12 @@ type Props = {
   onAfterCommand?: () => Promise<void>;
 };
 
-export function CommandsPage({ agents, selectedAgentId, onSelectAgent, onAfterCommand }: Props) {
+export function CommandsPage({
+  agents,
+  selectedAgentId,
+  onSelectAgent,
+  onAfterCommand,
+}: Props) {
   const [kind, setKind] = useState<CommandKind>("devs");
   const [query, setQuery] = useState("");
   const [output, setOutput] = useState("Select agent and run a command");
@@ -37,8 +42,14 @@ export function CommandsPage({ agents, selectedAgentId, onSelectAgent, onAfterCo
       <form className="form" onSubmit={submit}>
         <label>
           Agent
-          <select value={selectedAgentId} onChange={(e) => onSelectAgent(e.target.value)} required>
-            <option value="" disabled>Select agent</option>
+          <select
+            value={selectedAgentId}
+            onChange={(e) => onSelectAgent(e.target.value)}
+            required
+          >
+            <option value="" disabled>
+              Select agent
+            </option>
             {agents.map((agent) => (
               <option key={agent.agent_id} value={agent.agent_id}>
                 {agent.agent_id} ({agent.connected ? "connected" : "offline"})
@@ -48,7 +59,10 @@ export function CommandsPage({ agents, selectedAgentId, onSelectAgent, onAfterCo
         </label>
         <label>
           Command
-          <select value={kind} onChange={(e) => setKind(e.target.value as CommandKind)}>
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as CommandKind)}
+          >
             <option value="devs">devs</option>
             <option value="leases">leases</option>
             <option value="inventory">inventory</option>
@@ -57,9 +71,15 @@ export function CommandsPage({ agents, selectedAgentId, onSelectAgent, onAfterCo
         </label>
         <label>
           Query
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="optional" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="optional"
+          />
         </label>
-        <button type="submit" disabled={running || !selectedAgentId}>{running ? "Running..." : "Run command"}</button>
+        <button type="submit" disabled={running || !selectedAgentId}>
+          {running ? "Running..." : "Run command"}
+        </button>
       </form>
       <pre className="output">{output}</pre>
     </section>
