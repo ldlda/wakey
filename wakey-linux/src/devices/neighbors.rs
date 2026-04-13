@@ -106,8 +106,8 @@ pub async fn get_neighbors(
     }
 }
 
-/// Convenience wrapper around [`get_neighbors`] using the legacy `DeviceQuery`.
-pub async fn query_status(query: &DeviceQuery) -> Result<Vec<NeighborEntry>> {
+/// Convenience wrapper around [`get_neighbors`] using a `DeviceQuery` filter.
+pub async fn query_neighbors(query: &DeviceQuery) -> Result<Vec<NeighborEntry>> {
     get_neighbors(
         query.name.as_slice(),
         &query.filter.ips,

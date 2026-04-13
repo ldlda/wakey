@@ -18,7 +18,7 @@ pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
 /// status and wake flows should prefer deriving from inventory rather than
 /// directly from raw Linux source rows.
 pub async fn inventory(query: DeviceQuery) -> Result<DeviceInventory> {
-    let neighbors = wakey_linux::devices::query_status(&query).await?;
+    let neighbors = wakey_linux::devices::query_neighbors(&query).await?;
     let leases = get_leases(wakey_core::LeaseQuery {
         include_state: false,
     })
