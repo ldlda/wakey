@@ -1,6 +1,17 @@
 import { useMemo, useState } from "react";
 
 import type { Alert, AlertTransition } from "@/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 type Props = {
   alerts: Alert[];
@@ -51,83 +62,130 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
   }, [transitions, transitionQ]);
 
   return (
-    <section className="two-col">
-      <div className="card">
-        <div className="row-head">
-          <h2>Active Alerts</h2>
-          <button onClick={() => void onRefresh()}>Refresh</button>
-        </div>
-        <div className="grid-3 compact">
-          <label>
-            Severity
-            <select
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value)}
-            >
-              {severities.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Status
-            <select value={status} onChange={(e) => setStatus(e.target.value)}>
-              {statuses.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Kind
-            <select value={kind} onChange={(e) => setKind(e.target.value)}>
-              {kinds.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <p className="muted">
-          Showing {filteredAlerts.length} of {alerts.length}
-        </p>
-        <div className="list">
-          {filteredAlerts.map((alert) => (
-            <div className="row plain" key={alert.alert_id}>
-              <span>
-                {alert.kind}
-                {alert.agent_id ? ` (${alert.agent_id})` : ""}
-              </span>
-              <span>{alert.severity}</span>
-            </div>
-          ))}
-          {!filteredAlerts.length && (
-            <div className="empty">No active alerts</div>
-          )}
-        </div>
-      </div>
+    <section className="grid gap-3 lg:grid-cols-2">
+      <Card>
+        <CardHeader className="flex items-center justify-between gap-2">
+          <CardTitle>Active Alerts</CardTitle>
+          <Button size="sm" variant="outline" onClick={() => void onRefresh()}>
+            Refresh
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className="grid gap-1 text-sm text-muted-foreground">
+              Severity
+              <Select
+                value={severity}
+                onValueChange={(value) => {
+                  if (value) setSeverity(value);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Severity" />
+                </SelectTrigger>
+                <SelectContent>
+                  {severities.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {v}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
 
-      <div className="card">
-        <div className="row-head">
-          <h2>Transition History</h2>
-          <span className="muted">{filteredTransitions.length} shown</span>
-        </div>
-        <label>
-          Search
-          <input
-            value={transitionQ}
-            onChange={(e) => setTransitionQ(e.target.value)}
-            placeholder="kind, status, message, agent"
+            <label className="grid gap-1 text-sm text-muted-foreground">
+              Status
+              <Select
+                value={status}
+                onValueChange={(value) => {
+                  if (value) setStatus(value);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statuses.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {v}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+
+            <label className="grid gap-1 text-sm text-muted-foreground">
+              Kind
+              <Select
+                value={kind}
+                onValueChange={(value) => {
+                  if (value) setKind(value);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Kind" />
+                </SelectTrigger>
+                <SelectContent>
+                  {kinds.map((v) => (
+                    <SelectItem key={v} value={v}>
+                      {v}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          </div>
+
+          <p className="text-sm text-muted-foreground">
+            Showing {filteredAlerts.length} of {alerts.length}
+          </p>
+
+          <div className="grid gap-2">
+            {filteredAlerts.map((alert) => (
+              <div
+                className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                key={alert.alert_id}
+              >
+                <span>
+                  {alert.kind}
+                  {alert.agent_id ? ` (${alert.agent_id})` : ""}
+                </span>
+                <span className="text-muted-foreground">{alert.severity}</span>
+              </div>
+            ))}
+            {!filteredAlerts.length && (
+              <div className="px-1 text-sm text-muted-foreground">
+                No active alerts
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex items-center justify-between gap-2">
+          <CardTitle>Transition History</CardTitle>
+          <span className="text-sm text-muted-foreground">
+            {filteredTransitions.length} shown
+          </span>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            Search
+            <Input
+              value={transitionQ}
+              onChange={(e) => setTransitionQ(e.target.value)}
+              placeholder="kind, status, message, agent"
+            />
+          </label>
+
+          <Textarea
+            className="min-h-[230px] font-mono text-xs"
+            readOnly
+            value={JSON.stringify(filteredTransitions, null, 2)}
           />
-        </label>
-        <pre className="output small">
-          {JSON.stringify(filteredTransitions, null, 2)}
-        </pre>
-      </div>
+        </CardContent>
+      </Card>
     </section>
   );
 }

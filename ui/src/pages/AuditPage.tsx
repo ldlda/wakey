@@ -2,6 +2,17 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import type { AuditEvent } from "@/api";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 type Props = {
   events: AuditEvent[];
@@ -49,48 +60,78 @@ export function AuditPage({ events, onRefresh }: Props) {
   }, [events, eventType, outcome, needle]);
 
   return (
-    <section className="card span-full">
-      <div className="row-head">
-        <h2>Recent Audit Events</h2>
-        <button onClick={() => void onRefresh()}>Refresh</button>
-      </div>
-      <div className="grid-3 compact">
-        <label>
-          Event type
-          <select
-            value={eventType}
-            onChange={(e) => setEventType(e.target.value)}
-          >
-            {eventTypes.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Outcome
-          <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
-            {outcomes.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Search
-          <input
-            value={needle}
-            onChange={(e) => setNeedle(e.target.value)}
-            placeholder="message, agent, actor"
-          />
-        </label>
-      </div>
-      <p className="muted">
-        Showing {filtered.length} of {events.length}
-      </p>
-      <pre className="output">{JSON.stringify(filtered, null, 2)}</pre>
-    </section>
+    <Card size="sm">
+      <CardHeader className="flex items-center justify-between gap-2">
+        <CardTitle>Recent Audit Events</CardTitle>
+        <Button size="sm" variant="outline" onClick={() => void onRefresh()}>
+          Refresh
+        </Button>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            Event type
+            <Select
+              value={eventType}
+              onValueChange={(value) => {
+                if (value) setEventType(value);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Event type" />
+              </SelectTrigger>
+              <SelectContent>
+                {eventTypes.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            Outcome
+            <Select
+              value={outcome}
+              onValueChange={(value) => {
+                if (value) setOutcome(value);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Outcome" />
+              </SelectTrigger>
+              <SelectContent>
+                {outcomes.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {v}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            Search
+            <Input
+              value={needle}
+              onChange={(e) => setNeedle(e.target.value)}
+              placeholder="message, agent, actor"
+            />
+          </label>
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          Showing {filtered.length} of {events.length}
+        </p>
+
+        <Textarea
+          className="min-h-[360px] font-mono text-xs"
+          readOnly
+          value={JSON.stringify(filtered, null, 2)}
+        />
+      </CardContent>
+    </Card>
   );
 }
