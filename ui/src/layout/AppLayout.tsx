@@ -36,11 +36,15 @@ export function AppLayout() {
   }, [theme]);
 
   return (
-    <div className="app">
-      <header className="topbar">
+    <div className="mx-auto max-w-7xl p-4">
+      <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1>Wakey Operator UI</h1>
-          <p>Find devices fast and wake them reliably</p>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Wakey Operator UI
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Find devices fast and wake them reliably
+          </p>
         </div>
         <Button
           type="button"
@@ -54,13 +58,20 @@ export function AppLayout() {
         </Button>
       </header>
 
-      <nav className="tabs">
+      <nav className="mb-3 flex flex-wrap gap-2">
         {navItems.map(([to, label]) => (
           <NavLink
             key={to}
             to={to}
             end={to === "/"}
-            className={({ isActive }) => `tab ${isActive ? "active" : ""}`}
+            className={({ isActive }) =>
+              [
+                "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                isActive
+                  ? "border-primary/60 bg-primary/10 text-foreground"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground",
+              ].join(" ")
+            }
           >
             {label}
           </NavLink>

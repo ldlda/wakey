@@ -53,9 +53,9 @@ export function CommandsPage({
         <CardTitle>Command Runner</CardTitle>
       </CardHeader>
       <CardContent>
-        <form className="form" onSubmit={submit}>
-          <label>
-            Agent
+        <form className="grid gap-3" onSubmit={submit}>
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            <span>Agent</span>
             <Select
               value={selectedAgentId}
               onValueChange={(value) => {
@@ -76,8 +76,8 @@ export function CommandsPage({
             </Select>
           </label>
 
-          <label>
-            Command
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            <span>Command</span>
             <Select
               value={kind}
               onValueChange={(value) => setKind(value as CommandKind)}
@@ -94,8 +94,8 @@ export function CommandsPage({
             </Select>
           </label>
 
-          <label>
-            Query
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            <span>Query</span>
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -108,7 +108,11 @@ export function CommandsPage({
           </Button>
         </form>
 
-        <Textarea className="output" value={output} readOnly />
+        <Textarea
+          className="mt-3 max-h-80 min-h-48 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs"
+          value={output}
+          readOnly
+        />
       </CardContent>
     </Card>
   );

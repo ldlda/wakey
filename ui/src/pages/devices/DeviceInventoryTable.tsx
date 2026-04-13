@@ -43,8 +43,8 @@ export function DeviceInventoryTable({
   onCopyValue,
 }: Props) {
   return (
-    <div className="list device-list">
-      <div className="row plain device-row device-header">
+    <div className="device-list grid gap-2">
+      <div className="device-row device-header rounded-md border bg-muted/60 px-3 py-2 text-sm">
         <span className="device-cell device-select">
           <input
             type="checkbox"
@@ -83,7 +83,10 @@ export function DeviceInventoryTable({
       </div>
 
       {rows.map((row) => (
-        <div className="row plain device-row" key={row.id}>
+        <div
+          className="device-row rounded-md border bg-card px-3 py-2 text-sm"
+          key={row.id}
+        >
           <span className="device-cell device-select" data-label="Pick">
             <input
               type="checkbox"
@@ -96,14 +99,14 @@ export function DeviceInventoryTable({
             {row.name}
           </span>
           <span
-            className="device-cell muted"
+            className="device-cell text-muted-foreground"
             data-label="IP"
             title={row.ips.join(", ") || "-"}
           >
             {summarize(row.ips)}
           </span>
           <span
-            className="device-cell muted"
+            className="device-cell text-muted-foreground"
             data-label="MAC"
             title={row.macs.join(", ") || "-"}
           >
@@ -157,7 +160,11 @@ export function DeviceInventoryTable({
         </div>
       ))}
 
-      {!rows.length && <div className="empty">No devices found</div>}
+      {!rows.length && (
+        <div className="px-1 py-2 text-sm text-muted-foreground">
+          No devices found
+        </div>
+      )}
     </div>
   );
 }

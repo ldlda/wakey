@@ -6,6 +6,17 @@ import {
   issueEnrollToken,
   revokeEnrollToken,
 } from "@/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 function formatUnix(unix: number): string {
   return new Date(unix * 1000).toLocaleString();
@@ -77,74 +88,103 @@ export function TokensPage() {
   }, [includeExpired]);
 
   return (
-    <section className="two-col">
-      <div className="card">
-        <div className="row-head">
-          <h2>Enroll Tokens</h2>
-          <button onClick={() => void load()} disabled={busy}>
+    <section className="grid gap-3 xl:grid-cols-2">
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+          <CardTitle>Enroll Tokens</CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            disabled={busy}
+          >
             Refresh
-          </button>
-        </div>
-        <div className="form">
-          <label>
-            Include expired
-            <select
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            <span>Include expired</span>
+            <Select
               value={includeExpired ? "yes" : "no"}
-              onChange={(e) => setIncludeExpired(e.target.value === "yes")}
+              onValueChange={(value) => setIncludeExpired(value === "yes")}
             >
-              <option value="no">No</option>
-              <option value="yes">Yes</option>
-            </select>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Choose option" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="no">No</SelectItem>
+                <SelectItem value="yes">Yes</SelectItem>
+              </SelectContent>
+            </Select>
           </label>
-        </div>
-        <p className="muted">
-          {activeCount} active, {tokens.length} shown
-        </p>
-        <div className="list">
-          {tokens.map((token) => (
-            <div className="row" key={token.enroll_token}>
-              <div>
-                <strong>{token.enroll_token}</strong>
-                <div className="muted">
-                  expires: {formatUnix(token.expires_at_unix)}
+          <p className="text-sm text-muted-foreground">
+            {activeCount} active, {tokens.length} shown
+          </p>
+          <div className="grid gap-2">
+            {tokens.map((token) => (
+              <div
+                className="flex items-start justify-between gap-3 rounded-md border bg-card px-3 py-2"
+                key={token.enroll_token}
+              >
+                <div>
+                  <strong>{token.enroll_token}</strong>
+                  <div className="text-xs text-muted-foreground">
+                    expires: {formatUnix(token.expires_at_unix)}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={token.expired ? "destructive" : "secondary"}>
+                    {token.expired ? "expired" : "active"}
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void onRevoke(token.enroll_token)}
+                    disabled={busy}
+                  >
+                    Revoke
+                  </Button>
                 </div>
               </div>
-              <div className="token-actions">
-                <span className={`pill ${token.expired ? "error" : "ready"}`}>
-                  {token.expired ? "expired" : "active"}
-                </span>
-                <button
-                  onClick={() => void onRevoke(token.enroll_token)}
-                  disabled={busy}
-                >
-                  Revoke
-                </button>
+            ))}
+            {!tokens.length && (
+              <div className="px-1 py-2 text-sm text-muted-foreground">
+                No tokens found
               </div>
-            </div>
-          ))}
-          {!tokens.length && <div className="empty">No tokens found</div>}
-        </div>
-      </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="card">
-        <h2>Issue Token</h2>
-        <div className="form">
-          <label>
-            TTL seconds
-            <input
+      <Card>
+        <CardHeader>
+          <CardTitle>Issue Token</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <label className="grid gap-1 text-sm text-muted-foreground">
+            <span>TTL seconds</span>
+            <Input
               type="number"
               min={1}
               value={ttlSeconds}
               onChange={(e) => setTtlSeconds(e.target.value)}
             />
           </label>
-          <button onClick={() => void onIssue()} disabled={busy}>
+          <Button onClick={() => void onIssue()} disabled={busy}>
             Issue
-          </button>
-        </div>
-        {status && <pre className="output">{status}</pre>}
-        {error && <pre className="error">{error}</pre>}
-      </div>
+          </Button>
+          {status && (
+            <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
+              {status}
+            </pre>
+          )}
+          {error && (
+            <pre className="max-h-80 overflow-auto rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive">
+              {error}
+            </pre>
+          )}
+        </CardContent>
+      </Card>
     </section>
   );
 }

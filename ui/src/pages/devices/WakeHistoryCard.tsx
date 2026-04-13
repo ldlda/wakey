@@ -13,28 +13,30 @@ type Props = {
 export function WakeHistoryCard({ events, onClear }: Props) {
   return (
     <Card>
-      <CardHeader className="row-head">
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle>Recent Wake Actions</CardTitle>
         <Button variant="outline" size="sm" onClick={onClear}>
           Clear
         </Button>
       </CardHeader>
       <CardContent>
-        <div className="list">
+        <div className="grid gap-2">
           {events.map((event, idx) => (
             <div
-              className="row plain"
+              className="flex items-start justify-between gap-3 rounded-md border bg-card px-3 py-2"
               key={`${event.ts}-${event.target}-${idx}`}
             >
               <div>
                 <strong>{event.target}</strong>
-                <div className="muted">
+                <div className="text-xs text-muted-foreground">
                   {new Date(event.ts).toLocaleString()} on {event.agentId}
                 </div>
-                <div className="muted">{event.detail}</div>
+                <div className="text-xs text-muted-foreground">
+                  {event.detail}
+                </div>
                 {event.requestId && (
                   <Link
-                    className="muted linkish"
+                    className="linkish text-xs text-muted-foreground"
                     to={`/audit?q=${encodeURIComponent(event.requestId)}`}
                   >
                     View related audit ({event.requestId})
@@ -48,7 +50,11 @@ export function WakeHistoryCard({ events, onClear }: Props) {
               </Badge>
             </div>
           ))}
-          {!events.length && <div className="empty">No wake actions yet</div>}
+          {!events.length && (
+            <div className="px-1 py-2 text-sm text-muted-foreground">
+              No wake actions yet
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

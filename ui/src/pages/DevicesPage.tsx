@@ -288,9 +288,9 @@ export function DevicesPage({
   }
 
   return (
-    <section className="two-col">
+    <section className="grid gap-3 xl:grid-cols-[2fr_1fr]">
       <Card>
-        <CardHeader className="row-head">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
           <CardTitle>Devices</CardTitle>
           <Button
             variant="outline"
@@ -303,9 +303,9 @@ export function DevicesPage({
         </CardHeader>
 
         <CardContent>
-          <div className="grid-3 compact">
-            <label>
-              Agent
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <label className="grid gap-1 text-sm text-muted-foreground">
+              <span>Agent</span>
               <Select
                 value={selectedAgentId}
                 onValueChange={(value) => {
@@ -326,8 +326,8 @@ export function DevicesPage({
               </Select>
             </label>
 
-            <label className="span-2">
-              Search
+            <label className="grid gap-1 text-sm text-muted-foreground sm:col-span-2">
+              <span>Search</span>
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -404,13 +404,21 @@ export function DevicesPage({
             >
               Clear selection
             </Button>
-            {copyStatus && <span className="muted">{copyStatus}</span>}
+            {copyStatus && (
+              <span className="text-sm text-muted-foreground">
+                {copyStatus}
+              </span>
+            )}
           </div>
 
-          <p className="muted">
+          <p className="text-sm text-muted-foreground">
             Showing {filtered.length} of {rows.length}
           </p>
-          {error && <pre className="error">{error}</pre>}
+          {error && (
+            <pre className="max-h-80 overflow-auto rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive">
+              {error}
+            </pre>
+          )}
 
           <DeviceInventoryTable
             rows={filtered}
