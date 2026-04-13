@@ -2,13 +2,6 @@ use anyhow::Result;
 use tracing::{debug, instrument};
 use wakey_core::InterfaceSummary;
 
-/// Return interface names only.
-///
-/// This is the old, lightweight interface listing surface kept for compatibility.
-pub async fn list_interfaces() -> Result<Vec<String>> {
-    Ok(wakey_linux::devices::devs_sorted().await)
-}
-
 /// Return condensed interface summaries useful for CLI and wake routing.
 #[instrument(skip_all)]
 pub async fn get_interface_summaries() -> Result<Vec<InterfaceSummary>> {

@@ -1,58 +1,6 @@
 use anyhow::{Context, Result};
 use lda_ipjs::subcommands::address;
-use std::collections::HashSet;
 use wakey_core::{InterfaceAddr, InterfaceSummary};
-
-/// Discover interface names from Linux without requiring `ip`.
-///
-/// This is the lowest-common-denominator interface listing path and is used for
-/// quick existence checks and legacy string-only callers.
-pub async fn list_devs() -> HashSet<String> {
-    fn get_dev() -> HashSet<String> {
-        let mut devs: HashSet<String> = HashSet::new();
-        if let Ok(rd) = std::fs::read_dir("/sys/class/net") {
-            for e in rd.flatten() {
-                if e.file_type()
-                    .map(|ft| {
-                        if ft.is_symlink() {
-                            std::fs::metadata(e.path())
-                                .map(|m| m.is_dir())
-                                .unwrap_or(false)
-                        } else {
-                            ft.is_dir()
-                        }
-                    })
-                    .unwrap_or(false)
-                    && let Ok(name) = e.file_name().into_string()
-                    && name != "lo"
-                    && !name.is_empty()
-                {
-                    devs.insert(name);
-                }
-            }
-        } else if let Ok(txt) = std::fs::read_to_string("/proc/net/dev") {
-            for line in txt.lines().skip(2) {
-                if let Some((name, _rest)) = line.split_once(':') {
-                    let n = name.trim().to_string();
-                    if n != "lo" && !n.is_empty() {
-                        devs.insert(n);
-                    }
-                }
-            }
-        }
-        devs
-    }
-
-    tokio::task::spawn_blocking(get_dev)
-        .await
-        .unwrap_or_default()
-}
-
-pub async fn devs_sorted() -> Vec<String> {
-    let mut v: Vec<String> = list_devs().await.into_iter().collect();
-    v.sort();
-    v
-}
 
 /// Build condensed interface summaries from Linux address data.
 ///
@@ -100,7 +48,10 @@ pub async fn list_interface_summaries() -> Result<Vec<InterfaceSummary>> {
     Ok(out)
 }
 
-/// Return whether a named interface exists according to [`list_devs`].
+/// Return whether a named non-loopback interface exists.
 pub async fn has_dev(name: &str) -> bool {
-    list_devs().await.contains(name)
+    match list_interface_summaries().await {
+        Ok(interfaces) => interfaces.iter().any(|iface| iface.ifname == name),
+        Err(_) => false,
+    }
 }

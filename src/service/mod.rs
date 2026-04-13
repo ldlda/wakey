@@ -4,7 +4,7 @@ pub mod leases;
 pub mod query;
 pub mod wake;
 
-pub use interfaces::{get_interface_summaries, get_interface_summary, get_ips, list_interfaces};
+pub use interfaces::{get_interface_summaries, get_interface_summary, get_ips};
 pub use inventory::{inventory, merge_devices, resolve_devices};
 pub use leases::{get_leases, leases_without_state};
 pub use query::{query_to_device_query, resolve_query, resolve_selector};
