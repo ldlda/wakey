@@ -10,7 +10,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { DeviceInventoryTable } from "@/pages/devices/DeviceInventoryTable";
 import { WakeHistoryCard } from "@/pages/devices/WakeHistoryCard";
@@ -38,6 +37,11 @@ type Props = {
   onSelectAgent: (agentId: string) => void;
   onAfterWake?: () => Promise<void>;
 };
+
+function middleEllipsis(value: string, head = 16, tail = 10): string {
+  if (value.length <= head + tail + 3) return value;
+  return `${value.slice(0, head)}...${value.slice(-tail)}`;
+}
 
 export function DevicesPage({
   agents,
@@ -339,13 +343,23 @@ export function DevicesPage({
                 }}
               >
                 <SelectTrigger className="w-full min-w-0">
-                  <SelectValue placeholder="Select agent" />
+                  <span className="min-w-0 flex-1 truncate text-start">
+                    {selectedAgentId
+                      ? middleEllipsis(selectedAgentId)
+                      : "Select agent"}
+                  </span>
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent
+                  className="max-w-[min(92vw,30rem)]"
+                  alignItemWithTrigger={false}
+                >
                   {agents.map((agent) => (
-                    <SelectItem key={agent.agent_id} value={agent.agent_id}>
-                      {agent.agent_id} (
-                      {agent.connected ? "connected" : "offline"})
+                    <SelectItem
+                      key={agent.agent_id}
+                      value={agent.agent_id}
+                      className="pe-10"
+                    >
+                      {middleEllipsis(agent.agent_id, 14, 8)}
                     </SelectItem>
                   ))}
                 </SelectContent>
