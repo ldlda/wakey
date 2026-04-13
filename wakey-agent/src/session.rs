@@ -229,7 +229,7 @@ where
     let payload =
         serde_json::to_string(message).context("failed to serialize websocket message")?;
     debug!(message_type = %client_message_kind(message), "sending websocket message");
-    sink.send(Message::Text(payload))
+    sink.send(Message::Text(payload.into()))
         .await
         .context("failed to send websocket message")?;
     Ok(())

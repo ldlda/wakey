@@ -9,10 +9,13 @@ clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
 http = "1"
 macaddr = { version = "1", features = ["serde", "serde_std"] }
-nix = { version = "0.30", default-features = false, features = ["signal", "process"] }
-reqwest = { version = "0.12", default-features = false, features = [
+nix = { version = "0.31", default-features = false, features = [
+    "signal",
+    "process",
+] }
+reqwest = { version = "0.13", default-features = false, features = [
     "json",
-    "rustls-tls",
+    "rustls",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,10 +27,14 @@ tokio = { version = "1", features = [
     "signal",
     "sync",
 ] }
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
-toml = "0.8"
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+toml = "1.1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "fmt",
+    "time",
+] }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 url = "2"
 wakey = { path = "..", registry = "gitea" }
