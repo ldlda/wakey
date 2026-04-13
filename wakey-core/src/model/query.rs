@@ -1,37 +1,53 @@
 use macaddr::MacAddr;
-use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, OneOrMany, serde_as};
+use serde::Deserialize;
 use std::net::IpAddr;
 
 use crate::model::NeighborState;
 
-/// Legacy-compatible query shape used by HTTP and service adapters.
-///
-/// `name` carries free-form text selection, while `filter` carries explicit
-/// machine-readable filters such as IPs, MACs, interfaces, and neighbor states.
-#[derive(Debug, Default, Clone, Hash, Deserialize, Serialize)]
-pub struct DeviceQuery {
-    pub name: Option<String>,
-    #[serde(flatten)]
-    pub filter: DeviceFilters,
+/// Canonical inventory query represented as an AND of selector terms.
+pub type InventoryQuery = Vec<Query>;
+
+#[derive(Debug, Default, Clone)]
+pub struct InventoryQueryBuilder {
+    terms: InventoryQuery,
 }
 
-/// Explicit device filters for source- and service-level queries.
-#[serde_as]
-#[derive(Debug, Default, Clone, Hash, Serialize, Deserialize)]
-pub struct DeviceFilters {
-    #[serde_as(as = "OneOrMany<_>")]
-    #[serde(default)]
-    pub ips: Vec<IpAddr>,
-    #[serde_as(as = "OneOrMany<_>")]
-    #[serde(default)]
-    pub devs: Vec<String>,
-    #[serde_as(as = "OneOrMany<_>")]
-    #[serde(default)]
-    pub nuds: Vec<NeighborState>,
-    #[serde_as(as = "OneOrMany<DisplayFromStr>")]
-    #[serde(default)]
-    pub macs: Vec<MacAddr>,
+impl InventoryQueryBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn maybe_text(mut self, text: Option<String>) -> Self {
+        if let Some(text) = text {
+            self.terms.push(Query::Text(text));
+        }
+        self
+    }
+
+    pub fn ips(mut self, values: impl IntoIterator<Item = IpAddr>) -> Self {
+        self.terms.extend(values.into_iter().map(Query::Ip));
+        self
+    }
+
+    pub fn interfaces(mut self, values: impl IntoIterator<Item = String>) -> Self {
+        self.terms.extend(values.into_iter().map(Query::Interface));
+        self
+    }
+
+    pub fn neighbor_states(mut self, values: impl IntoIterator<Item = NeighborState>) -> Self {
+        self.terms
+            .extend(values.into_iter().map(Query::NeighborState));
+        self
+    }
+
+    pub fn macs(mut self, values: impl IntoIterator<Item = MacAddr>) -> Self {
+        self.terms.extend(values.into_iter().map(Query::Mac));
+        self
+    }
+
+    pub fn build(self) -> InventoryQuery {
+        self.terms
+    }
 }
 
 /// Path helper for routes that receive a single `{name}` segment.
@@ -51,7 +67,7 @@ pub enum QueryInput {
 }
 
 /// Higher-level typed selector used by the service layer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Query {
     Text(String),
     Ip(IpAddr),

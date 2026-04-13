@@ -51,7 +51,7 @@ async fn dispatch_devs(req: DevsRequest) -> Result<CommandResult> {
 }
 
 async fn dispatch_inventory(req: InventoryRequest) -> Result<CommandResult> {
-    let inventory = wakey::inventory(req.into_device_query()).await?;
+    let inventory = wakey::inventory(req.into_inventory_query()).await?;
     debug!(
         rows = inventory.devices.len(),
         "dispatched inventory command"

@@ -8,7 +8,7 @@ use anyhow::Result;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use tracing::debug;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use wakey_core::{DeviceFilters, DeviceQuery, InterfaceSummary, WakeResult};
+use wakey_core::{InterfaceSummary, InventoryQuery, InventoryQueryBuilder, Query, WakeResult};
 
 #[derive(Parser)]
 #[command(name = "wakey")]
@@ -141,7 +141,10 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Inventory(args) => {
             let as_json = args.json;
             let query = inventory_args_to_query(args);
-            let selected_name = query.name.clone();
+            let selected_name = query.iter().find_map(|term| match term {
+                Query::Text(text) => Some(text.clone()),
+                _ => None,
+            });
             debug!(?query, json = as_json, "dispatching inventory command");
             let status = wakey::inventory(query).await?;
             if as_json {
@@ -207,29 +210,14 @@ pub async fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-fn inventory_args_to_query(args: InventoryArgs) -> DeviceQuery {
-    if let Some(query) = args.query.as_ref()
-        && args.name.is_none()
-        && args.ips.is_empty()
-        && args.devs.is_empty()
-        && args.nuds.is_empty()
-        && args.macs.is_empty()
-    {
-        return DeviceQuery {
-            name: Some(query.clone()),
-            ..Default::default()
-        };
-    }
-
-    DeviceQuery {
-        name: args.name.or(args.query),
-        filter: DeviceFilters {
-            ips: args.ips,
-            devs: args.devs,
-            nuds: args.nuds,
-            macs: args.macs,
-        },
-    }
+fn inventory_args_to_query(args: InventoryArgs) -> InventoryQuery {
+    InventoryQueryBuilder::new()
+        .maybe_text(args.name.or(args.query))
+        .ips(args.ips)
+        .interfaces(args.devs)
+        .neighbor_states(args.nuds)
+        .macs(args.macs)
+        .build()
 }
 
 fn validate_wake_args(args: &WakeArgs) -> Result<()> {

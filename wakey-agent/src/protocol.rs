@@ -4,7 +4,8 @@ use std::fmt;
 use std::net::IpAddr;
 use wakey_core::parse::mac;
 use wakey_core::{
-    DeviceFilters, DeviceInventory, DeviceQuery, DhcpLeaseWithState, InterfaceSummary, WakeResult,
+    DeviceInventory, DhcpLeaseWithState, InterfaceSummary, InventoryQuery, InventoryQueryBuilder,
+    WakeResult,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -95,43 +96,28 @@ pub struct InventoryRequest {
 }
 
 impl InventoryRequest {
-    pub fn into_device_query(self) -> DeviceQuery {
-        into_device_query(
+    pub fn into_inventory_query(self) -> InventoryQuery {
+        into_inventory_query(
             self.query, self.name, self.ips, self.devs, self.nuds, self.macs,
         )
     }
 }
 
-fn into_device_query(
+fn into_inventory_query(
     query: Option<String>,
     name: Option<String>,
     ips: Vec<IpAddr>,
     devs: Vec<String>,
     nuds: Vec<wakey_core::NeighborState>,
     macs: Vec<MacAddr>,
-) -> DeviceQuery {
-    if let Some(q) = query.as_ref()
-        && name.is_none()
-        && ips.is_empty()
-        && devs.is_empty()
-        && nuds.is_empty()
-        && macs.is_empty()
-    {
-        return DeviceQuery {
-            name: Some(q.clone()),
-            ..Default::default()
-        };
-    }
-
-    DeviceQuery {
-        name: name.or(query),
-        filter: DeviceFilters {
-            ips,
-            devs,
-            nuds,
-            macs,
-        },
-    }
+) -> InventoryQuery {
+    InventoryQueryBuilder::new()
+        .maybe_text(name.or(query))
+        .ips(ips)
+        .interfaces(devs)
+        .neighbor_states(nuds)
+        .macs(macs)
+        .build()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

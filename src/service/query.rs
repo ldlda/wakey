@@ -1,12 +1,12 @@
 use anyhow::Result;
-use wakey_core::{DeviceFilters, DeviceQuery, Query, QueryInput};
+use wakey_core::{InventoryQuery, Query, QueryInput};
 
-/// Resolve free-form user input into the legacy `DeviceQuery` filter shape.
+/// Resolve free-form user input into an `InventoryQuery` filter shape.
 ///
 /// This is the compatibility entrypoint used by CLI and HTTP paths that still
-/// speak in terms of `DeviceQuery`.
-pub async fn resolve_query(input: impl Into<String>) -> Result<DeviceQuery> {
-    query_to_device_query(resolve_selector(input).await?)
+/// speak in terms of query/filter payloads.
+pub async fn resolve_query(input: impl Into<String>) -> Result<InventoryQuery> {
+    query_to_inventory_query(resolve_selector(input).await?)
 }
 
 /// Classify one piece of free-form user input into a typed selector.
@@ -25,43 +25,10 @@ pub async fn resolve_selector(input: impl Into<String>) -> Result<Query> {
     )
 }
 
-/// Convert the newer selector-oriented `Query` model into a `DeviceQuery`.
+/// Convert the newer selector-oriented `Query` model into an `InventoryQuery`.
 ///
 /// This keeps the old filter-based service and HTTP surfaces working while the
 /// internals migrate toward selector- and device-oriented APIs.
-pub fn query_to_device_query(query: Query) -> Result<DeviceQuery> {
-    Ok(match query {
-        Query::Ip(ip_addr) => DeviceQuery {
-            filter: DeviceFilters {
-                ips: vec![ip_addr],
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        Query::Mac(mac_addr) => DeviceQuery {
-            filter: DeviceFilters {
-                macs: vec![mac_addr],
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        Query::Interface(dev) => DeviceQuery {
-            filter: DeviceFilters {
-                devs: vec![dev],
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        Query::NeighborState(state) => DeviceQuery {
-            filter: DeviceFilters {
-                nuds: vec![state],
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        Query::Text(name) => DeviceQuery {
-            name: Some(name),
-            ..Default::default()
-        },
-    })
+pub fn query_to_inventory_query(query: Query) -> Result<InventoryQuery> {
+    Ok(vec![query])
 }

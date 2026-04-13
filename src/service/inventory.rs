@@ -1,6 +1,7 @@
 use anyhow::Result;
 use wakey_core::{
-    Device, DeviceInventory, DeviceQuery, DhcpLease, DhcpLeaseWithState, NeighborEntry, Presence,
+    Device, DeviceInventory, DhcpLease, DhcpLeaseWithState, InventoryQuery, NeighborEntry,
+    Presence, Query,
 };
 
 use crate::service::leases::get_leases;
@@ -17,7 +18,7 @@ pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
 /// This is the current center of gravity for the service layer. Higher-level
 /// status and wake flows should prefer deriving from inventory rather than
 /// directly from raw Linux source rows.
-pub async fn inventory(query: DeviceQuery) -> Result<DeviceInventory> {
+pub async fn inventory(query: InventoryQuery) -> Result<DeviceInventory> {
     let neighbors = wakey_linux::devices::query_neighbors(&query).await?;
     let leases = get_leases(wakey_core::LeaseQuery {
         include_state: false,
@@ -35,7 +36,7 @@ pub async fn inventory(query: DeviceQuery) -> Result<DeviceInventory> {
 pub fn merge_devices(
     neighbors: Vec<NeighborEntry>,
     leases: Vec<DhcpLeaseWithState>,
-    query: &DeviceQuery,
+    query: &InventoryQuery,
 ) -> Vec<Device> {
     use std::collections::BTreeMap;
 
@@ -58,34 +59,45 @@ pub fn merge_devices(
         .map(|(neighbors, leases)| Device::from_parts(neighbors, leases))
         .collect();
 
-    if let Some(name) = &query.name {
-        devices.retain(|device| device.names.iter().any(|n| n == name));
+    let mut texts: Vec<&str> = Vec::new();
+    let mut devs: Vec<&str> = Vec::new();
+    let mut ips = Vec::new();
+    let mut macs = Vec::new();
+    let mut nuds = Vec::new();
+
+    for term in query {
+        match term {
+            Query::Text(v) => texts.push(v.as_str()),
+            Query::Interface(v) => devs.push(v.as_str()),
+            Query::Ip(v) => ips.push(*v),
+            Query::Mac(v) => macs.push(*v),
+            Query::NeighborState(v) => nuds.push(*v),
+        }
     }
-    if !query.filter.devs.is_empty() {
+
+    if !texts.is_empty() {
+        devices.retain(|device| device.names.iter().any(|n| texts.iter().any(|t| n == t)));
+    }
+    if !devs.is_empty() {
         devices.retain(|device| {
             device
                 .interfaces
                 .iter()
-                .any(|iface| query.filter.devs.contains(iface))
+                .any(|iface| devs.iter().any(|d| iface == d))
         });
     }
-    if !query.filter.ips.is_empty() {
-        devices.retain(|device| device.ips.iter().any(|ip| query.filter.ips.contains(ip)));
+    if !ips.is_empty() {
+        devices.retain(|device| device.ips.iter().any(|ip| ips.contains(ip)));
     }
-    if !query.filter.macs.is_empty() {
-        devices.retain(|device| {
-            device
-                .macs
-                .iter()
-                .any(|mac| query.filter.macs.contains(mac))
-        });
+    if !macs.is_empty() {
+        devices.retain(|device| device.macs.iter().any(|mac| macs.contains(mac)));
     }
-    if !query.filter.nuds.is_empty() {
+    if !nuds.is_empty() {
         devices.retain(|device| {
             device
                 .neighbors
                 .iter()
-                .any(|neighbor| query.filter.nuds.contains(&neighbor.state))
+                .any(|neighbor| nuds.contains(&neighbor.state))
         });
     }
 
@@ -103,5 +115,62 @@ const fn presence_rank(presence: Presence) -> u8 {
         Presence::LikelyOnline => 2,
         Presence::Unknown => 1,
         Presence::Offline => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+    use wakey_core::{DhcpLease, InventoryQueryBuilder, NeighborState};
+
+    fn sample_neighbors() -> Vec<NeighborEntry> {
+        vec![NeighborEntry {
+            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+            dev: Some("br-lan".to_string()),
+            mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
+            state: NeighborState::Reachable,
+        }]
+    }
+
+    fn sample_leases() -> Vec<DhcpLeaseWithState> {
+        vec![DhcpLeaseWithState {
+            lease_line: DhcpLease {
+                expires_epoch: 1,
+                ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+                mac: "aa:bb:cc:dd:ee:ff".parse().expect("mac"),
+                name: Some("pc".to_string()),
+            },
+            nud_state: None,
+        }]
+    }
+
+    #[test]
+    fn merge_devices_applies_and_across_categories() {
+        let query = InventoryQueryBuilder::new()
+            .maybe_text(Some("pc".to_string()))
+            .interfaces(vec!["br-lan".to_string()])
+            .neighbor_states(vec![NeighborState::Reachable])
+            .build();
+
+        let out = merge_devices(sample_neighbors(), sample_leases(), &query);
+        assert_eq!(out.len(), 1);
+
+        let no_match_query = InventoryQueryBuilder::new()
+            .maybe_text(Some("pc".to_string()))
+            .interfaces(vec!["eth9".to_string()])
+            .build();
+        let out = merge_devices(sample_neighbors(), sample_leases(), &no_match_query);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn merge_devices_allows_or_within_same_category() {
+        let query = InventoryQueryBuilder::new()
+            .neighbor_states(vec![NeighborState::Stale, NeighborState::Reachable])
+            .build();
+
+        let out = merge_devices(sample_neighbors(), sample_leases(), &query);
+        assert_eq!(out.len(), 1);
     }
 }

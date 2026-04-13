@@ -9,5 +9,5 @@ pub use device::{Device, DeviceId, DeviceInventory, Presence};
 pub use dhcp::{DhcpLease, DhcpLeaseWithState, LeaseQuery};
 pub use interface::{InterfaceAddr, InterfaceSummary};
 pub use neighbor::{NeighborEntry, NeighborParseError, NeighborState, parse_neighbor_line};
-pub use query::{DeviceFilters, DeviceQuery, NamePath, Query, QueryInput};
+pub use query::{InventoryQuery, InventoryQueryBuilder, NamePath, Query, QueryInput};
 pub use wake::{WakeResult, WakeStatus, WakeTarget, WakeTargetResult};

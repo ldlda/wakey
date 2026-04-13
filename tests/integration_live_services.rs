@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 
 use wakey::{broadcast_wake_targets, get_interface_summaries, inventory, resolve_query};
-use wakey_core::{DeviceFilters, DeviceQuery};
+use wakey_core::{InventoryQuery, Query};
 
 #[tokio::test]
 #[ignore = "runs against live router data; use on-device or via scripts/test_remote.ps1"]
@@ -18,7 +18,7 @@ async fn interfaces_real_router_prints_interface_summaries() -> anyhow::Result<(
 #[tokio::test]
 #[ignore = "runs against live router data; use on-device or via scripts/test_remote.ps1"]
 async fn inventory_real_router_default_query_returns_rows_or_empty_cleanly() -> anyhow::Result<()> {
-    let inv = inventory(DeviceQuery::default()).await?;
+    let inv = inventory(InventoryQuery::default()).await?;
     println!("{}", serde_json::to_string_pretty(&inv)?);
     Ok(())
 }
@@ -32,14 +32,7 @@ async fn inventory_real_router_for_interface_filter_succeeds() -> anyhow::Result
         .map(|iface| iface.ifname.clone())
         .expect("expected at least one interface");
 
-    let inv = inventory(DeviceQuery {
-        name: None,
-        filter: DeviceFilters {
-            devs: vec![first.clone()],
-            ..Default::default()
-        },
-    })
-    .await?;
+    let inv = inventory(vec![Query::Interface(first.clone())]).await?;
 
     println!("filtered dev: {first}");
     println!("{}", serde_json::to_string_pretty(&inv)?);

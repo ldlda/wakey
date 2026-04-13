@@ -3,7 +3,7 @@ pub mod utils;
 
 pub use service::{
     broadcast_wake_targets, get_interface_summaries, get_interface_summary, get_ips, get_leases,
-    inventory, leases_without_state, merge_devices, query_to_device_query, resolve_devices,
+    inventory, leases_without_state, merge_devices, query_to_inventory_query, resolve_devices,
     resolve_query, resolve_selector, resolve_wake_targets, wake_explicit, wake_from_query,
     wake_targets,
 };
@@ -20,8 +20,8 @@ mod tests {
     async fn resolve_query_parses_ip() {
         let query = resolve_query("192.168.1.10").await.expect("resolve query");
         assert_eq!(
-            query.filter.ips,
-            vec![IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10))]
+            query,
+            vec![Query::Ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)))]
         );
     }
 
@@ -30,13 +30,16 @@ mod tests {
         let query = resolve_query("aa:bb:cc:dd:ee:ff")
             .await
             .expect("resolve query");
-        assert_eq!(query.filter.macs.len(), 1);
+        assert_eq!(
+            query,
+            vec![Query::Mac("aa:bb:cc:dd:ee:ff".parse().expect("mac"))]
+        );
     }
 
     #[tokio::test]
     async fn resolve_query_parses_nud() {
         let query = resolve_query("reachable").await.expect("resolve query");
-        assert_eq!(query.filter.nuds, vec![NeighborState::Reachable]);
+        assert_eq!(query, vec![Query::NeighborState(NeighborState::Reachable)]);
     }
 
     #[tokio::test]
@@ -80,7 +83,7 @@ mod tests {
             },
             nud_state: None,
         }];
-        let devices = merge_devices(neighbors, leases, &wakey_core::DeviceQuery::default());
+        let devices = merge_devices(neighbors, leases, &wakey_core::InventoryQuery::default());
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].presence, Presence::Online);
         assert_eq!(devices[0].names, vec!["pc".to_string()]);

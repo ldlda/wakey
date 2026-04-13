@@ -3,7 +3,7 @@ use futures::future::try_join_all;
 use lda_ipjs::subcommands::neighbor;
 use std::collections::HashSet;
 use std::net::IpAddr;
-use wakey_core::{DeviceQuery, NeighborEntry, NeighborState};
+use wakey_core::{InventoryQuery, NeighborEntry, NeighborState, Query};
 
 /// Resolve a hostname through the local resolver and return all reported IPs.
 pub async fn get_ips(machine_name: &str) -> Result<impl Iterator<Item = IpAddr>> {
@@ -106,16 +106,25 @@ pub async fn get_neighbors(
     }
 }
 
-/// Convenience wrapper around [`get_neighbors`] using a `DeviceQuery` filter.
-pub async fn query_neighbors(query: &DeviceQuery) -> Result<Vec<NeighborEntry>> {
-    get_neighbors(
-        query.name.as_slice(),
-        &query.filter.ips,
-        &query.filter.devs,
-        &query.filter.nuds,
-        &query.filter.macs,
-    )
-    .await
+/// Convenience wrapper around [`get_neighbors`] using an `InventoryQuery` filter.
+pub async fn query_neighbors(query: &InventoryQuery) -> Result<Vec<NeighborEntry>> {
+    let mut names: Vec<&str> = Vec::new();
+    let mut ips = Vec::new();
+    let mut devs: Vec<&str> = Vec::new();
+    let mut nuds = Vec::new();
+    let mut macs = Vec::new();
+
+    for term in query {
+        match term {
+            Query::Text(v) => names.push(v.as_str()),
+            Query::Ip(v) => ips.push(*v),
+            Query::Interface(v) => devs.push(v.as_str()),
+            Query::NeighborState(v) => nuds.push(*v),
+            Query::Mac(v) => macs.push(*v),
+        }
+    }
+
+    get_neighbors(&names, &ips, &devs, &nuds, &macs).await
 }
 
 fn to_ipjs_state(value: NeighborState) -> lda_ipjs::subcommands::neighbor::NUDState {
