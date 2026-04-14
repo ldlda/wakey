@@ -2,6 +2,7 @@
 name = "wakey-core"
 version = "0.2.0"
 edition = "2024"
+publish = ["gitea"]
 
 [dependencies]
 macaddr = { version = "1", features = ["serde", "serde_std"] }

@@ -47,15 +47,34 @@ cargo build --release
 # Publish crate (only if -Publish and registry auth is available)
 # Publish crate (only if -Publish). Relies on your Cargo config/credentials.
 if ($Publish) {
-    try {
-        $pubArgs = @('publish')
-        if ($Registry) { $pubArgs += @('--registry', $Registry) }
-        cargo @pubArgs
+    $publishOrder = @(
+        'lda-ipjs',
+        'wakey-core',
+        'wakey-linux',
+        'wakey',
+        'wakey-agent',
+        'wakey-control-plane'
+    )
 
-        Write-Host ("published. ran cargo {0}" -f ($pubArgs -join " "))
-    }
-    catch {
-        Write-Warning ("cargo publish failed: {0}" -f $_)
+    foreach ($pkg in $publishOrder) {
+        $pubArgs = @('publish', '-p', $pkg)
+        if ($Registry) { $pubArgs += @('--registry', $Registry) }
+
+        Write-Host ("publishing {0}..." -f $pkg)
+        $publishOutput = & cargo @pubArgs 2>&1
+        $publishOutput | ForEach-Object { Write-Host $_ }
+
+        if ($LASTEXITCODE -ne 0) {
+            $joined = ($publishOutput | Out-String)
+            if ($joined -match 'already exists' -or $joined -match 'already uploaded') {
+                Write-Warning ("skip {0}: version already present in registry" -f $pkg)
+                continue
+            }
+
+            throw ("cargo publish failed for {0}. ran: cargo {1}" -f $pkg, ($pubArgs -join ' '))
+        }
+
+        Write-Host ("published {0}." -f $pkg)
     }
 }
 
