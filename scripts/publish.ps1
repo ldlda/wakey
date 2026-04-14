@@ -47,6 +47,11 @@ cargo build --release
 # Publish crate (only if -Publish and registry auth is available)
 # Publish crate (only if -Publish). Relies on your Cargo config/credentials.
 if ($Publish) {
+    if (-not $Registry) {
+        $Registry = 'gitea'
+        Write-Host 'No -Registry provided; defaulting publish target to registry: gitea'
+    }
+
     $publishOrder = @(
         'lda-ipjs',
         'wakey-core',
