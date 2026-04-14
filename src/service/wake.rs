@@ -6,6 +6,7 @@ use wakey_core::{InterfaceSummary, WakeResult, WakeTarget};
 
 use crate::service::interfaces::get_interface_summaries;
 use crate::service::inventory::resolve_devices;
+use crate::utils::product;
 
 /// Send Wake-on-LAN packets for already-concrete wake targets.
 #[instrument(skip_all, fields(targets = targets.len()))]
@@ -50,14 +51,15 @@ pub async fn wake_explicit(mac: MacAddr, ip: Option<IpAddr>) -> Result<WakeResul
 #[instrument(skip_all)]
 pub async fn resolve_wake_targets(input: impl Into<String>) -> Result<Vec<WakeTarget>> {
     let devices = resolve_devices(input).await?;
+
     let targets: Vec<WakeTarget> = devices
         .into_iter()
         .flat_map(|device| {
-            let mac = device.macs.first().copied();
-            device
-                .ips
-                .into_iter()
-                .map(move |ip| WakeTarget { ip: Some(ip), mac })
+            // TRY EVERYTHING some has to work
+            product(device.ips, device.macs).map(|(i, m)| WakeTarget {
+                ip: Some(i),
+                mac: Some(m),
+            })
         })
         .collect();
     debug!(targets = targets.len(), "resolved wake targets");
@@ -79,8 +81,8 @@ fn broadcast_wake_targets_from_interfaces(
         .iter()
         .flat_map(|iface| iface.addrs.iter())
         .filter_map(|addr| addr.broadcast)
-        .map(|ip| WakeTarget {
-            ip: Some(IpAddr::V4(ip)),
+        .map(|br| WakeTarget {
+            ip: Some(IpAddr::V4(br)), // some will hit eventually AHHH logic
             mac: Some(mac),
         })
         .collect();

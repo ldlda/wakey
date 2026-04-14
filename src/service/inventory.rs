@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 use wakey_core::{
     Device, DeviceInventory, DhcpLease, DhcpLeaseWithState, InventoryQuery, NeighborEntry,
@@ -59,48 +61,29 @@ pub fn merge_devices(
         .map(|(neighbors, leases)| Device::from_parts(neighbors, leases))
         .collect();
 
-    let mut texts: Vec<&str> = Vec::new();
-    let mut devs: Vec<&str> = Vec::new();
-    let mut ips = Vec::new();
-    let mut macs = Vec::new();
-    let mut nuds = Vec::new();
+    let mut texts = HashSet::new();
+    let mut devs = HashSet::new();
+    let mut ips = HashSet::new();
+    let mut macs = HashSet::new();
+    let mut nuds = HashSet::new();
 
     for term in query {
         match term {
-            Query::Text(v) => texts.push(v.as_str()),
-            Query::Interface(v) => devs.push(v.as_str()),
-            Query::Ip(v) => ips.push(*v),
-            Query::Mac(v) => macs.push(*v),
-            Query::NeighborState(v) => nuds.push(*v),
-        }
+            Query::Text(v) => texts.insert(v.as_str()),
+            Query::Interface(v) => devs.insert(v.as_str()),
+            Query::Ip(v) => ips.insert(*v),
+            Query::Mac(v) => macs.insert(*v),
+            Query::NeighborState(v) => nuds.insert(*v),
+        };
     }
 
-    if !texts.is_empty() {
-        devices.retain(|device| device.names.iter().any(|n| texts.iter().any(|t| n == t)));
-    }
-    if !devs.is_empty() {
-        devices.retain(|device| {
-            device
-                .interfaces
-                .iter()
-                .any(|iface| devs.iter().any(|d| iface == d))
-        });
-    }
-    if !ips.is_empty() {
-        devices.retain(|device| device.ips.iter().any(|ip| ips.contains(ip)));
-    }
-    if !macs.is_empty() {
-        devices.retain(|device| device.macs.iter().any(|mac| macs.contains(mac)));
-    }
-    if !nuds.is_empty() {
-        devices.retain(|device| {
-            device
-                .neighbors
-                .iter()
-                .any(|neighbor| nuds.contains(&neighbor.state))
-        });
-    }
-
+    devices.retain(|device| {
+        (texts.is_empty() || device.names.iter().any(|n| texts.contains(n.as_str())))
+            && (devs.is_empty() || device.interfaces.iter().any(|i| devs.contains(i.as_str())))
+            && (ips.is_empty() || device.ips.iter().any(|ip| ips.contains(ip)))
+            && (macs.is_empty() || device.macs.iter().any(|mac| macs.contains(mac)))
+            && (nuds.is_empty() || device.neighbors.iter().any(|n| nuds.contains(&n.state)))
+    });
     devices.sort_by(|a, b| {
         presence_rank(b.presence)
             .cmp(&presence_rank(a.presence))

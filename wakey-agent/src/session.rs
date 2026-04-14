@@ -36,7 +36,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
             .unwrap_or_default()
     );
     let span = info_span!("agent_session", session_id = %session_id, agent_id = %config.agent_id);
-    let _span_guard = span.enter();
+    let _span_guard = span.enter(); // the ENTIRETY of below is agent_session.
 
     let ws_url = websocket_url(&config.server_url)?;
     info!(%ws_url, agent_id = %config.agent_id, "connecting agent websocket");

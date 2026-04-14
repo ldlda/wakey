@@ -18,7 +18,7 @@ pub struct Store {
     agent_meta: sled::Tree,
     audit_events: sled::Tree,
     active_alerts: sled::Tree,
-    alert_transitions: sled::Tree,
+    alert_transitions: sled::Tree, // Where are them Types! 
 }
 
 const SCHEMA_VERSION_KEY: &[u8] = b"schema_version";

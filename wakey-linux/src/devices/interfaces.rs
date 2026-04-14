@@ -13,7 +13,7 @@ use wakey_core::{InterfaceAddr, InterfaceSummary};
 /// Loopback is intentionally excluded.
 pub async fn list_interface_summaries() -> Result<Vec<InterfaceSummary>> {
     #[cfg(unix)]
-    let rows = address::nl::get(None)
+    let rows = address::nl::get(None) // <- why not do filtering here
         .await
         .context("rtnetlink address query failed")?;
 
@@ -22,6 +22,7 @@ pub async fn list_interface_summaries() -> Result<Vec<InterfaceSummary>> {
         .await
         .context("ip -j address show failed")?;
 
+    // convert semi raw [AddrOutput] into Almost the same [InterfaceSummary]
     let mut out: Vec<InterfaceSummary> = rows
         .into_iter()
         .filter(|row| row.ifname != "lo")

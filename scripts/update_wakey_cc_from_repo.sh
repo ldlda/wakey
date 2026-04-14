@@ -15,6 +15,7 @@
 #   WAKEY_CC_VERSION     Bundle version label (default: v0.0.0-local-<short_sha>)
 #   WAKEY_CC_NO_RESTART  If set, skip systemd restart
 #   WAKEY_CC_KEEP_TMP    If set, keep temp checkout/build dir for debugging
+#   SUDO                 Privilege escalation command/path (default: sudo when needed)
 #
 # Requires: git, cargo, tar, pnpm, systemctl (optional for restart)
 
@@ -45,12 +46,31 @@ require_cmd() {
     command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
 
+sudo_cmd() {
+    if [ "$(id -u)" -eq 0 ]; then
+        return 0
+    fi
+
+    if [ -n "${SUDO:-}" ]; then
+        printf '%s' "$SUDO"
+        return 0
+    fi
+
+    if command -v sudo >/dev/null 2>&1; then
+        printf '%s' sudo
+        return 0
+    fi
+
+    fail 'root privileges are required for install/restart steps; set SUDO or run as root'
+}
+
 main() {
     REPO_URL="${WAKEY_CC_REPO_URL:-https://git.ldlda.com/lda/wakey.git}"
     REF="${WAKEY_CC_REF:-main}"
     TARGET="${WAKEY_CC_TARGET:-$(default_target)}"
     ROOT="${WAKEY_CC_ROOT:-$PWD}"
     SERVICE="${WAKEY_CC_SERVICE:-wakey-cc.service}"
+    SUDO_BIN=$(sudo_cmd)
 
     require_cmd git
     require_cmd cargo
@@ -104,15 +124,26 @@ main() {
     [ -f "$STAGING/bin/wakey-control-plane" ] || fail 'bundle missing bin/wakey-control-plane'
     [ -f "$STAGING/ui/dist/index.html" ] || fail 'bundle missing ui/dist/index.html'
 
-    mkdir -p "$ROOT"
-    cp -a "$STAGING/." "$ROOT/"
+    if [ "$(id -u)" -ne 0 ] && [ -n "$SUDO_BIN" ]; then
+        $SUDO_BIN mkdir -p "$ROOT"
+        $SUDO_BIN cp -a "$STAGING/." "$ROOT/"
+    else
+        mkdir -p "$ROOT"
+        cp -a "$STAGING/." "$ROOT/"
+    fi
 
     if [ -z "${WAKEY_CC_NO_RESTART:-}" ] && command -v systemctl >/dev/null 2>&1; then
         if systemctl list-unit-files "$SERVICE" >/dev/null 2>&1; then
             log "restarting $SERVICE"
-            systemctl daemon-reload
-            systemctl restart "$SERVICE"
-            systemctl --no-pager --full status "$SERVICE" | sed -n '1,16p'
+            if [ "$(id -u)" -ne 0 ] && [ -n "$SUDO_BIN" ]; then
+                $SUDO_BIN systemctl daemon-reload
+                $SUDO_BIN systemctl restart "$SERVICE"
+                $SUDO_BIN systemctl --no-pager --full status "$SERVICE" | sed -n '1,16p'
+            else
+                systemctl daemon-reload
+                systemctl restart "$SERVICE"
+                systemctl --no-pager --full status "$SERVICE" | sed -n '1,16p'
+            fi
         else
             log "service $SERVICE not installed; skipped restart"
         fi

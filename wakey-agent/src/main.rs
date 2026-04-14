@@ -109,7 +109,7 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
     let cfg = config::AgentConfig {
         server_url: args
             .server_url
-            .unwrap_or_else(|| "https://control-plane.example.com".to_string()),
+            .unwrap_or_else(|| "https://wakey.ldlda.com".to_string()),
         agent_id: args
             .agent_id
             .unwrap_or_else(|| "REPLACE_ME_AGENT_ID".to_string()),

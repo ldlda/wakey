@@ -50,7 +50,7 @@ pub struct WakeTargetResult {
 #[serde(rename_all = "snake_case")]
 pub enum WakeStatus {
     Succeed,
-    NonexistentAddress,
+    NonexistentAddress, // how do i know this isnt some other errors? what!
     WrongSize,
     Incomplete,
 }

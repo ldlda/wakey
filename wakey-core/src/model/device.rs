@@ -71,8 +71,8 @@ impl Device {
         for lease in &leases {
             ips.insert(lease.ip);
             macs.insert(lease.mac);
-            if let Some(name) = &lease.name {
-                names.insert(name.clone());
+            if let Some(name) = lease.name.as_deref() {
+                names.insert(name);
             }
         }
         for neighbor in &neighbors {
@@ -80,8 +80,8 @@ impl Device {
             if let Some(mac) = neighbor.mac {
                 macs.insert(mac);
             }
-            if let Some(dev) = &neighbor.dev {
-                interfaces.insert(dev.clone());
+            if let Some(dev) = neighbor.dev.as_deref() {
+                interfaces.insert(dev);
             }
             presence = std::cmp::max(
                 presence_rank(presence),
@@ -93,10 +93,10 @@ impl Device {
         let macs: Vec<MacAddr> = macs.into_iter().collect();
         Self {
             id: macs.first().copied().map(|mac| DeviceId { mac }),
-            names: names.into_iter().collect(),
+            names: names.into_iter().map(|n| n.to_owned()).collect(),
             ips: ips.into_iter().collect(),
             macs,
-            interfaces: interfaces.into_iter().collect(),
+            interfaces: interfaces.into_iter().map(|d| d.to_owned()).collect(),
             neighbors,
             leases,
             presence,
