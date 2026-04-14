@@ -38,36 +38,36 @@ jobs:
         run: |
           cargo build --release --target armv7-unknown-linux-musleabihf -p wakey -p wakey-agent
 
-      - name: Build UI dist
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd ui
-          # corepack enable # no no no
-          pnpm install --frozen-lockfile
-          pnpm build
+      # - name: Build UI dist
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     cd ui
+      #     # corepack enable # no no no
+      #     pnpm install --frozen-lockfile
+      #     pnpm build
 
-      - name: Build control-plane (linux gnu)
-        shell: bash
-        run: |
-          set -euo pipefail
-          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            cargo build --release --target "$target" -p wakey-control-plane
-          done
+      # - name: Build control-plane (linux gnu)
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+      #       cargo build --release --target "$target" -p wakey-control-plane
+      #     done
 
       - name: Package rootfs tarball
         shell: pwsh
         run: |
           ./scripts/package_rootfs.ps1 -Version "${{ github.ref_name }}" -Target armv7-unknown-linux-musleabihf
 
-      - name: Package control-plane bundles
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x scripts/update_wakey_cc.sh scripts/package_wakey_cc_bundle.sh
-          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            ./scripts/package_wakey_cc_bundle.sh --version "${{ github.ref_name }}" --target "$target"
-          done
+      # - name: Package control-plane bundles
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     chmod +x scripts/update_wakey_cc.sh scripts/package_wakey_cc_bundle.sh
+      #     for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+      #       ./scripts/package_wakey_cc_bundle.sh --version "${{ github.ref_name }}" --target "$target"
+      #     done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v3
