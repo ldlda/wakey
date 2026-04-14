@@ -45,6 +45,7 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
   - Uploads to `<RemotePath>.tmp` then atomically moves into place; `-Restart` restarts the service; `-Quiet` silences MOTD.
 - `package_rootfs.ps1` — Produces `dist/wakey-rootfs-<version>-<target>.tgz` with `/root/.bin/wakey` and `/etc/init.d/*`.
 - `update_wakey_cc.sh` — Linux VPS updater for control-plane bundles; extracts into the selected directory (default: current directory) and restarts `wakey-cc.service`.
+- `update_wakey_cc_from_repo.sh` — Linux VPS source updater; clones repo to temp dir, builds UI + control-plane locally, packages bundle tgz, installs into selected directory, and restarts `wakey-cc.service`.
 - `package_wakey_cc_bundle.sh` — Produces `dist/wakey-cc-<version>-<target>.tgz` with `bin/wakey-control-plane`, `ui/dist/*`, updater script, and systemd template.
 - `publish.ps1` — Optional version bump + build + tag (and `cargo publish` only if you pass `-Publish`).
 - `test_remote.ps1` — Build ARM Linux test binaries locally, upload them to the router, and run them there.
@@ -59,6 +60,20 @@ sudo -E ./scripts/update_wakey_cc.sh
 # optional: pin version/target
 WAKEY_CC_VERSION=v0.2.0 WAKEY_CC_TARGET=x86_64-unknown-linux-gnu \
   sudo -E ./scripts/update_wakey_cc.sh
+```
+
+## VPS source updater (control-plane)
+
+Build-and-install locally on the VPS (avoids glibc mismatch from prebuilt binaries):
+
+```sh
+chmod +x ./scripts/update_wakey_cc_from_repo.sh
+cd /opt/wakey
+sudo -E /path/to/repo/scripts/update_wakey_cc_from_repo.sh
+
+# optional: pin ref/target and skip restart
+WAKEY_CC_REF=main WAKEY_CC_TARGET=x86_64-unknown-linux-gnu WAKEY_CC_NO_RESTART=1 \
+  sudo -E /path/to/repo/scripts/update_wakey_cc_from_repo.sh
 ```
 
 Expected tarball layout:
