@@ -6,13 +6,13 @@
 #
 # Replace cp.example.com with your public control-plane domain.
 
-cp.example.com {
+wakey.ldlda.com {
     encode zstd gzip
 
     # Public agent-facing endpoints.
     @public path /healthz /api/v1/agents/enroll /api/v1/agent/ws
     handle @public {
-        reverse_proxy 127.0.0.1:8787
+        reverse_proxy 127.0.0.1:6767
     }
 
     # Admin surface requires Cloudflare Access headers.
@@ -21,7 +21,7 @@ cp.example.com {
 
     handle @admin {
         handle @cf_access {
-            reverse_proxy 127.0.0.1:8787
+            reverse_proxy 127.0.0.1:6767
         }
         respond "forbidden" 403
     }

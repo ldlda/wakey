@@ -62,8 +62,9 @@ fi
 
 [ -f "$BINARY" ] || { echo "missing binary: $BINARY" >&2; exit 1; }
 [ -f "$UI_DIST/index.html" ] || { echo "missing UI dist index: $UI_DIST/index.html" >&2; exit 1; }
-[ -f "scripts/update_wakey_cc.sh" ] || { echo "missing updater script" >&2; exit 1; }
+[ -f "scripts/update_wakey_cc.sh" ] && [ -f "scripts/update_wakey_cc_from_repo.sh" ] || { echo "missing updater scripts" >&2; exit 1; }
 [ -f "deploy/systemd/wakey-cc.service" ] || { echo "missing systemd template" >&2; exit 1; }
+[ -f "deploy/control-plane.Caddyfile" ] || { echo "missing Caddyfile" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
 STAGING="$OUT_DIR/wakey-cc-stage.$$"
@@ -75,9 +76,11 @@ mkdir -p "$STAGING/bin" "$STAGING/ui" "$STAGING/scripts" "$STAGING/deploy/system
 cp "$BINARY" "$STAGING/bin/wakey-control-plane"
 cp -a "$UI_DIST" "$STAGING/ui/dist"
 cp "scripts/update_wakey_cc.sh" "$STAGING/scripts/update_wakey_cc.sh"
+cp "scripts/update_wakey_cc_from_repo.sh" "$STAGING/scripts/update_wakey_cc_from_repo.sh"
 cp "deploy/systemd/wakey-cc.service" "$STAGING/deploy/systemd/wakey-cc.service"
+cp "deploy/control-plane.Caddyfile" "$STAGING/deploy/control-plane.Caddyfile"
 
-chmod +x "$STAGING/bin/wakey-control-plane" "$STAGING/scripts/update_wakey_cc.sh"
+chmod +x "$STAGING/bin/wakey-control-plane" "$STAGING/scripts/update_wakey_cc.sh" "$STAGING/scripts/update_wakey_cc_from_repo.sh" "$STAGING/deploy/control-plane.Caddyfile"
 
 (
     cd "$STAGING"
@@ -87,4 +90,4 @@ chmod +x "$STAGING/bin/wakey-control-plane" "$STAGING/scripts/update_wakey_cc.sh
 rm -rf "$STAGING"
 
 echo "Bundle package: $OUT_DIR/$PKG"
-echo "Contains: bin/wakey-control-plane, ui/dist, scripts/update_wakey_cc.sh, deploy/systemd/wakey-cc.service"
+echo "Contains: bin/wakey-control-plane, ui/dist, scripts/update_wakey_cc.sh, scripts/update_wakey_cc_from_repo.sh, deploy/systemd/wakey-cc.service, deploy/control-plane.Caddyfile"
