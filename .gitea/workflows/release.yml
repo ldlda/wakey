@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           cd ui
-          corepack enable
+          # corepack enable # no no no
           pnpm install --frozen-lockfile
           pnpm build
 
