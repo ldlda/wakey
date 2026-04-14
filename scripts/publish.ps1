@@ -18,6 +18,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/lib.ps1"
 
 # If no version provided, deduce from Cargo.toml
 $versionProvided = [bool]$Version
@@ -90,13 +91,25 @@ if ($Tag -and $Version) {
 
     switch ($RunnerMode) {
         'wsl' {
-            $runnerScript = Join-Path $PSScriptRoot 'act_runner_wsl.ps1'
-            if (Test-Path $runnerScript) {
-                Write-Host "Starting Fedora/WSL act_runner (once mode) to process release job..."
-                & $runnerScript -Distro $WslDistro -Action start -Once
+            if ($IsWindows) {
+                $runnerScript = Join-Path $PSScriptRoot 'act_runner_wsl.ps1'
+                if (Test-Path $runnerScript) {
+                    Write-Host "Starting Fedora/WSL act_runner via Windows wrapper (once mode)..."
+                    & $runnerScript -Distro $WslDistro -Action start -Once
+                }
+                else {
+                    Write-Warning "act_runner_wsl.ps1 not found at $runnerScript. Skipping runner."
+                }
             }
             else {
-                Write-Warning "act_runner_wsl.ps1 not found at $runnerScript. Skipping runner."
+                $runnerScript = Join-Path $PSScriptRoot 'act_runner_fedora.sh'
+                if (Test-Path $runnerScript) {
+                    Write-Host "Starting Fedora runner directly (once mode)..."
+                    & bash $runnerScript start --once
+                }
+                else {
+                    Write-Warning "act_runner_fedora.sh not found at $runnerScript. Skipping runner."
+                }
             }
         }
         'windows' {

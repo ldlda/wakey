@@ -83,7 +83,8 @@ jobs:
 
       - name: Publish Release to Gitea
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/gitea-release-action@v1
+        # use their personal repo cuz this searches github.com T_T
+        uses: akkuman/gitea-release-action@v1
         with:
           token: ${{ secrets.GITEA_TOKEN }}
           files: |

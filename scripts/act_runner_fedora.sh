@@ -11,6 +11,14 @@ SERVER_URL="${SERVER_URL:-}"
 TOKEN="${TOKEN:-}"
 LABELS="${LABELS:-self-hosted,linux,fedora,wsl,release:host}"
 
+normalize_paths() {
+    local config_dir config_file
+    config_dir="$(cd "$(dirname "$CONFIG_PATH")" && pwd)"
+    config_file="$(basename "$CONFIG_PATH")"
+    CONFIG_PATH="$config_dir/$config_file"
+    RUNNER_HOME="$config_dir"
+}
+
 usage() {
     cat <<'EOF'
 Usage:
@@ -92,6 +100,7 @@ register_runner() {
 
 start_runner() {
     local mode="${1:-daemon}"
+    local config_dir config_file
     ensure_dirs
     ensure_runner_bin
 
@@ -100,15 +109,23 @@ start_runner() {
         exit 2
     fi
 
+    config_dir="$(dirname "$CONFIG_PATH")"
+    config_file="$(basename "$CONFIG_PATH")"
+
     case "$mode" in
     attach)
-        exec "$RUNNER_BIN" daemon --config "$CONFIG_PATH"
+        cd "$config_dir"
+        exec "$RUNNER_BIN" daemon --config "$config_file"
         ;;
     once)
-        exec "$RUNNER_BIN" daemon --config "$CONFIG_PATH" --once
+        cd "$config_dir"
+        exec "$RUNNER_BIN" daemon --config "$config_file" --once
         ;;
     daemon)
-        nohup "$RUNNER_BIN" daemon --config "$CONFIG_PATH" >/tmp/act_runner.log 2>&1 &
+        (
+            cd "$config_dir"
+            nohup "$RUNNER_BIN" daemon --config "$config_file" >/tmp/act_runner.log 2>&1 &
+        )
         echo "Started act_runner in background"
         ;;
     *)
@@ -188,6 +205,8 @@ while [[ $# -gt 0 ]]; do
         ;;
     esac
 done
+
+normalize_paths
 
 case "$ACTION" in
 update)
