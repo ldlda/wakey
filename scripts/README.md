@@ -54,7 +54,10 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
 ```sh
 chmod +x ./scripts/update_wakey_cc.sh
 cd /opt/wakey
-WAKEY_CC_VERSION=v0.1.0 WAKEY_CC_TARGET=x86_64-unknown-linux-gnu \
+sudo -E ./scripts/update_wakey_cc.sh
+
+# optional: pin version/target
+WAKEY_CC_VERSION=v0.2.0 WAKEY_CC_TARGET=x86_64-unknown-linux-gnu \
   sudo -E ./scripts/update_wakey_cc.sh
 ```
 

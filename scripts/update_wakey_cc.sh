@@ -11,7 +11,7 @@
 #   WAKEY_HOST         Release host (default: git.ldlda.com)
 #   WAKEY_OWNER        Repo owner (default: lda)
 #   WAKEY_REPO         Repo name (default: wakey)
-#   WAKEY_CC_VERSION   Tag, e.g. v0.1.0 (required unless WAKEY_CC_TGZ_URL set)
+#   WAKEY_CC_VERSION   Optional tag, e.g. v0.1.0 (if omitted, latest release is used)
 #   WAKEY_CC_TARGET    Target triple (default from uname: x86_64-unknown-linux-gnu or aarch64-unknown-linux-gnu)
 #   WAKEY_CC_FILE      Asset filename (default: wakey-cc-${WAKEY_CC_VERSION}-${WAKEY_CC_TARGET}.tgz)
 #   WAKEY_CC_ROOT      Install root (default: current directory)
@@ -19,7 +19,7 @@
 #   WAKEY_CC_NO_RESTART If set, skip systemd restart
 #   WAKEY_INSECURE     If set, disable TLS verification
 #
-# Requires: tar, systemctl, curl or wget
+# Requires: tar, systemctl, jq, curl or wget
 
 set -eu
 
@@ -27,6 +27,26 @@ log() { printf '[update_wakey_cc] %s\n' "$*"; }
 fail() {
     printf '[update_wakey_cc] ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+http_get() {
+    # http_get <url>
+    if command -v curl >/dev/null 2>&1; then
+        if [ -n "${WAKEY_INSECURE:-}" ]; then
+            curl -fsSL -k "$1"
+        else
+            curl -fsSL "$1"
+        fi
+        return
+    fi
+
+    if command -v wget >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        wget ${WAKEY_INSECURE:+--no-check-certificate} -qO- "$1"
+        return
+    fi
+
+    fail 'curl or wget is required'
 }
 
 fetch() {
@@ -64,6 +84,45 @@ default_target() {
     esac
 }
 
+latest_asset_url() {
+    # latest_asset_url <host> <owner> <repo> <target> [file_hint]
+    HOST="$1"
+    OWNER="$2"
+    REPO="$3"
+    TARGET="$4"
+    FILE_HINT="${5:-}"
+    API="https://$HOST/api/v1/repos/$OWNER/$REPO/releases/latest"
+
+    command -v jq >/dev/null 2>&1 || fail 'jq is required for latest release resolution'
+
+    RESP=$(http_get "$API") || return 1
+
+    if [ -n "$FILE_HINT" ]; then
+        echo "$RESP" |
+            jq -r --arg file "$FILE_HINT" '
+                .assets[]?
+                | select(
+                    (.name // "") == $file
+                    or ((.browser_download_url // "") | endswith("/" + $file) or endswith($file))
+                )
+                | .browser_download_url
+            ' |
+            head -n1
+        return
+    fi
+
+    echo "$RESP" |
+        jq -r --arg target "$TARGET" '
+            .assets[]?
+            | select(
+                ((.name // "") | startswith("wakey-cc-"))
+                and ((.name // "") | endswith("-" + $target + ".tgz"))
+            )
+            | .browser_download_url
+        ' |
+        head -n1
+}
+
 main() {
     ROOT="${WAKEY_CC_ROOT:-$PWD}"
     SERVICE="${WAKEY_CC_SERVICE:-wakey-cc.service}"
@@ -76,11 +135,21 @@ main() {
         HOST="${WAKEY_HOST:-git.ldlda.com}"
         OWNER="${WAKEY_OWNER:-lda}"
         REPO="${WAKEY_REPO:-wakey}"
-        VERSION="${WAKEY_CC_VERSION:-}"
-        [ -n "$VERSION" ] || fail 'set WAKEY_CC_TGZ_URL or WAKEY_CC_VERSION'
         TARGET="${WAKEY_CC_TARGET:-$(default_target)}"
-        FILE="${WAKEY_CC_FILE:-wakey-cc-${VERSION}-${TARGET}.tgz}"
-        URL="https://$HOST/$OWNER/$REPO/releases/download/$VERSION/$FILE"
+        VERSION="${WAKEY_CC_VERSION:-}"
+        FILE="${WAKEY_CC_FILE:-}"
+
+        if [ -n "$VERSION" ]; then
+            if [ -z "$FILE" ]; then
+                FILE="wakey-cc-${VERSION}-${TARGET}.tgz"
+            fi
+            URL="https://$HOST/$OWNER/$REPO/releases/download/$VERSION/$FILE"
+        else
+            URL=$(latest_asset_url "$HOST" "$OWNER" "$REPO" "$TARGET" "$FILE") ||
+                fail 'unable to resolve latest release asset URL'
+            [ -n "$URL" ] ||
+                fail "no latest control-plane asset found for target $TARGET"
+        fi
     fi
 
     trap 'rm -f "$ARCHIVE"; rm -rf "$STAGING"' EXIT INT TERM
