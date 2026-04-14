@@ -50,7 +50,10 @@ done
 [ -n "$VERSION" ] || { echo "--version is required" >&2; exit 1; }
 [ -n "$TARGET" ] || { echo "--target is required" >&2; exit 1; }
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT_DIR=$(
+    unset CDPATH
+    cd -- "$(dirname -- "$0")/.." && pwd
+)
 cd "$ROOT_DIR"
 
 if [ -z "$BINARY" ]; then

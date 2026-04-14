@@ -127,7 +127,7 @@ export function AuditPage({ events, onRefresh }: Props) {
         </p>
 
         <Textarea
-          className="min-h-[360px] font-mono text-xs"
+          className="min-h-90 font-mono text-xs"
           readOnly
           value={JSON.stringify(filtered, null, 2)}
         />

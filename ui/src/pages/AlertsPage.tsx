@@ -180,7 +180,7 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
           </label>
 
           <Textarea
-            className="min-h-[230px] font-mono text-xs"
+            className="min-h-57.5 font-mono text-xs"
             readOnly
             value={JSON.stringify(filteredTransitions, null, 2)}
           />
