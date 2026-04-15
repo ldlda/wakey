@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use anyhow::Result;
 use wakey_core::{
     Device, DeviceInventory, DhcpLease, DhcpLeaseWithState, InventoryQuery, NeighborEntry,
@@ -61,25 +59,25 @@ pub fn merge_devices(
         .map(|(neighbors, leases)| Device::from_parts(neighbors, leases))
         .collect();
 
-    let mut texts = HashSet::new();
-    let mut devs = HashSet::new();
-    let mut ips = HashSet::new();
-    let mut macs = HashSet::new();
-    let mut nuds = HashSet::new();
+    let mut texts = Vec::new();
+    let mut devs = Vec::new();
+    let mut ips = Vec::new();
+    let mut macs = Vec::new();
+    let mut nuds = Vec::new();
 
     for term in query {
         match term {
-            Query::Text(v) => texts.insert(v.as_str()),
-            Query::Interface(v) => devs.insert(v.as_str()),
-            Query::Ip(v) => ips.insert(*v),
-            Query::Mac(v) => macs.insert(*v),
-            Query::NeighborState(v) => nuds.insert(*v),
+            Query::Text(v) => texts.push(v.as_str()),
+            Query::Interface(v) => devs.push(v.as_str()),
+            Query::Ip(v) => ips.push(*v),
+            Query::Mac(v) => macs.push(*v),
+            Query::NeighborState(v) => nuds.push(*v),
         };
     }
 
     devices.retain(|device| {
-        (texts.is_empty() || device.names.iter().any(|n| texts.contains(n.as_str())))
-            && (devs.is_empty() || device.interfaces.iter().any(|i| devs.contains(i.as_str())))
+        (texts.is_empty() || device.names.iter().any(|n| texts.contains(&n.as_str())))
+            && (devs.is_empty() || device.interfaces.iter().any(|i| devs.contains(&i.as_str()))) // same pattern as iter().any
             && (ips.is_empty() || device.ips.iter().any(|ip| ips.contains(ip)))
             && (macs.is_empty() || device.macs.iter().any(|mac| macs.contains(mac)))
             && (nuds.is_empty() || device.neighbors.iter().any(|n| nuds.contains(&n.state)))
