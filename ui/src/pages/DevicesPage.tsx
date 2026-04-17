@@ -352,7 +352,7 @@ export function DevicesPage({
               <span>Agent</span>
               <Select
                 value={selectedAgentId}
-                onValueChange={(value: string) => {
+                onValueChange={(value: string | null) => {
                   if (value) onSelectAgent(value);
                 }}
               >

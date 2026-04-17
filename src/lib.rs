@@ -1,3 +1,6 @@
+//! Operator-facing service API: inventory, leases, interfaces, wake, and query resolution.
+//! The `wakey` binary is Linux-only; use `wakey-agent` / `wakey-control-plane` for remote control.
+
 pub mod service;
 pub mod utils;
 

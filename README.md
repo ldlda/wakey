@@ -23,12 +23,19 @@ service-first project with:
 In practice that means commands like:
 
 ```sh
-wakey status bedroom-pc
+wakey inventory bedroom-pc
 wakey leases --include-state
 wakey devs
 wakey wake bedroom-pc
 wakey wake --mac aa:bb:cc:dd:ee:ff
 ```
+
+(`inventory` is the canonical subcommand; `status` is a visible alias for the same behavior.)
+
+## Architecture at a glance
+
+- **On-router (local):** run `wakey` for `inventory`, `leases`, `devs`, and `wake` against live Linux neighbor/DHCP/interface data.
+- **Fleet (remote):** `wakey-agent` on each router enrolls with `wakey-control-plane`, keeps an authenticated WebSocket, and executes relayed commands using the same service logic as the local CLI.
 
 ## Workspace layout
 
@@ -54,7 +61,7 @@ Inside the `wakey` crate:
 
 - `src/service`
   - the real use-case layer
-  - status, leases, inventory, interfaces, wake, and query resolution
+  - inventory, leases, interfaces, wake, and query resolution
 
 The long-term direction is:
 
@@ -214,7 +221,7 @@ agent enrollment and websocket endpoints reachable.
 
 An example Caddy config is provided at:
 
-- `deploy/Caddyfile.control-plane.example`
+- `deploy/control-plane.Caddyfile`
 
 Expected exposure model:
 
@@ -285,21 +292,23 @@ The update tarball is expected to contain:
 
 `wakey` is usable as a local/operator CLI.
 
-### Status
+### Inventory
 
-Show device status rows using a free-form selector:
+Show merged device inventory rows using a free-form selector:
 
 ```sh
-wakey status bedroom-pc
+wakey inventory bedroom-pc
 ```
 
 Or use explicit filters:
 
 ```sh
-wakey status --dev br-lan --nud reachable
-wakey status --mac aa:bb:cc:dd:ee:ff
-wakey status --json
+wakey inventory --dev br-lan --nud reachable
+wakey inventory --mac aa:bb:cc:dd:ee:ff
+wakey inventory --json
 ```
+
+The `status` subcommand is an alias for `inventory` (same flags and output).
 
 ### Leases
 
@@ -358,6 +367,10 @@ cargo check
 cargo test --no-run
 cargo clippy --all-targets --all-features -- -D warnings
 ```
+
+On GitHub Actions (`.github/workflows/ci.yml`), the same Rust checks run on
+`ubuntu-latest`, plus a separate **`ui`** job: `pnpm install --frozen-lockfile`
+in `ui/`, then `typecheck`, `format:check`, and `vite build`.
 
 Focused control-plane state tests:
 

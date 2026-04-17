@@ -1,3 +1,5 @@
+//! HTTP + WebSocket control plane: agent enrollment, registry, command relay, and operator UI hosting.
+
 mod api;
 mod cli;
 mod config;

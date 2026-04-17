@@ -94,7 +94,7 @@ Basic examples:
 ```powershell
 ./scripts/test_remote.ps1 -Package wakey
 ./scripts/test_remote.ps1 -Package wakey -BinaryFilter integration_live_services -Ignored -NoCapture
-./scripts/test_remote.ps1 -Package wakey -BinaryFilter integration_live_services -Filter status_real_router_default_query_succeeds -Ignored -NoCapture
+./scripts/test_remote.ps1 -Package wakey -BinaryFilter integration_live_services -Filter inventory_real_router_default_query_returns_rows_or_empty_cleanly -Ignored -NoCapture
 ./scripts/test_remote.ps1 -AllPackages
 ```
 
@@ -128,12 +128,25 @@ Implementation notes:
 - each package run gets a unique remote temp directory for safer concurrent use
 - packages with no test executables are skipped instead of treated as failures
 
+## Release checklist (tag push)
+
+1. **Version:** bump crate versions / changelog as you prefer; tag `v*` and push.
+2. **Runner:** Fedora/WSL self-hosted labels `self-hosted`, `linux`, `fedora`, `wsl`, `release` online (see [`WSL_RUNNER.md`](./WSL_RUNNER.md)).
+3. **Control-plane bundle:** release job builds `ui/dist`, then `wakey-control-plane` for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`. With **zig** + **cargo-zigbuild** on the runner, gnu builds use workflow env `WAKEY_CC_GLIBC_VERSION` (default `2.28`) for a predictable glibc floor; without them, binaries match the host glibc.
+4. **Artifacts:** expect `dist/wakey-rootfs-*-armv7-unknown-linux-musleabihf.tgz` and `dist/wakey-cc-*-unknown-linux-gnu.tgz` attached to the Gitea release.
+5. **Secret:** `GITEA_TOKEN` must be set for the publish step.
+
 ## CI (Gitea)
 
-- Defined in `.gitea/workflows/release.yml`.
-- Release job now targets your Fedora/WSL runner labels: `self-hosted`, `linux`, `fedora`, `wsl`, `release`.
-- Steps: Linux-native build of `wakey` + `wakey-agent` → package rootfs → upload artifact (v3) → publish a release and attach tgz.
+- Defined in `.gitea/workflows/release.yml` (tag / manual dispatch): router rootfs + control-plane bundles and Gitea release attach.
+- Release job targets your Fedora/WSL runner labels: `self-hosted`, `linux`, `fedora`, `wsl`, `release`.
 - Requires `secrets.GITEA_TOKEN` in the repo to publish the release.
+
+## CI (GitHub)
+
+- Defined in `.github/workflows/ci.yml` on pushes/PRs to `main` or `master`:
+  - **`rust` job:** `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace` on `ubuntu-latest`.
+  - **`ui` job:** under `ui/`, `pnpm install --frozen-lockfile`, then `pnpm run typecheck`, `format:check`, and `build` (mirrors what you need before packaging the control-plane bundle). GitHub sets `CI=true` for the runner; pnpm uses lockfile `ui/pnpm-lock.yaml` for cache.
 
 ## Runner migration
 

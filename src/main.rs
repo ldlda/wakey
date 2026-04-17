@@ -5,7 +5,7 @@ use clap::Parser;
 #[cfg(not(target_os = "linux"))]
 fn main() -> anyhow::Result<()> {
     Err(anyhow::anyhow!(
-        "OS not supported! run this on your ahh router!"
+        "wakey only runs on Linux (router/OpenWrt-style targets)."
     ))
 }
 
