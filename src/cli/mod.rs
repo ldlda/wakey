@@ -25,6 +25,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Command {
     /// Show merged device inventory rows.
+    #[command(alias = "status")]
     Inventory(InventoryArgs),
     /// Show DHCP leases, optionally enriched with current neighbor state.
     Leases(LeasesArgs),
