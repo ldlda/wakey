@@ -20,3 +20,7 @@ tw = "t --target=x86_64-pc-windows-msvc"
 ldabr = "b -r --target=armv7-unknown-linux-musleabihf"
 t = "test -- --nocapture --test-threads=1"
 tdebug = "test -- --nocapture --test-threads=1 --show-output"
+
+
+[registries.gitea]
+index = "sparse+https://git.ldlda.com/api/packages/lda/cargo/" # Sparse index
