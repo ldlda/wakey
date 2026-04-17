@@ -65,11 +65,10 @@ pub async fn get_with_handle(
 
         for attr in msg.attributes {
             match attr {
-                AddressAttribute::Address(addr) | AddressAttribute::Local(addr) => {
-                    if local.is_none() {
+                AddressAttribute::Address(addr) | AddressAttribute::Local(addr)
+                    if local.is_none() => {
                         local = addr.to_string().parse().ok();
                     }
-                }
                 AddressAttribute::Broadcast(addr) => {
                     broadcast = addr.to_string().parse().ok();
                 }
