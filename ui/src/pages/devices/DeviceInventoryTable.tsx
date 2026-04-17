@@ -28,6 +28,7 @@ type Props = {
   onSortChange: (next: { key: SortKey; dir: SortDir }) => void;
   onWakeDevice: (device: DeviceRow) => void;
   onCopyValue: (label: string, value: string) => void;
+  onOpenDetails: (device: DeviceRow) => void;
 };
 
 function sortArrow(active: boolean, dir: SortDir) {
@@ -48,7 +49,13 @@ export function DeviceInventoryTable({
   onSortChange,
   onWakeDevice,
   onCopyValue,
+  onOpenDetails,
 }: Props) {
+  function shouldIgnoreRowClick(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest("button, input, a, [role='menuitem']"));
+  }
+
   return (
     <div className="device-list grid gap-2">
       <div className="device-row device-header rounded-md border bg-muted/60 px-3 py-2 text-sm">
@@ -85,14 +92,26 @@ export function DeviceInventoryTable({
         >
           Presence {sortArrow(sort.key === "presence", sort.dir)}
         </span>
-        <span className="device-cell">Interfaces</span>
         <span className="device-cell device-action">Actions</span>
       </div>
 
       {rows.map((row) => (
         <div
-          className="device-row rounded-md border bg-card px-3 py-2 text-sm"
+          className="device-row cursor-pointer rounded-md border bg-card px-3 py-2 text-sm transition-colors hover:bg-accent/30"
           key={row.id}
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            if (shouldIgnoreRowClick(event.target)) return;
+            onOpenDetails(row);
+          }}
+          onKeyDown={(event) => {
+            if (shouldIgnoreRowClick(event.target)) return;
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onOpenDetails(row);
+            }
+          }}
         >
           <span className="device-cell device-select" data-label="Pick">
             <input
@@ -121,13 +140,6 @@ export function DeviceInventoryTable({
           </span>
           <span className="device-cell" data-label="Presence">
             <Badge variant="outline">{row.presence}</Badge>
-          </span>
-          <span
-            className="device-cell"
-            data-label="Interfaces"
-            title={row.interfaces.join(", ") || "-"}
-          >
-            {summarize(row.interfaces)}
           </span>
           <span className="device-cell device-action" data-label="">
             <Button

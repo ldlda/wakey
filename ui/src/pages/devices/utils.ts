@@ -50,11 +50,13 @@ export function parseInventoryRows(payload: unknown): DeviceRow[] {
         : [];
       const presence =
         typeof device.presence === "string" ? device.presence : "unknown";
+      const isUnnamed = names.length === 0;
 
       const id = macs[0] || ips[0] || names[0] || `row-${idx}`;
       return {
         id,
         name: names[0] || "(unnamed)",
+        isUnnamed,
         ips,
         macs,
         interfaces,
@@ -122,9 +124,7 @@ export function parseWakeSummary(response: unknown): {
 }
 
 export function chooseWakeTarget(device: DeviceRow): string {
-  return device.name !== "(unnamed)"
-    ? device.name
-    : device.macs[0] || device.ips[0] || "";
+  return device.isUnnamed ? device.macs[0] || device.ips[0] || "" : device.name;
 }
 
 export function summarize(values: string[]): string {

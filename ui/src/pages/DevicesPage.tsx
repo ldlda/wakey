@@ -12,6 +12,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { DeviceInventoryTable } from "@/pages/devices/DeviceInventoryTable";
+import { DeviceDetailsDialog } from "@/pages/devices/DeviceDetailsDialog";
 import { WakeHistoryCard } from "@/pages/devices/WakeHistoryCard";
 import type {
   DeviceRow,
@@ -112,6 +113,7 @@ export function DevicesPage({
   const [bulkWakeBusy, setBulkWakeBusy] = useState(false);
   const [quickWake, setQuickWake] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [detailsDevice, setDetailsDevice] = useState<DeviceRow | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [recentWakes, setRecentWakes] = useState<WakeEvent[]>([]);
   function appendWakeEvent(event: WakeEvent) {
@@ -288,9 +290,17 @@ export function DevicesPage({
       );
     }
     // Sort
-    const sorter = sorters[sort.key];
-    result = [...result].sort(sorter);
-    if (sort.dir === "desc") result.reverse();
+    if (sort.key === "name") {
+      result = [...result].sort((a, b) => {
+        if (a.isUnnamed !== b.isUnnamed) return a.isUnnamed ? 1 : -1;
+        const cmp = a.name.localeCompare(b.name);
+        return sort.dir === "desc" ? -cmp : cmp;
+      });
+    } else {
+      const sorter = sorters[sort.key];
+      result = [...result].sort(sorter);
+      if (sort.dir === "desc") result.reverse();
+    }
     return result;
   }, [rows, query, sort, presenceFilter]);
 
@@ -342,7 +352,7 @@ export function DevicesPage({
               <span>Agent</span>
               <Select
                 value={selectedAgentId}
-                onValueChange={(value) => {
+                onValueChange={(value: string) => {
                   if (value) onSelectAgent(value);
                 }}
               >
@@ -505,6 +515,14 @@ export function DevicesPage({
             onSortChange={setSort}
             onWakeDevice={(device) => void wakeDevice(device)}
             onCopyValue={(label, value) => void copyValue(label, value)}
+            onOpenDetails={setDetailsDevice}
+          />
+          <DeviceDetailsDialog
+            device={detailsDevice}
+            open={Boolean(detailsDevice)}
+            onOpenChange={(open) => {
+              if (!open) setDetailsDevice(null);
+            }}
           />
         </CardContent>
       </Card>

@@ -52,11 +52,11 @@
   display: grid;
   grid-template-columns:
     36px minmax(110px, 1.1fr) minmax(160px, 2fr) minmax(130px, 1.5fr)
-    minmax(100px, 0.85fr) minmax(100px, 0.9fr) minmax(170px, max-content);
+    minmax(100px, 0.85fr) minmax(170px, max-content);
   align-items: center;
   column-gap: 0.4rem;
   row-gap: 0.55rem;
-  min-width: 980px;
+  min-width: 860px;
 }
 
 .device-header {
@@ -111,8 +111,7 @@
       "name name"
       "presence presence"
       "ip ip"
-      "mac mac"
-      "interfaces interfaces";
+      "mac mac";
     align-items: start;
     min-width: 0;
   }
@@ -160,10 +159,6 @@
 
   .device-row .device-cell[data-label="MAC"] {
     grid-area: mac;
-  }
-
-  .device-row .device-cell[data-label="Interfaces"] {
-    grid-area: interfaces;
   }
 
   .device-row .device-action {

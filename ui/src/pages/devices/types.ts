@@ -1,6 +1,7 @@
 export type DeviceRow = {
   id: string;
   name: string;
+  isUnnamed: boolean;
   ips: string[];
   macs: string[];
   interfaces: string[];
