@@ -2,3 +2,4 @@ We work towards clean, modular, maintainable design, clear documentation... im n
 
 DRY: spawn subagents.
 Context: break those files out.
+Test: make functions easy to test.

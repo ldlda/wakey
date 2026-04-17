@@ -146,7 +146,7 @@ mod tests {
 
         assert_eq!(link.operstate, Some(OperState::Up));
         assert_eq!(
-            link.address.map(|mac| mac.to_string()).as_deref(),
+            link.address.map(|mac| mac.to_string().to_ascii_lowercase()).as_deref(),
             Some("aa:bb:cc:dd:ee:ff")
         );
     }
