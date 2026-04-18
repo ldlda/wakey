@@ -7,10 +7,6 @@ on:
       - "v*"
   workflow_dispatch:
 
-env:
-  # When using cargo-zigbuild for *-gnu targets, link against this glibc baseline (wider VPS compatibility).
-  WAKEY_CC_GLIBC_VERSION: "2.28"
-
 permissions:
   contents: write
 
@@ -59,29 +55,17 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
-      - name: Build control-plane (linux-gnu; zig + older glibc when available)
+      - name: Build control-plane (linux-gnu)
         shell: bash
         run: |
           set -euo pipefail
-          GLIBC_VER="${WAKEY_CC_GLIBC_VERSION:-2.28}"
-          GNU_TARGETS=(x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu)
 
-          use_zig=false
-          if command -v zig >/dev/null 2>&1 && cargo zigbuild -h >/dev/null 2>&1; then
-            use_zig=true
-          fi
+          # x86_64 builds natively; aarch64 needs cross
+          echo "Building control-plane x86_64-unknown-linux-gnu (native)"
+          cargo build --release --target x86_64-unknown-linux-gnu -p wakey-control-plane
 
-          if [ "$use_zig" = true ]; then
-            echo "cargo-zigbuild + zig found: building control-plane with glibc ${GLIBC_VER}"
-            for base in "${GNU_TARGETS[@]}"; do
-              cargo zigbuild --release --target "${base}.${GLIBC_VER}" -p wakey-control-plane
-            done
-          else
-            echo "zig or cargo zigbuild not available: using plain cargo build (binary needs glibc >= host)"
-            for base in "${GNU_TARGETS[@]}"; do
-              cargo build --release --target "$base" -p wakey-control-plane
-            done
-          fi
+          echo "Building control-plane aarch64-unknown-linux-gnu (cross)"
+          cross build --release --target aarch64-unknown-linux-gnu -p wakey-control-plane
 
       - name: Package rootfs tarball
         shell: pwsh
