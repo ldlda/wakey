@@ -1262,7 +1262,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lda-ipjs"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "futures",
@@ -3055,7 +3055,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-agent"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3079,7 +3079,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-control-plane"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -3106,7 +3106,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "macaddr",
  "serde",
@@ -3117,7 +3117,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-linux"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "futures",
