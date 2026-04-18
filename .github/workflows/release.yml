@@ -1,0 +1,127 @@
+name: release
+run-name: Release ${{ github.ref_name }}
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  # When using cargo-zigbuild for *-gnu targets, link against this glibc baseline (wider VPS compatibility).
+  WAKEY_CC_GLIBC_VERSION: "2.28"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-unknown-linux-musleabihf,x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Ensure toolchain and targets
+        shell: pwsh
+        run: |
+          rustc -V
+          cargo -V
+          rustup target add armv7-unknown-linux-musleabihf
+          rustup target add x86_64-unknown-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build (armv7-musl)
+        shell: pwsh
+        run: |
+          cargo build --release --target armv7-unknown-linux-musleabihf -p wakey -p wakey-agent
+
+      - name: Build UI dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ui
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build control-plane (linux-gnu; zig + older glibc when available)
+        shell: bash
+        run: |
+          set -euo pipefail
+          GLIBC_VER="${WAKEY_CC_GLIBC_VERSION:-2.28}"
+          GNU_TARGETS=(x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu)
+
+          use_zig=false
+          if command -v zig >/dev/null 2>&1 && cargo zigbuild -h >/dev/null 2>&1; then
+            use_zig=true
+          fi
+
+          if [ "$use_zig" = true ]; then
+            echo "cargo-zigbuild + zig found: building control-plane with glibc ${GLIBC_VER}"
+            for base in "${GNU_TARGETS[@]}"; do
+              cargo zigbuild --release --target "${base}.${GLIBC_VER}" -p wakey-control-plane
+            done
+          else
+            echo "zig or cargo zigbuild not available: using plain cargo build (binary needs glibc >= host)"
+            for base in "${GNU_TARGETS[@]}"; do
+              cargo build --release --target "$base" -p wakey-control-plane
+            done
+          fi
+
+      - name: Package rootfs tarball
+        shell: pwsh
+        run: |
+          ./scripts/package_rootfs.ps1 -Version "${{ github.ref_name }}" -Target armv7-unknown-linux-musleabihf
+
+      - name: Package control-plane bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/update_wakey_cc.sh scripts/package_wakey_cc_bundle.sh
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            ./scripts/package_wakey_cc_bundle.sh --version "${{ github.ref_name }}" --target "$target"
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wakey-rootfs
+          path: dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz
+
+      - name: Upload control-plane bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: wakey-cc-bundles
+          path: dist/wakey-cc-*unknown-linux-gnu.tgz
+
+      - name: Publish Release to GitHub
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz
+            dist/wakey-cc-*unknown-linux-gnu.tgz
