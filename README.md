@@ -125,7 +125,7 @@ Example:
 data_dir = "/var/lib/wakey-control-plane"
 bind = "0.0.0.0:8080"
 public_url = "https://cp.example.com"
-state_file = "state.db"
+state_file = "state.sqlite3"
 pid_file = "wakey-control-plane.pid"
 ui_dist_dir = "/opt/wakey/ui/dist"
 command_timeout_ms = 30000
@@ -140,9 +140,14 @@ json_logs = false
 If `telemetry.otlp_endpoint` is omitted, logs still work normally and only local
 structured logs are emitted.
 
-State is persisted in an embedded `sled` database (default
-`/var/lib/wakey-control-plane/state.db`).
+State is persisted in an embedded SQLite database (default
+`/var/lib/wakey-control-plane/state.sqlite3`).
 Relative paths in config are resolved under `data_dir`.
+Legacy sled state can be imported explicitly:
+
+```sh
+wakey-control-plane import-sled-state --from-sled-state /var/lib/wakey-control-plane/state.db --to-state-file /var/lib/wakey-control-plane/state.sqlite3
+```
 
 Enroll tokens are now expiring and revocable. Issuance returns `expires_at_unix`.
 Expired tokens are rejected on enroll and can be garbage-collected periodically

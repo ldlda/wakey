@@ -61,6 +61,10 @@ async fn main() -> Result<()> {
             tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
             runtime::state_stats(args).await
         }
+        Command::ImportSledState(args) => {
+            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
+            runtime::import_sled_state(args).await
+        }
         Command::Reload(args) => {
             tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
             runtime::reload_daemon(&args.pid_file)

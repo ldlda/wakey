@@ -26,7 +26,9 @@ use crate::ws;
 mod admin;
 mod process;
 pub use admin::revoke_agent;
-pub use admin::{issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats};
+pub use admin::{
+    import_sled_state, issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats,
+};
 pub use process::reload_daemon;
 use process::{remove_pid_file, write_pid_file};
 
@@ -62,6 +64,7 @@ fn public_api_routes(ui_dist_dir: std::path::PathBuf) -> Router<AppState> {
 
     Router::new()
         .route("/ui", get(|| async { Redirect::temporary("/ui/") }))
+        .route("/", get(|| async { Redirect::temporary("/ui/") })) // same as caddyfile
         .nest_service(
             "/ui/",
             get_service(ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(index_file))),

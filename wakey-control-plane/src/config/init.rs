@@ -40,7 +40,7 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
     let state_file_raw = args
         .state_file
         .clone()
-        .unwrap_or_else(|| PathBuf::from("state.db"));
+        .unwrap_or_else(|| PathBuf::from("state.sqlite3"));
     let state_file = resolve_path(&data_dir, state_file_raw);
 
     let pid_file_raw = args

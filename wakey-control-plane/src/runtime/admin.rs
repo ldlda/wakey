@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 
 use crate::api;
 use crate::cli::{
-    IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeAgentArgs, RevokeEnrollTokenArgs,
-    StateStatsArgs,
+    ImportSledStateArgs, IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeAgentArgs,
+    RevokeEnrollTokenArgs, StateStatsArgs,
 };
 use crate::config;
 use crate::state;
@@ -274,5 +274,13 @@ pub async fn state_stats(args: StateStatsArgs) -> Result<()> {
         "expired_enroll_token_count={}",
         stats.expired_enroll_token_count
     );
+    Ok(())
+}
+
+pub async fn import_sled_state(args: ImportSledStateArgs) -> Result<()> {
+    state::Store::import_sled_state(&args.from_sled_state, &args.to_state_file, args.force).await?;
+    println!("from_sled_state={}", args.from_sled_state.display());
+    println!("to_state_file={}", args.to_state_file.display());
+    println!("imported=true");
     Ok(())
 }

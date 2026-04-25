@@ -49,7 +49,7 @@ impl DaemonConfig {
             .state_file
             .clone()
             .or(file.state_file)
-            .unwrap_or_else(|| PathBuf::from("state.db"));
+            .unwrap_or_else(|| PathBuf::from("state.sqlite3"));
         let state_file = resolve_path(&data_dir, state_file_raw);
 
         let command_timeout = Duration::from_millis(
@@ -255,7 +255,7 @@ fn resolve_state_access(
         &data_dir,
         cli_state_file
             .or(file.state_file)
-            .unwrap_or_else(|| PathBuf::from("state.db")),
+            .unwrap_or_else(|| PathBuf::from("state.sqlite3")),
     );
 
     let resolved_public_url = cli_public_url
@@ -288,8 +288,11 @@ mod tests {
     fn resolve_path_joins_relative_path() {
         let out = resolve_path(
             Path::new("/var/lib/wakey-control-plane"),
-            PathBuf::from("state.db"),
+            PathBuf::from("state.sqlite3"),
         );
-        assert_eq!(out, PathBuf::from("/var/lib/wakey-control-plane/state.db"));
+        assert_eq!(
+            out,
+            PathBuf::from("/var/lib/wakey-control-plane/state.sqlite3")
+        );
     }
 }

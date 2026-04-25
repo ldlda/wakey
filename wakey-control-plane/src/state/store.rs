@@ -1,8 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use tracing::{debug, info, warn};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::{Row, SqlitePool};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::state::types::{
@@ -12,17 +15,11 @@ use crate::state::types::{
 
 pub struct Store {
     db_path: PathBuf,
-    meta: sled::Tree,
-    enroll_tokens: sled::Tree,
-    agents: sled::Tree,
-    agent_meta: sled::Tree,
-    audit_events: sled::Tree,
-    active_alerts: sled::Tree,
-    alert_transitions: sled::Tree, // Where are them Types!
+    pool: SqlitePool,
 }
 
-const SCHEMA_VERSION_KEY: &[u8] = b"schema_version";
-const SEEDED_ENROLL_TOKEN_PREFIX: &[u8] = b"seeded_enroll_token:";
+const SCHEMA_VERSION_KEY: &str = "schema_version";
+const SEEDED_ENROLL_TOKEN_PREFIX: &str = "seeded_enroll_token:";
 const SCHEMA_VERSION: u32 = 1;
 
 impl Store {
@@ -31,58 +28,37 @@ impl Store {
         enroll_tokens: Vec<String>,
         seed_ttl: Duration,
     ) -> Result<Self> {
+        if path.is_dir() {
+            anyhow::bail!(
+                "state_file {} is a directory, which looks like a legacy sled store; run `wakey-control-plane import-sled-state --from-sled-state {} --to-state-file <sqlite-file>` and update state_file",
+                path.display(),
+                path.display()
+            );
+        }
+
         let db_path = path.to_path_buf();
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create state dir {}", parent.display()))?;
         }
 
-        let db = sled::open(&db_path)
-            .with_context(|| format!("failed to open state db {}", db_path.display()))?;
-        let meta_tree = db.open_tree("meta").context("failed to open meta tree")?;
-        let enroll_tree = db
-            .open_tree("enroll_tokens")
-            .context("failed to open enroll_tokens tree")?;
-        let agents_tree = db
-            .open_tree("agents")
-            .context("failed to open agents tree")?;
-        let agent_meta_tree = db
-            .open_tree("agent_meta")
-            .context("failed to open agent_meta tree")?;
-        let audit_events_tree = db
-            .open_tree("audit_events")
-            .context("failed to open audit_events tree")?;
-        let active_alerts_tree = db
-            .open_tree("active_alerts")
-            .context("failed to open active_alerts tree")?;
-        let alert_transitions_tree = db
-            .open_tree("alert_transitions")
-            .context("failed to open alert_transitions tree")?;
+        let pool = open_sqlite_pool(&db_path).await?;
+        sqlx::migrate!("./migrations")
+            .run(&pool)
+            .await
+            .with_context(|| format!("failed to migrate state db {}", db_path.display()))?;
 
-        let store = Self {
-            db_path,
-            meta: meta_tree,
-            enroll_tokens: enroll_tree,
-            agents: agents_tree,
-            agent_meta: agent_meta_tree,
-            audit_events: audit_events_tree,
-            active_alerts: active_alerts_tree,
-            alert_transitions: alert_transitions_tree,
-        };
+        let store = Self { db_path, pool };
 
-        store.ensure_schema_version()?;
-
-        store.seed_bootstrap_enroll_tokens(&enroll_tokens, seed_ttl)?;
-
-        store.gc_expired_enroll_tokens_inner()?;
-
+        store.ensure_schema_version().await?;
         store
-            .flush()
-            .with_context(|| format!("failed to flush state db {}", store.db_path.display()))?;
+            .seed_bootstrap_enroll_tokens(&enroll_tokens, seed_ttl)
+            .await?;
+        store.gc_expired_enroll_tokens_inner().await?;
 
-        let enroll_tokens = store.enroll_tokens.iter().count();
-        let agents = store.agents.iter().count();
-        let audit_events = store.audit_events.iter().count();
+        let enroll_tokens = sql_count(&store.pool, "enroll_tokens").await?;
+        let agents = sql_count(&store.pool, "agents").await?;
+        let audit_events = sql_count(&store.pool, "audit_events").await?;
         info!(
             path = %store.db_path.display(),
             enroll_tokens,
@@ -93,22 +69,131 @@ impl Store {
         Ok(store)
     }
 
+    pub async fn import_sled_state(
+        from_sled_state: &Path,
+        to_state_file: &Path,
+        force: bool,
+    ) -> Result<()> {
+        if !from_sled_state.is_dir() {
+            anyhow::bail!(
+                "legacy sled state {} does not exist or is not a directory",
+                from_sled_state.display()
+            );
+        }
+        if to_state_file.is_dir() {
+            anyhow::bail!(
+                "target state file {} is a directory",
+                to_state_file.display()
+            );
+        }
+        if to_state_file.exists()
+            && to_state_file
+                .metadata()
+                .with_context(|| format!("failed to stat {}", to_state_file.display()))?
+                .len()
+                > 0
+        {
+            if !force {
+                anyhow::bail!(
+                    "target SQLite state file {} already exists and is non-empty; re-run with --force to overwrite",
+                    to_state_file.display()
+                );
+            }
+            std::fs::remove_file(to_state_file)
+                .with_context(|| format!("failed to remove {}", to_state_file.display()))?;
+        }
+
+        let legacy = sled::open(from_sled_state).with_context(|| {
+            format!(
+                "failed to open legacy sled state {}",
+                from_sled_state.display()
+            )
+        })?;
+        let store = Store::load_or_init(to_state_file, Vec::new(), Duration::from_secs(1)).await?;
+
+        import_tree_raw(&store.pool, &legacy, "meta", "meta", "key", "value").await?;
+        import_enroll_tokens(&store.pool, &legacy).await?;
+        import_agents(&store.pool, &legacy).await?;
+        import_agent_meta(&store.pool, &legacy).await?;
+        import_json_tree(
+            &store.pool,
+            &legacy,
+            "audit_events",
+            "audit_events",
+            "event_key",
+            "event_json",
+            |raw| {
+                let event: AuditEvent = serde_json::from_slice(raw)?;
+                Ok(vec![
+                    ("ts_unix", event.ts_unix.to_string()),
+                    ("agent_id", event.agent_id.unwrap_or_default()),
+                    ("request_id", event.request_id.unwrap_or_default()),
+                    ("event_type", event.event_type),
+                    ("outcome", event.outcome),
+                ])
+            },
+        )
+        .await?;
+        import_simple_json_tree(
+            &store.pool,
+            &legacy,
+            "active_alerts",
+            "active_alerts",
+            "alert_id",
+            "alert_json",
+        )
+        .await?;
+        import_json_tree(
+            &store.pool,
+            &legacy,
+            "alert_transitions",
+            "alert_transitions",
+            "transition_key",
+            "transition_json",
+            |raw| {
+                let transition: AlertTransition = serde_json::from_slice(raw)?;
+                Ok(vec![("ts_unix", transition.ts_unix.to_string())])
+            },
+        )
+        .await?;
+
+        info!(
+            from = %from_sled_state.display(),
+            to = %to_state_file.display(),
+            "imported legacy sled state into SQLite"
+        );
+        Ok(())
+    }
+
     pub async fn enroll(&self, enroll_token: &str) -> Result<IssuedAgent> {
-        let Some(raw_expiry) = self
-            .enroll_tokens
-            .get(enroll_token.as_bytes())
-            .context("failed reading enroll token")?
-        else {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting enroll transaction")?;
+        let expires_at_unix = sqlx::query_scalar::<_, i64>(
+            "SELECT expires_at_unix FROM enroll_tokens WHERE token = ?1",
+        )
+        .bind(enroll_token)
+        .fetch_optional(&mut *tx)
+        .await
+        .context("failed reading enroll token")?;
+
+        let Some(expires_at_unix) = expires_at_unix else {
             warn!("rejecting enroll attempt with invalid, expired, or consumed token");
             anyhow::bail!("invalid or already-used enroll token");
         };
 
-        let expires_at_unix =
-            decode_expiry(raw_expiry.as_ref()).context("failed decoding enroll token expiry")?;
         let now = now_unix();
-        if expires_at_unix <= now {
-            let _ = self.enroll_tokens.remove(enroll_token.as_bytes());
-            self.flush().ok();
+        if expires_at_unix as u64 <= now {
+            sqlx::query("DELETE FROM enroll_tokens WHERE token = ?1")
+                .bind(enroll_token)
+                .execute(&mut *tx)
+                .await
+                .context("failed removing expired enroll token")?;
+            tx.commit()
+                .await
+                .context("failed committing expired enroll token removal")?;
             warn!(
                 expires_at_unix,
                 now_unix = now,
@@ -117,18 +202,25 @@ impl Store {
             anyhow::bail!("enroll token has expired");
         }
 
-        self.enroll_tokens
-            .remove(enroll_token.as_bytes())
+        sqlx::query("DELETE FROM enroll_tokens WHERE token = ?1")
+            .bind(enroll_token)
+            .execute(&mut *tx)
+            .await
             .context("failed consuming enroll token")?;
 
         let agent_id = format!("agent-{}", Uuid::new_v4());
         let agent_token = format!("tok-{}", Uuid::new_v4());
 
-        self.agents
-            .insert(agent_id.as_bytes(), agent_token.as_bytes())
+        sqlx::query("INSERT INTO agents (agent_id, agent_token) VALUES (?1, ?2)")
+            .bind(&agent_id)
+            .bind(&agent_token)
+            .execute(&mut *tx)
+            .await
             .context("failed persisting agent credentials")?;
-        self.flush()
-            .context("failed flushing state db after enroll")?;
+
+        tx.commit()
+            .await
+            .context("failed committing state db after enroll")?;
         info!(agent_id = %agent_id, "issued persistent agent credentials");
 
         Ok(IssuedAgent {
@@ -140,11 +232,12 @@ impl Store {
     pub async fn issue_enroll_token(&self, ttl: Duration) -> Result<IssuedEnrollToken> {
         let token = format!("enr-{}", Uuid::new_v4());
         let expires_at_unix = now_unix().saturating_add(ttl.as_secs().max(1));
-        self.enroll_tokens
-            .insert(token.as_bytes(), &expires_at_unix.to_le_bytes())
+        sqlx::query("INSERT INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)")
+            .bind(&token)
+            .bind(i64::try_from(expires_at_unix).context("expiry does not fit SQLite integer")?)
+            .execute(&self.pool)
+            .await
             .context("failed persisting enroll token")?;
-        self.flush()
-            .context("failed flushing state db after token issuance")?;
         info!(expires_at_unix, "persisted new enroll token");
         Ok(IssuedEnrollToken {
             enroll_token: token,
@@ -154,119 +247,145 @@ impl Store {
 
     pub async fn list_enroll_tokens(&self) -> Result<Vec<EnrollTokenInfo>> {
         let now = now_unix();
-        let mut out = Vec::new();
-        for item in self.enroll_tokens.iter() {
-            let (token, value) = item.context("failed iterating enroll token tree")?;
-            let expires_at_unix =
-                decode_expiry(value.as_ref()).context("failed decoding token expiry")?;
-            let expired = expires_at_unix <= now;
-            let enroll_token =
-                String::from_utf8(token.to_vec()).context("invalid utf-8 enroll token in db")?;
-            out.push(EnrollTokenInfo {
-                enroll_token,
-                expires_at_unix,
-                expired,
-            });
-        }
-        out.sort_by(|a, b| {
-            a.expires_at_unix
-                .cmp(&b.expires_at_unix)
-                .then(a.enroll_token.cmp(&b.enroll_token))
-        });
-        Ok(out)
+        let rows = sqlx::query(
+            "SELECT token, expires_at_unix FROM enroll_tokens ORDER BY expires_at_unix, token",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed listing enroll tokens")?;
+
+        rows.into_iter()
+            .map(|row| {
+                let enroll_token: String = row.try_get("token")?;
+                let expires_at_unix: i64 = row.try_get("expires_at_unix")?;
+                let expires_at_unix =
+                    u64::try_from(expires_at_unix).context("negative token expiry in state db")?;
+                Ok(EnrollTokenInfo {
+                    enroll_token,
+                    expires_at_unix,
+                    expired: expires_at_unix <= now,
+                })
+            })
+            .collect()
     }
 
     pub async fn revoke_enroll_token(&self, token: &str) -> Result<bool> {
-        let removed = self
-            .enroll_tokens
-            .remove(token.as_bytes())
-            .context("failed removing enroll token")?
-            .is_some();
-        if removed {
-            self.flush()
-                .context("failed flushing db after enroll token revoke")?;
-        }
-        Ok(removed)
+        let result = sqlx::query("DELETE FROM enroll_tokens WHERE token = ?1")
+            .bind(token)
+            .execute(&self.pool)
+            .await
+            .context("failed removing enroll token")?;
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn revoke_agent(&self, agent_id: &str) -> Result<bool> {
-        let removed = self
-            .agents
-            .remove(agent_id.as_bytes())
-            .context("failed removing agent credentials")?
-            .is_some();
-        if removed {
-            let _ = self.agent_meta.remove(agent_id.as_bytes());
-            self.flush()
-                .context("failed flushing db after agent revoke")?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting revoke transaction")?;
+        let result = sqlx::query("DELETE FROM agents WHERE agent_id = ?1")
+            .bind(agent_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed removing agent credentials")?;
+        if result.rows_affected() > 0 {
+            sqlx::query("DELETE FROM agent_meta WHERE agent_id = ?1")
+                .bind(agent_id)
+                .execute(&mut *tx)
+                .await
+                .context("failed removing agent metadata")?;
         }
-        Ok(removed)
+        tx.commit()
+            .await
+            .context("failed committing db after agent revoke")?;
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn set_agent_nickname(&self, agent_id: &str, nickname: Option<&str>) -> Result<bool> {
-        if !self
-            .agents
-            .contains_key(agent_id.as_bytes())
-            .context("failed checking agent existence")?
-        {
+        let exists =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agents WHERE agent_id = ?1")
+                .bind(agent_id)
+                .fetch_one(&self.pool)
+                .await
+                .context("failed checking agent existence")?;
+        if exists == 0 {
             return Ok(false);
         }
 
         let normalized = nickname.map(str::trim).filter(|v| !v.is_empty());
         if let Some(value) = normalized {
-            self.agent_meta
-                .insert(agent_id.as_bytes(), value.as_bytes())
-                .context("failed persisting agent nickname")?;
+            sqlx::query(
+                "INSERT INTO agent_meta (agent_id, nickname) VALUES (?1, ?2)
+                 ON CONFLICT(agent_id) DO UPDATE SET nickname = excluded.nickname",
+            )
+            .bind(agent_id)
+            .bind(value)
+            .execute(&self.pool)
+            .await
+            .context("failed persisting agent nickname")?;
         } else {
-            let _ = self
-                .agent_meta
-                .remove(agent_id.as_bytes())
+            sqlx::query("DELETE FROM agent_meta WHERE agent_id = ?1")
+                .bind(agent_id)
+                .execute(&self.pool)
+                .await
                 .context("failed clearing agent nickname")?;
         }
 
-        self.flush()
-            .context("failed flushing db after nickname update")?;
         Ok(true)
     }
 
     pub async fn stats(&self) -> Result<StateStats> {
-        let now = now_unix();
-        let mut enroll_token_count = 0usize;
-        let mut expired_enroll_token_count = 0usize;
-        for item in self.enroll_tokens.iter() {
-            let (_, value) = item.context("failed iterating enroll token tree")?;
-            let expires_at = decode_expiry(value.as_ref())
-                .context("failed decoding token expiry during stats")?;
-            enroll_token_count = enroll_token_count.saturating_add(1);
-            if expires_at <= now {
-                expired_enroll_token_count = expired_enroll_token_count.saturating_add(1);
-            }
-        }
+        let now = i64::try_from(now_unix()).context("current time does not fit SQLite integer")?;
+        let enroll_token_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM enroll_tokens")
+            .fetch_one(&self.pool)
+            .await
+            .context("failed counting enroll tokens")?;
+        let expired_enroll_token_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM enroll_tokens WHERE expires_at_unix <= ?1",
+        )
+        .bind(now)
+        .fetch_one(&self.pool)
+        .await
+        .context("failed counting expired enroll tokens")?;
+        let agent_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agents")
+            .fetch_one(&self.pool)
+            .await
+            .context("failed counting agents")?;
 
         Ok(StateStats {
             db_path: self.db_path.clone(),
-            schema_version: self.schema_version()?,
-            agent_count: self.agents.iter().count(),
-            enroll_token_count,
-            expired_enroll_token_count,
+            schema_version: self.schema_version().await?,
+            agent_count: usize::try_from(agent_count).context("agent count overflow")?,
+            enroll_token_count: usize::try_from(enroll_token_count)
+                .context("enroll token count overflow")?,
+            expired_enroll_token_count: usize::try_from(expired_enroll_token_count)
+                .context("expired enroll token count overflow")?,
         })
     }
 
     #[cfg_attr(not(unix), allow(dead_code))]
     pub async fn gc_expired_enroll_tokens(&self) -> Result<u64> {
-        self.gc_expired_enroll_tokens_inner()
+        self.gc_expired_enroll_tokens_inner().await
     }
 
     #[cfg_attr(not(unix), allow(dead_code))]
     pub async fn reload_from_disk(&self) -> Result<()> {
-        // sled is durable and read-through; explicit reload is a no-op.
-        info!(path = %self.db_path.display(), "reload requested; sled backend does not require in-memory reload");
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .context("failed validating SQLite state connection")?;
+        info!(path = %self.db_path.display(), "reload requested; SQLite backend does not require in-memory reload");
         Ok(())
     }
 
     pub async fn verify_agent_token(&self, agent_id: &str, token: &str) -> bool {
-        match self.agents.get(agent_id.as_bytes()) {
-            Ok(Some(value)) => value.as_ref() == token.as_bytes(),
+        match sqlx::query_scalar::<_, String>("SELECT agent_token FROM agents WHERE agent_id = ?1")
+            .bind(agent_id)
+            .fetch_optional(&self.pool)
+            .await
+        {
+            Ok(Some(value)) => value == token,
             Ok(None) => false,
             Err(err) => {
                 warn!(error = %err, agent_id = %agent_id, "failed to read agent token from state db");
@@ -276,36 +395,47 @@ impl Store {
     }
 
     pub async fn list_agents(&self) -> Vec<String> {
-        let mut out = self
-            .agents
-            .iter()
-            .filter_map(|item| item.ok())
-            .filter_map(|(key, _)| String::from_utf8(key.to_vec()).ok())
-            .collect::<Vec<_>>();
-        out.sort();
-        out
+        match sqlx::query_scalar::<_, String>("SELECT agent_id FROM agents ORDER BY agent_id")
+            .fetch_all(&self.pool)
+            .await
+        {
+            Ok(out) => out,
+            Err(err) => {
+                warn!(error = %err, "failed to list agents from state db");
+                Vec::new()
+            }
+        }
     }
 
     pub async fn list_agents_with_nicknames(&self) -> Vec<(String, Option<String>)> {
-        let mut out = self
-            .agents
-            .iter()
-            .filter_map(|item| item.ok())
-            .filter_map(|(key, _)| String::from_utf8(key.to_vec()).ok())
-            .map(|agent_id| {
-                let nickname = self
-                    .agent_meta
-                    .get(agent_id.as_bytes())
-                    .ok()
-                    .flatten()
-                    .and_then(|v| String::from_utf8(v.to_vec()).ok())
-                    .map(|v| v.trim().to_string())
-                    .filter(|v| !v.is_empty());
-                (agent_id, nickname)
-            })
-            .collect::<Vec<_>>();
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        out
+        let rows = sqlx::query(
+            "SELECT agents.agent_id, agent_meta.nickname
+             FROM agents
+             LEFT JOIN agent_meta ON agent_meta.agent_id = agents.agent_id
+             ORDER BY agents.agent_id",
+        )
+        .fetch_all(&self.pool)
+        .await;
+
+        match rows {
+            Ok(rows) => rows
+                .into_iter()
+                .filter_map(|row| {
+                    let agent_id: String = row.try_get("agent_id").ok()?;
+                    let nickname: Option<String> = row
+                        .try_get::<Option<String>, _>("nickname")
+                        .ok()
+                        .flatten()
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty());
+                    Some((agent_id, nickname))
+                })
+                .collect(),
+            Err(err) => {
+                warn!(error = %err, "failed to list agents from state db");
+                Vec::new()
+            }
+        }
     }
 
     pub async fn append_audit_event(&self, input: AuditEventInput) -> Result<AuditEvent> {
@@ -324,35 +454,69 @@ impl Store {
         };
 
         let key = format!("{:020}:{}", event.ts_unix, event.event_id);
-        let value = serde_json::to_vec(&event).context("failed to encode audit event")?;
-        self.audit_events
-            .insert(key.as_bytes(), value)
-            .context("failed persisting audit event")?;
-        self.flush()
-            .context("failed flushing state db after audit append")?;
+        let value = serde_json::to_string(&event).context("failed to encode audit event")?;
+        sqlx::query(
+            "INSERT INTO audit_events
+             (event_key, event_json, ts_unix, agent_id, request_id, event_type, outcome)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        )
+        .bind(&key)
+        .bind(value)
+        .bind(i64::try_from(event.ts_unix).context("audit timestamp overflow")?)
+        .bind(&event.agent_id)
+        .bind(&event.request_id)
+        .bind(&event.event_type)
+        .bind(&event.outcome)
+        .execute(&self.pool)
+        .await
+        .context("failed persisting audit event")?;
         Ok(event)
     }
 
     pub async fn list_audit_events(&self, filter: AuditEventFilter) -> Result<Vec<AuditEvent>> {
         let limit = filter.limit.clamp(1, 500);
-        let mut out = Vec::new();
+        let mut builder =
+            sqlx::QueryBuilder::new("SELECT event_json FROM audit_events WHERE 1 = 1");
 
-        for item in self.audit_events.iter().rev() {
-            let (_, raw) = item.context("failed iterating audit event tree")?;
-            let event: AuditEvent =
-                serde_json::from_slice(raw.as_ref()).context("failed decoding audit event")?;
-
-            if !matches_audit_filter(&event, &filter) {
-                continue;
-            }
-
-            out.push(event);
-            if out.len() >= limit {
-                break;
-            }
+        if let Some(agent_id) = filter.agent_id.as_deref() {
+            builder.push(" AND agent_id = ");
+            builder.push_bind(agent_id);
         }
+        if let Some(request_id) = filter.request_id.as_deref() {
+            builder.push(" AND request_id = ");
+            builder.push_bind(request_id);
+        }
+        if let Some(event_type) = filter.event_type.as_deref() {
+            builder.push(" AND event_type = ");
+            builder.push_bind(event_type);
+        }
+        if let Some(outcome) = filter.outcome.as_deref() {
+            builder.push(" AND outcome = ");
+            builder.push_bind(outcome);
+        }
+        if let Some(since_unix) = filter.since_unix {
+            builder.push(" AND ts_unix >= ");
+            builder.push_bind(i64::try_from(since_unix).context("since_unix overflow")?);
+        }
+        if let Some(until_unix) = filter.until_unix {
+            builder.push(" AND ts_unix <= ");
+            builder.push_bind(i64::try_from(until_unix).context("until_unix overflow")?);
+        }
+        builder.push(" ORDER BY event_key DESC LIMIT ");
+        builder.push_bind(i64::try_from(limit).context("audit limit overflow")?);
 
-        Ok(out)
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .context("failed listing audit events")?;
+
+        rows.into_iter()
+            .map(|row| {
+                let raw: String = row.try_get("event_json")?;
+                serde_json::from_str(&raw).context("failed decoding audit event")
+            })
+            .collect()
     }
 
     pub async fn sync_alert_transitions(
@@ -360,10 +524,14 @@ impl Store {
         current: &[AlertState],
     ) -> Result<Vec<AlertTransition>> {
         let mut previous = std::collections::HashMap::<String, AlertState>::new();
-        for item in self.active_alerts.iter() {
-            let (_, raw) = item.context("failed iterating active_alerts tree")?;
+        let rows = sqlx::query("SELECT alert_json FROM active_alerts")
+            .fetch_all(&self.pool)
+            .await
+            .context("failed iterating active_alerts table")?;
+        for row in rows {
+            let raw: String = row.try_get("alert_json")?;
             let alert: AlertState =
-                serde_json::from_slice(raw.as_ref()).context("failed decoding active alert")?;
+                serde_json::from_str(&raw).context("failed decoding active alert")?;
             previous.insert(alert.alert_id.clone(), alert);
         }
 
@@ -409,32 +577,46 @@ impl Store {
             });
         }
 
-        for item in self.active_alerts.iter() {
-            let (key, _) = item.context("failed iterating active_alerts keys")?;
-            self.active_alerts
-                .remove(key)
-                .context("failed clearing active alert snapshot")?;
-        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting alert transaction")?;
+        sqlx::query("DELETE FROM active_alerts")
+            .execute(&mut *tx)
+            .await
+            .context("failed clearing active alert snapshot")?;
 
         for alert in current {
-            let key = alert.alert_id.as_bytes();
-            let value = serde_json::to_vec(alert).context("failed encoding active alert")?;
-            self.active_alerts
-                .insert(key, value)
+            let value = serde_json::to_string(alert).context("failed encoding active alert")?;
+            sqlx::query("INSERT INTO active_alerts (alert_id, alert_json) VALUES (?1, ?2)")
+                .bind(&alert.alert_id)
+                .bind(value)
+                .execute(&mut *tx)
+                .await
                 .context("failed writing active alert snapshot")?;
         }
 
         for transition in &transitions {
             let key = format!("{:020}:{}", transition.ts_unix, transition.transition_id);
             let value =
-                serde_json::to_vec(transition).context("failed encoding alert transition")?;
-            self.alert_transitions
-                .insert(key.as_bytes(), value)
-                .context("failed persisting alert transition")?;
+                serde_json::to_string(transition).context("failed encoding alert transition")?;
+            sqlx::query(
+                "INSERT INTO alert_transitions
+                 (transition_key, transition_json, ts_unix)
+                 VALUES (?1, ?2, ?3)",
+            )
+            .bind(key)
+            .bind(value)
+            .bind(i64::try_from(transition.ts_unix).context("alert timestamp overflow")?)
+            .execute(&mut *tx)
+            .await
+            .context("failed persisting alert transition")?;
         }
 
-        self.flush()
-            .context("failed flushing state db after alert sync")?;
+        tx.commit()
+            .await
+            .context("failed committing state db after alert sync")?;
         Ok(transitions)
     }
 
@@ -444,47 +626,38 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<AlertTransition>> {
         let limit = limit.clamp(1, 500);
-        let mut out = Vec::new();
-        for item in self.alert_transitions.iter().rev() {
-            let (_, raw) = item.context("failed iterating alert transition tree")?;
-            let transition: AlertTransition =
-                serde_json::from_slice(raw.as_ref()).context("failed decoding alert transition")?;
-            if let Some(since) = since_unix
-                && transition.ts_unix < since
-            {
-                continue;
-            }
-            out.push(transition);
-            if out.len() >= limit {
-                break;
-            }
+        let rows = if let Some(since) = since_unix {
+            sqlx::query(
+                "SELECT transition_json FROM alert_transitions
+                 WHERE ts_unix >= ?1
+                 ORDER BY transition_key DESC
+                 LIMIT ?2",
+            )
+            .bind(i64::try_from(since).context("since_unix overflow")?)
+            .bind(i64::try_from(limit).context("alert limit overflow")?)
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query(
+                "SELECT transition_json FROM alert_transitions
+                 ORDER BY transition_key DESC
+                 LIMIT ?1",
+            )
+            .bind(i64::try_from(limit).context("alert limit overflow")?)
+            .fetch_all(&self.pool)
+            .await
         }
-        Ok(out)
+        .context("failed listing alert transitions")?;
+
+        rows.into_iter()
+            .map(|row| {
+                let raw: String = row.try_get("transition_json")?;
+                serde_json::from_str(&raw).context("failed decoding alert transition")
+            })
+            .collect()
     }
 
-    fn flush(&self) -> Result<()> {
-        self.meta.flush().context("failed to flush meta tree")?;
-        self.enroll_tokens
-            .flush()
-            .context("failed to flush enroll token tree")?;
-        self.agents.flush().context("failed to flush agents tree")?;
-        self.agent_meta
-            .flush()
-            .context("failed to flush agent_meta tree")?;
-        self.audit_events
-            .flush()
-            .context("failed to flush audit event tree")?;
-        self.active_alerts
-            .flush()
-            .context("failed to flush active alerts tree")?;
-        self.alert_transitions
-            .flush()
-            .context("failed to flush alert transitions tree")?;
-        debug!(path = %self.db_path.display(), "flushed sled state db");
-        Ok(())
-    }
-
-    fn seed_bootstrap_enroll_tokens(
+    async fn seed_bootstrap_enroll_tokens(
         &self,
         enroll_tokens: &[String],
         seed_ttl: Duration,
@@ -496,61 +669,62 @@ impl Store {
             }
 
             let marker_key = seeded_enroll_token_key(token);
-            if self.meta.contains_key(&marker_key).with_context(|| {
-                format!(
-                    "failed reading bootstrap marker in {}",
-                    self.db_path.display()
-                )
-            })? {
+            let marker_exists =
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM meta WHERE key = ?1")
+                    .bind(&marker_key)
+                    .fetch_one(&self.pool)
+                    .await
+                    .context("failed reading bootstrap marker")?;
+            if marker_exists > 0 {
                 continue;
             }
 
             let expires_at = now_unix().saturating_add(seed_ttl.as_secs().max(1));
-            self.enroll_tokens
-                .insert(token.as_bytes(), &expires_at.to_le_bytes())
-                .with_context(|| {
-                    format!(
-                        "failed to seed enroll token into {}",
-                        self.db_path.display()
-                    )
-                })?;
-            self.meta
-                .insert(marker_key, &expires_at.to_le_bytes())
-                .with_context(|| {
-                    format!(
-                        "failed to persist bootstrap marker into {}",
-                        self.db_path.display()
-                    )
-                })?;
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .context("failed starting bootstrap token transaction")?;
+            sqlx::query(
+                "INSERT OR REPLACE INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)",
+            )
+            .bind(token)
+            .bind(i64::try_from(expires_at).context("token expiry overflow")?)
+            .execute(&mut *tx)
+            .await
+            .context("failed seeding enroll token")?;
+            sqlx::query("INSERT INTO meta (key, value) VALUES (?1, ?2)")
+                .bind(marker_key)
+                .bind(expires_at.to_le_bytes().to_vec())
+                .execute(&mut *tx)
+                .await
+                .context("failed persisting bootstrap marker")?;
+            tx.commit()
+                .await
+                .context("failed committing bootstrap token transaction")?;
         }
         Ok(())
     }
 
-    fn gc_expired_enroll_tokens_inner(&self) -> Result<u64> {
-        let now = now_unix();
-        let mut removed = 0u64;
-        for item in self.enroll_tokens.iter() {
-            let (token, value) = item.context("failed iterating enroll token tree")?;
-            let expires_at =
-                decode_expiry(value.as_ref()).context("failed decoding token expiry during gc")?;
-            if expires_at <= now {
-                self.enroll_tokens
-                    .remove(token)
-                    .context("failed removing expired enroll token")?;
-                removed = removed.saturating_add(1);
-            }
-        }
+    async fn gc_expired_enroll_tokens_inner(&self) -> Result<u64> {
+        let now = i64::try_from(now_unix()).context("current time does not fit SQLite integer")?;
+        let result = sqlx::query("DELETE FROM enroll_tokens WHERE expires_at_unix <= ?1")
+            .bind(now)
+            .execute(&self.pool)
+            .await
+            .context("failed removing expired enroll tokens")?;
+        let removed = result.rows_affected();
         if removed > 0 {
-            self.flush().context("failed flushing db after gc")?;
             info!(removed, "garbage-collected expired enroll tokens");
         }
         Ok(removed)
     }
 
-    fn ensure_schema_version(&self) -> Result<()> {
-        match self
-            .meta
-            .get(SCHEMA_VERSION_KEY)
+    async fn ensure_schema_version(&self) -> Result<()> {
+        match sqlx::query_scalar::<_, Vec<u8>>("SELECT value FROM meta WHERE key = ?1")
+            .bind(SCHEMA_VERSION_KEY)
+            .fetch_optional(&self.pool)
+            .await
             .context("failed reading schema version")?
         {
             Some(raw) => {
@@ -565,11 +739,12 @@ impl Store {
                 }
             }
             None => {
-                self.meta
-                    .insert(SCHEMA_VERSION_KEY, &SCHEMA_VERSION.to_le_bytes())
+                sqlx::query("INSERT INTO meta (key, value) VALUES (?1, ?2)")
+                    .bind(SCHEMA_VERSION_KEY)
+                    .bind(SCHEMA_VERSION.to_le_bytes().to_vec())
+                    .execute(&self.pool)
+                    .await
                     .context("failed writing schema version")?;
-                self.flush()
-                    .context("failed flushing db after schema init")?;
                 info!(
                     schema_version = SCHEMA_VERSION,
                     "initialized state schema version"
@@ -579,14 +754,36 @@ impl Store {
         Ok(())
     }
 
-    fn schema_version(&self) -> Result<u32> {
-        let raw = self
-            .meta
-            .get(SCHEMA_VERSION_KEY)
-            .context("failed reading schema version")?
-            .ok_or_else(|| anyhow::anyhow!("missing schema version in state db"))?;
+    async fn schema_version(&self) -> Result<u32> {
+        let raw = sqlx::query_scalar::<_, Vec<u8>>("SELECT value FROM meta WHERE key = ?1")
+            .bind(SCHEMA_VERSION_KEY)
+            .fetch_one(&self.pool)
+            .await
+            .context("failed reading schema version")?;
         decode_schema(raw.as_ref()).context("failed decoding schema version")
     }
+}
+
+async fn open_sqlite_pool(path: &Path) -> Result<SqlitePool> {
+    let options = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .foreign_keys(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal);
+    SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await
+        .with_context(|| format!("failed to open SQLite state db {}", path.display()))
+}
+
+async fn sql_count(pool: &SqlitePool, table: &str) -> Result<i64> {
+    let sql = format!("SELECT COUNT(*) FROM {table}");
+    sqlx::query_scalar::<_, i64>(&sql)
+        .fetch_one(pool)
+        .await
+        .with_context(|| format!("failed counting {table}"))
 }
 
 fn now_unix() -> u64 {
@@ -614,46 +811,195 @@ fn decode_schema(raw: &[u8]) -> Result<u32> {
     Ok(u32::from_le_bytes(arr))
 }
 
-fn seeded_enroll_token_key(token: &str) -> Vec<u8> {
-    let mut key = Vec::with_capacity(SEEDED_ENROLL_TOKEN_PREFIX.len() + token.len());
-    key.extend_from_slice(SEEDED_ENROLL_TOKEN_PREFIX);
-    key.extend_from_slice(token.as_bytes());
-    key
+fn seeded_enroll_token_key(token: &str) -> String {
+    format!("{SEEDED_ENROLL_TOKEN_PREFIX}{token}")
 }
 
-fn matches_audit_filter(event: &AuditEvent, filter: &AuditEventFilter) -> bool {
-    if let Some(agent_id) = filter.agent_id.as_deref()
-        && event.agent_id.as_deref() != Some(agent_id)
-    {
-        return false;
+async fn import_tree_raw(
+    pool: &SqlitePool,
+    legacy: &sled::Db,
+    sled_tree: &str,
+    sql_table: &str,
+    key_col: &str,
+    value_col: &str,
+) -> Result<()> {
+    let tree = legacy
+        .open_tree(sled_tree)
+        .with_context(|| format!("failed to open legacy {sled_tree} tree"))?;
+    let sql =
+        format!("INSERT OR REPLACE INTO {sql_table} ({key_col}, {value_col}) VALUES (?1, ?2)");
+    for item in tree.iter() {
+        let (key, value) =
+            item.with_context(|| format!("failed reading legacy {sled_tree} tree"))?;
+        let key = String::from_utf8(key.to_vec())
+            .with_context(|| format!("legacy {sled_tree} key is not utf-8"))?;
+        sqlx::query(&sql)
+            .bind(key)
+            .bind(value.to_vec())
+            .execute(pool)
+            .await
+            .with_context(|| format!("failed importing legacy {sled_tree} row"))?;
     }
-    if let Some(request_id) = filter.request_id.as_deref()
-        && event.request_id.as_deref() != Some(request_id)
-    {
-        return false;
-    }
-    if let Some(event_type) = filter.event_type.as_deref()
-        && event.event_type != event_type
-    {
-        return false;
-    }
-    if let Some(outcome) = filter.outcome.as_deref()
-        && event.outcome != outcome
-    {
-        return false;
-    }
-    if let Some(since_unix) = filter.since_unix
-        && event.ts_unix < since_unix
-    {
-        return false;
-    }
-    if let Some(until_unix) = filter.until_unix
-        && event.ts_unix > until_unix
-    {
-        return false;
-    }
+    Ok(())
+}
 
-    true
+async fn import_enroll_tokens(pool: &SqlitePool, legacy: &sled::Db) -> Result<()> {
+    let tree = legacy
+        .open_tree("enroll_tokens")
+        .context("failed to open legacy enroll_tokens tree")?;
+    for item in tree.iter() {
+        let (token, expiry) = item.context("failed reading legacy enroll token")?;
+        let token =
+            String::from_utf8(token.to_vec()).context("legacy enroll token key is not utf-8")?;
+        let expires_at_unix = decode_expiry(expiry.as_ref())?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)",
+        )
+        .bind(token)
+        .bind(i64::try_from(expires_at_unix).context("legacy token expiry overflow")?)
+        .execute(pool)
+        .await
+        .context("failed importing legacy enroll token")?;
+    }
+    Ok(())
+}
+
+async fn import_agents(pool: &SqlitePool, legacy: &sled::Db) -> Result<()> {
+    let tree = legacy
+        .open_tree("agents")
+        .context("failed to open legacy agents tree")?;
+    for item in tree.iter() {
+        let (agent_id, agent_token) = item.context("failed reading legacy agent")?;
+        let agent_id =
+            String::from_utf8(agent_id.to_vec()).context("legacy agent id is not utf-8")?;
+        let agent_token =
+            String::from_utf8(agent_token.to_vec()).context("legacy agent token is not utf-8")?;
+        sqlx::query("INSERT OR REPLACE INTO agents (agent_id, agent_token) VALUES (?1, ?2)")
+            .bind(agent_id)
+            .bind(agent_token)
+            .execute(pool)
+            .await
+            .context("failed importing legacy agent")?;
+    }
+    Ok(())
+}
+
+async fn import_agent_meta(pool: &SqlitePool, legacy: &sled::Db) -> Result<()> {
+    let tree = legacy
+        .open_tree("agent_meta")
+        .context("failed to open legacy agent_meta tree")?;
+    for item in tree.iter() {
+        let (agent_id, nickname) = item.context("failed reading legacy agent metadata")?;
+        let agent_id =
+            String::from_utf8(agent_id.to_vec()).context("legacy agent id is not utf-8")?;
+        let nickname =
+            String::from_utf8(nickname.to_vec()).context("legacy nickname is not utf-8")?;
+        sqlx::query("INSERT OR REPLACE INTO agent_meta (agent_id, nickname) VALUES (?1, ?2)")
+            .bind(agent_id)
+            .bind(nickname)
+            .execute(pool)
+            .await
+            .context("failed importing legacy agent metadata")?;
+    }
+    Ok(())
+}
+
+async fn import_simple_json_tree(
+    pool: &SqlitePool,
+    legacy: &sled::Db,
+    sled_tree: &str,
+    sql_table: &str,
+    key_col: &str,
+    value_col: &str,
+) -> Result<()> {
+    let tree = legacy
+        .open_tree(sled_tree)
+        .with_context(|| format!("failed to open legacy {sled_tree} tree"))?;
+    let sql =
+        format!("INSERT OR REPLACE INTO {sql_table} ({key_col}, {value_col}) VALUES (?1, ?2)");
+    for item in tree.iter() {
+        let (key, value) =
+            item.with_context(|| format!("failed reading legacy {sled_tree} tree"))?;
+        let key = String::from_utf8(key.to_vec())
+            .with_context(|| format!("legacy {sled_tree} key is not utf-8"))?;
+        let value = String::from_utf8(value.to_vec())
+            .with_context(|| format!("legacy {sled_tree} value is not utf-8"))?;
+        sqlx::query(&sql)
+            .bind(key)
+            .bind(value)
+            .execute(pool)
+            .await
+            .with_context(|| format!("failed importing legacy {sled_tree} row"))?;
+    }
+    Ok(())
+}
+
+async fn import_json_tree<F>(
+    pool: &SqlitePool,
+    legacy: &sled::Db,
+    sled_tree: &str,
+    sql_table: &str,
+    _key_col: &str,
+    _value_col: &str,
+    derive_cols: F,
+) -> Result<()>
+where
+    F: Fn(&[u8]) -> Result<Vec<(&'static str, String)>>,
+{
+    let tree = legacy
+        .open_tree(sled_tree)
+        .with_context(|| format!("failed to open legacy {sled_tree} tree"))?;
+    for item in tree.iter() {
+        let (key, value) =
+            item.with_context(|| format!("failed reading legacy {sled_tree} tree"))?;
+        let key = String::from_utf8(key.to_vec())
+            .with_context(|| format!("legacy {sled_tree} key is not utf-8"))?;
+        let json = String::from_utf8(value.to_vec())
+            .with_context(|| format!("legacy {sled_tree} value is not utf-8"))?;
+        let derived = derive_cols(json.as_bytes())?;
+        match (sql_table, derived.as_slice()) {
+            ("audit_events", cols) => {
+                let ts_unix = i64::from_str(&cols[0].1).context("invalid audit timestamp")?;
+                let agent_id = empty_to_none(&cols[1].1);
+                let request_id = empty_to_none(&cols[2].1);
+                sqlx::query(
+                    "INSERT OR REPLACE INTO audit_events
+                     (event_key, event_json, ts_unix, agent_id, request_id, event_type, outcome)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                )
+                .bind(key)
+                .bind(json)
+                .bind(ts_unix)
+                .bind(agent_id)
+                .bind(request_id)
+                .bind(&cols[3].1)
+                .bind(&cols[4].1)
+                .execute(pool)
+                .await
+                .context("failed importing legacy audit event")?;
+            }
+            ("alert_transitions", cols) => {
+                let ts_unix = i64::from_str(&cols[0].1).context("invalid alert timestamp")?;
+                sqlx::query(
+                    "INSERT OR REPLACE INTO alert_transitions
+                     (transition_key, transition_json, ts_unix)
+                     VALUES (?1, ?2, ?3)",
+                )
+                .bind(key)
+                .bind(json)
+                .bind(ts_unix)
+                .execute(pool)
+                .await
+                .context("failed importing legacy alert transition")?;
+            }
+            _ => unreachable!("unsupported import_json_tree target"),
+        }
+    }
+    Ok(())
+}
+
+fn empty_to_none(value: &str) -> Option<&str> {
+    if value.is_empty() { None } else { Some(value) }
 }
 
 #[cfg(test)]
@@ -666,7 +1012,7 @@ mod tests {
     async fn make_store() -> (Store, std::path::PathBuf) {
         let dir =
             std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
-        let db_path = dir.join("state.db");
+        let db_path = dir.join("state.sqlite3");
         let store = Store::load_or_init(&db_path, Vec::new(), Duration::from_secs(60))
             .await
             .expect("store should initialize");
@@ -677,15 +1023,34 @@ mod tests {
         let _ = fs::remove_dir_all(path);
     }
 
+    async fn insert_token(store: &Store, token: &str, expires_at_unix: u64) {
+        sqlx::query(
+            "INSERT OR REPLACE INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)",
+        )
+        .bind(token)
+        .bind(expires_at_unix as i64)
+        .execute(&store.pool)
+        .await
+        .expect("insert should succeed");
+    }
+
+    #[tokio::test]
+    async fn rejects_directory_state_path() {
+        let dir =
+            std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("dir should be created");
+        let err = match Store::load_or_init(&dir, Vec::new(), Duration::from_secs(60)).await {
+            Ok(_) => panic!("directory path should be rejected"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("legacy sled store"));
+        cleanup_dir(&dir);
+    }
+
     #[tokio::test]
     async fn gc_removes_expired_tokens() {
         let (store, dir) = make_store().await;
-        let key = b"enr-expired-gc-test";
-        let expired = 1u64.to_le_bytes();
-        store
-            .enroll_tokens
-            .insert(key, &expired)
-            .expect("insert should succeed");
+        insert_token(&store, "enr-expired-gc-test", 1).await;
 
         let removed = store
             .gc_expired_enroll_tokens()
@@ -693,25 +1058,20 @@ mod tests {
             .expect("gc should succeed");
 
         assert_eq!(removed, 1);
-        assert!(
-            store
-                .enroll_tokens
-                .get(key)
-                .expect("read should succeed")
-                .is_none()
-        );
+        let exists =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1")
+                .bind("enr-expired-gc-test")
+                .fetch_one(&store.pool)
+                .await
+                .expect("read should succeed");
+        assert_eq!(exists, 0);
         cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn enroll_rejects_expired_token() {
         let (store, dir) = make_store().await;
-        let key = b"enr-expired-enroll-test";
-        let expired = 1u64.to_le_bytes();
-        store
-            .enroll_tokens
-            .insert(key, &expired)
-            .expect("insert should succeed");
+        insert_token(&store, "enr-expired-enroll-test", 1).await;
 
         let err = store
             .enroll("enr-expired-enroll-test")
@@ -719,33 +1079,27 @@ mod tests {
             .expect_err("expired token should be rejected");
 
         assert!(err.to_string().contains("expired"));
-        assert!(
-            store
-                .enroll_tokens
-                .get(key)
-                .expect("read should succeed")
-                .is_none()
-        );
+        let exists =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1")
+                .bind("enr-expired-enroll-test")
+                .fetch_one(&store.pool)
+                .await
+                .expect("read should succeed");
+        assert_eq!(exists, 0);
         cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn stats_counts_agents_and_expired_tokens() {
         let (store, dir) = make_store().await;
-        store
-            .enroll_tokens
-            .insert(b"enr-valid-test", &(u64::MAX - 10).to_le_bytes())
-            .expect("insert valid should succeed");
+        insert_token(&store, "enr-valid-test", i64::MAX as u64).await;
 
         let _issued = store
             .issue_enroll_token(Duration::from_secs(60))
             .await
             .expect("issue should succeed");
 
-        store
-            .enroll_tokens
-            .insert(b"enr-expired-stats-test", &1u64.to_le_bytes())
-            .expect("insert expired should succeed");
+        insert_token(&store, "enr-expired-stats-test", 1).await;
 
         let issued_agent = store
             .enroll("enr-valid-test")
@@ -765,10 +1119,7 @@ mod tests {
     async fn revoke_agent_removes_credentials() {
         let (store, dir) = make_store().await;
 
-        store
-            .enroll_tokens
-            .insert(b"enr-revoke-agent-test", &(u64::MAX - 10).to_le_bytes())
-            .expect("insert should succeed");
+        insert_token(&store, "enr-revoke-agent-test", i64::MAX as u64).await;
 
         let issued = store
             .enroll("enr-revoke-agent-test")
@@ -805,10 +1156,7 @@ mod tests {
     async fn nickname_set_and_clear_roundtrip() {
         let (store, dir) = make_store().await;
 
-        store
-            .enroll_tokens
-            .insert(b"enr-nickname-test", &(u64::MAX - 10).to_le_bytes())
-            .expect("insert should succeed");
+        insert_token(&store, "enr-nickname-test", i64::MAX as u64).await;
 
         let issued = store
             .enroll("enr-nickname-test")
@@ -942,7 +1290,7 @@ mod tests {
     async fn bootstrap_seed_tokens_are_not_reseeded_after_consumption() {
         let dir =
             std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
-        let db_path = dir.join("state.db");
+        let db_path = dir.join("state.sqlite3");
 
         let first = Store::load_or_init(
             &db_path,
@@ -975,6 +1323,67 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("invalid or already-used enroll token")
+        );
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn import_sled_state_copies_core_records() {
+        let dir =
+            std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
+        let sled_path = dir.join("legacy-state.db");
+        let sqlite_path = dir.join("state.sqlite3");
+        fs::create_dir_all(&dir).expect("dir should exist");
+
+        let legacy = sled::open(&sled_path).expect("legacy db should open");
+        let meta = legacy.open_tree("meta").expect("meta should open");
+        meta.insert(
+            super::SCHEMA_VERSION_KEY.as_bytes(),
+            &super::SCHEMA_VERSION.to_le_bytes(),
+        )
+        .expect("schema should insert");
+        let enroll = legacy
+            .open_tree("enroll_tokens")
+            .expect("enroll tree should open");
+        enroll
+            .insert(b"enr-import-test", &(i64::MAX as u64).to_le_bytes())
+            .expect("token should insert");
+        let agents = legacy.open_tree("agents").expect("agents should open");
+        agents
+            .insert(b"agent-import", b"tok-import")
+            .expect("agent should insert");
+        let agent_meta = legacy.open_tree("agent_meta").expect("meta should open");
+        agent_meta
+            .insert(b"agent-import", b"imported-router")
+            .expect("nickname should insert");
+        legacy.flush().expect("legacy flush should succeed");
+        drop(agent_meta);
+        drop(agents);
+        drop(enroll);
+        drop(meta);
+        drop(legacy);
+
+        Store::import_sled_state(&sled_path, &sqlite_path, false)
+            .await
+            .expect("import should succeed");
+        let store = Store::load_or_init(&sqlite_path, Vec::new(), Duration::from_secs(60))
+            .await
+            .expect("sqlite should load");
+
+        assert!(store.verify_agent_token("agent-import", "tok-import").await);
+        let agents = store.list_agents_with_nicknames().await;
+        assert!(agents.iter().any(|(id, nickname)| {
+            id == "agent-import" && nickname.as_deref() == Some("imported-router")
+        }));
+        let tokens = store
+            .list_enroll_tokens()
+            .await
+            .expect("tokens should list");
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.enroll_token == "enr-import-test")
         );
 
         cleanup_dir(&dir);

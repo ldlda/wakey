@@ -43,6 +43,8 @@ pub enum Command {
     RevokeAgent(RevokeAgentArgs),
     /// Print state backend stats.
     StateStats(StateStatsArgs),
+    /// Import a legacy sled state directory into a SQLite state file.
+    ImportSledState(ImportSledStateArgs),
     /// Send SIGHUP to an already-running daemon.
     Reload(ReloadArgs),
 }
@@ -234,6 +236,18 @@ pub struct StateStatsArgs {
 
     #[command(flatten)]
     pub target: AdminTargetArgs,
+}
+
+#[derive(Args)]
+pub struct ImportSledStateArgs {
+    #[arg(long)]
+    pub from_sled_state: PathBuf,
+
+    #[arg(long)]
+    pub to_state_file: PathBuf,
+
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args)]
