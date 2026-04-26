@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT expires_at_unix FROM enroll_tokens WHERE token = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "expires_at_unix",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "540f57604aa987b97930bb0bcfe440094d97b769fd758fd5cffc32f6d5716bb4"
+}

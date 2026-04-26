@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM active_alerts",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "72afd48584f822116318c623f7dd42ddf4c82b337d8a3d52ed5973d52e08c163"
+}

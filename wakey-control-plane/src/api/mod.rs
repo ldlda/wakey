@@ -12,8 +12,8 @@ pub use commands::{list_agents, run_command};
 pub use control::{
     EnrollTokenStatus, IssueEnrollTokenResponse, RevokeAgentResponse, RevokeEnrollTokenResponse,
     StateStatsResponse, attach_device_identifier, create_known_device, enroll, forget_known_device,
-    healthz, issue_enroll_token, list_enroll_tokens, list_known_devices, revoke_agent,
-    revoke_enroll_token, set_agent_nickname, state_stats,
+    healthz, issue_enroll_token, list_agent_observations, list_enroll_tokens, list_known_devices,
+    revoke_agent, revoke_enroll_token, set_agent_nickname, state_stats, upload_agent_observations,
 };
 
 pub fn json_error(

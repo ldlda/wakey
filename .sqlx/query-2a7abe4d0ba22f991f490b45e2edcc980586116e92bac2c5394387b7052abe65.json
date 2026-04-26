@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT identifier_key as \"identifier_key!\", device_id as \"device_id!\",\n                    kind as \"kind!\", value as \"value!\", created_at_unix\n             FROM device_identifiers\n             WHERE device_id = ?1\n             ORDER BY kind, value",
+  "describe": {
+    "columns": [
+      {
+        "name": "identifier_key!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "device_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "kind!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "value!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at_unix",
+        "ordinal": 4,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2a7abe4d0ba22f991f490b45e2edcc980586116e92bac2c5394387b7052abe65"
+}

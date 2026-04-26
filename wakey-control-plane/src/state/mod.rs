@@ -3,6 +3,6 @@ mod types;
 
 pub use store::Store;
 pub use types::{
-    AlertState, AuditEvent, AuditEventFilter, AuditEventInput, DeviceIdentifierInput, KnownDevice,
-    KnownDeviceInput,
+    AgentDeviceObservation, AgentDeviceObservationInput, AlertState, AuditEvent, AuditEventFilter,
+    AuditEventInput, DeviceIdentifierInput, KnownDevice, KnownDeviceInput,
 };

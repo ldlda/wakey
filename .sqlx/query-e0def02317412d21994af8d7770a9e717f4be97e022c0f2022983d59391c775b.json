@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT agent_token FROM agents WHERE agent_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_token",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e0def02317412d21994af8d7770a9e717f4be97e022c0f2022983d59391c775b"
+}

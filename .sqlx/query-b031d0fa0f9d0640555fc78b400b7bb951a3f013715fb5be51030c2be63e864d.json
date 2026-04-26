@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT alert_id as \"alert_id!\", kind as \"kind!\", severity as \"severity!\",\n                    status as \"status!\", agent_id, message as \"message!\",\n                    value, threshold, last_seen_unix, metadata_json as \"metadata_json!\"\n             FROM active_alerts",
+  "describe": {
+    "columns": [
+      {
+        "name": "alert_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "kind!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "severity!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "status!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "agent_id",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "message!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "value",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "threshold",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_seen_unix",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "metadata_json!",
+        "ordinal": 9,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b031d0fa0f9d0640555fc78b400b7bb951a3f013715fb5be51030c2be63e864d"
+}

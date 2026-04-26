@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
+use serde::Serialize;
 use std::net::IpAddr;
 use std::time::Instant;
 use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
@@ -84,8 +85,11 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
     .await?;
     info!(agent_id = %config.agent_id, "agent websocket session authenticated");
 
+    let http_client = reqwest::Client::new();
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut observation_sync = interval(Duration::from_secs(60));
+    observation_sync.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -94,6 +98,11 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                     agent_id: config.agent_id.clone(),
                 }).await?;
                 debug!(agent_id = %config.agent_id, "heartbeat sent");
+            }
+            _ = observation_sync.tick() => {
+                if let Err(err) = send_agent_observations(&http_client, config).await {
+                    warn!(agent_id = %config.agent_id, error = %err, "failed to sync local observations");
+                }
             }
             maybe_msg = source.next() => {
                 let msg = match maybe_msg {
@@ -133,6 +142,72 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
             }
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+struct UploadAgentObservationsRequest {
+    agent_id: String,
+    agent_token: String,
+    observations: Vec<AgentObservationRequest>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentObservationRequest {
+    kind: String,
+    action: String,
+    mac: Option<String>,
+    ip: Option<IpAddr>,
+    hostname: Option<String>,
+    first_seen_unix: u64,
+    last_seen_unix: u64,
+}
+
+async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig) -> Result<()> {
+    let observations = wakey::list_local_observations()
+        .await
+        .context("failed to read local observations")?;
+    if observations.is_empty() {
+        return Ok(());
+    }
+
+    let url = observations_url(&config.server_url)?;
+    let payload = UploadAgentObservationsRequest {
+        agent_id: config.agent_id.clone(),
+        agent_token: config.agent_token.clone(),
+        observations: observations
+            .into_iter()
+            .map(|observation| AgentObservationRequest {
+                kind: observation.kind,
+                action: observation.action,
+                mac: observation.mac,
+                ip: observation.ip,
+                hostname: observation.hostname,
+                first_seen_unix: observation.first_seen_unix,
+                last_seen_unix: observation.last_seen_unix,
+            })
+            .collect(),
+    };
+
+    let response = client
+        .post(url.clone())
+        .json(&payload)
+        .send()
+        .await
+        .with_context(|| format!("failed to call observation endpoint {url}"))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "<unreadable error body>".to_string());
+        anyhow::bail!("observation upload failed with {status}: {body}");
+    }
+    debug!(
+        agent_id = %config.agent_id,
+        observations = payload.observations.len(),
+        "synced local observations"
+    );
+    Ok(())
 }
 
 pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
@@ -268,6 +343,14 @@ pub fn websocket_url(server_url: &str) -> Result<url::Url> {
     url.set_scheme(scheme)
         .map_err(|_| anyhow::anyhow!("failed to convert server_url scheme"))?;
     url.set_path("/api/v1/agent/ws");
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url)
+}
+
+pub fn observations_url(server_url: &str) -> Result<url::Url> {
+    let mut url = url::Url::parse(server_url).context("invalid server_url")?;
+    url.set_path("/api/v1/agents/observations");
     url.set_query(None);
     url.set_fragment(None);
     Ok(url)

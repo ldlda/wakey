@@ -38,6 +38,38 @@ CREATE TABLE device_identifiers (
 
 CREATE INDEX device_identifiers_device_id_idx ON device_identifiers(device_id);
 
+CREATE TABLE agent_device_observations (
+    observation_key TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    mac TEXT,
+    ip TEXT,
+    hostname TEXT,
+    first_seen_unix INTEGER NOT NULL,
+    last_seen_unix INTEGER NOT NULL,
+    last_action TEXT NOT NULL
+);
+
+CREATE INDEX agent_device_observations_agent_id_idx ON agent_device_observations(agent_id);
+CREATE INDEX agent_device_observations_mac_idx ON agent_device_observations(mac);
+CREATE INDEX agent_device_observations_ip_idx ON agent_device_observations(ip);
+CREATE INDEX agent_device_observations_hostname_idx ON agent_device_observations(hostname);
+CREATE INDEX agent_device_observations_last_seen_unix_idx ON agent_device_observations(last_seen_unix);
+
+CREATE TABLE agent_device_observation_events (
+    event_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    action TEXT NOT NULL,
+    mac TEXT,
+    ip TEXT,
+    hostname TEXT,
+    ts_unix INTEGER NOT NULL
+);
+
+CREATE INDEX agent_device_observation_events_agent_ts_idx ON agent_device_observation_events(agent_id, ts_unix);
+CREATE INDEX agent_device_observation_events_mac_idx ON agent_device_observation_events(mac);
+
 CREATE TABLE audit_events (
     event_key TEXT PRIMARY KEY,
     event_id TEXT NOT NULL UNIQUE,

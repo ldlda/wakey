@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM enroll_tokens WHERE token = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "8f3499a2f461f738711b9942a9c9d6254c1f7ed0db54db8b3d65e10fa8dadfc9"
+}

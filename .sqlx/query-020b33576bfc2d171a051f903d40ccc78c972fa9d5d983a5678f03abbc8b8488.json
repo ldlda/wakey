@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO agents (agent_id, agent_token) VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "020b33576bfc2d171a051f903d40ccc78c972fa9d5d983a5678f03abbc8b8488"
+}

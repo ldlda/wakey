@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT agents.agent_id as \"agent_id!\", agent_meta.nickname\n             FROM agents\n             LEFT JOIN agent_meta ON agent_meta.agent_id = agents.agent_id\n             ORDER BY agents.agent_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "nickname",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "977adb8bdfb9e031a738055fb81c02c6180ca9c37c90e39b3e4efb9168bd1944"
+}

@@ -71,6 +71,10 @@ fn public_api_routes(ui_dist_dir: std::path::PathBuf) -> Router<AppState> {
         )
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
+        .route(
+            "/api/v1/agents/observations",
+            post(api::upload_agent_observations),
+        )
         .route("/api/v1/agent/ws", get(ws::agent_ws))
 }
 
@@ -89,6 +93,10 @@ fn control_api_routes() -> Router<AppState> {
             axum::routing::delete(api::revoke_enroll_token),
         )
         .route("/api/v1/control/state-stats", get(api::state_stats))
+        .route(
+            "/api/v1/control/observations",
+            get(api::list_agent_observations),
+        )
         .route(
             "/api/v1/control/devices",
             get(api::list_known_devices).post(api::create_known_device),

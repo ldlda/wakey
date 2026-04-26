@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT token as \"token!\", expires_at_unix FROM enroll_tokens ORDER BY expires_at_unix, token",
+  "describe": {
+    "columns": [
+      {
+        "name": "token!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "expires_at_unix",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "7f6c5c108953cd4eda8f4e1d4f4db6b3b88270d3d7087b2948362d0ea94ad246"
+}

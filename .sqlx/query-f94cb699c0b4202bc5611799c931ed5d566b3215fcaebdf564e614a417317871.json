@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO agent_device_observation_events\n                 (event_id, agent_id, kind, action, mac, ip, hostname, ts_unix)\n                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "f94cb699c0b4202bc5611799c931ed5d566b3215fcaebdf564e614a417317871"
+}

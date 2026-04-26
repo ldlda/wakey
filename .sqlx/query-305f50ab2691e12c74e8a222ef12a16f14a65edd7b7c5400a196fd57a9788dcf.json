@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT observation_key as \"observation_key!\", agent_id as \"agent_id!\",\n                        kind as \"kind!\", mac, ip, hostname,\n                        first_seen_unix, last_seen_unix, last_action as \"last_action!\"\n                 FROM agent_device_observations\n                 WHERE agent_id = ?1\n                 ORDER BY last_seen_unix DESC\n                 LIMIT ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_key!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "agent_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "kind!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "mac",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "ip",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "hostname",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "first_seen_unix",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_seen_unix",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_action!",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "305f50ab2691e12c74e8a222ef12a16f14a65edd7b7c5400a196fd57a9788dcf"
+}

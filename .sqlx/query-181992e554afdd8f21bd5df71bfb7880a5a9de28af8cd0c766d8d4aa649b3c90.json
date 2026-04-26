@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO agent_meta (agent_id, nickname) VALUES (?1, ?2)\n                 ON CONFLICT(agent_id) DO UPDATE SET nickname = excluded.nickname",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "181992e554afdd8f21bd5df71bfb7880a5a9de28af8cd0c766d8d4aa649b3c90"
+}

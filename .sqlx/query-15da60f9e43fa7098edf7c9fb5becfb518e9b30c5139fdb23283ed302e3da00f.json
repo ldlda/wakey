@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT device_id as \"device_id!\", display_name as \"display_name!\",\n                    pinned, created_at_unix, updated_at_unix, notes\n             FROM known_devices\n             ORDER BY pinned DESC, display_name, device_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "display_name!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "pinned",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at_unix",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "updated_at_unix",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "notes",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "15da60f9e43fa7098edf7c9fb5becfb518e9b30c5139fdb23283ed302e3da00f"
+}

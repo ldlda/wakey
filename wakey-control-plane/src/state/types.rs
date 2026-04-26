@@ -65,6 +65,30 @@ pub struct DeviceIdentifierInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDeviceObservation {
+    pub observation_key: String,
+    pub agent_id: String,
+    pub kind: String,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+    pub hostname: Option<String>,
+    pub first_seen_unix: u64,
+    pub last_seen_unix: u64,
+    pub last_action: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentDeviceObservationInput {
+    pub kind: String,
+    pub action: String,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+    pub hostname: Option<String>,
+    pub first_seen_unix: u64,
+    pub last_seen_unix: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEvent {
     pub event_id: String,
     pub ts_unix: u64,

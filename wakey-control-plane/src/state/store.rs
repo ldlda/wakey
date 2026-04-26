@@ -8,9 +8,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::state::types::{
-    AlertState, AlertTransition, AuditEvent, AuditEventFilter, AuditEventInput, DeviceIdentifier,
-    DeviceIdentifierInput, EnrollTokenInfo, IssuedAgent, IssuedEnrollToken, KnownDevice,
-    KnownDeviceInput, StateStats,
+    AgentDeviceObservation, AgentDeviceObservationInput, AlertState, AlertTransition, AuditEvent,
+    AuditEventFilter, AuditEventInput, DeviceIdentifier, DeviceIdentifierInput, EnrollTokenInfo,
+    IssuedAgent, IssuedEnrollToken, KnownDevice, KnownDeviceInput, StateStats,
 };
 
 pub struct Store {
@@ -133,10 +133,10 @@ impl Store {
             .begin()
             .await
             .context("failed starting enroll transaction")?;
-        let expires_at_unix = sqlx::query_scalar::<_, i64>(
+        let expires_at_unix = sqlx::query_scalar!(
             "SELECT expires_at_unix FROM enroll_tokens WHERE token = ?1",
+            enroll_token
         )
-        .bind(enroll_token)
         .fetch_optional(&mut *tx)
         .await
         .context("failed reading enroll token")?;
@@ -148,8 +148,7 @@ impl Store {
 
         let now = now_unix();
         if expires_at_unix as u64 <= now {
-            sqlx::query("DELETE FROM enroll_tokens WHERE token = ?1")
-                .bind(enroll_token)
+            sqlx::query!("DELETE FROM enroll_tokens WHERE token = ?1", enroll_token)
                 .execute(&mut *tx)
                 .await
                 .context("failed removing expired enroll token")?;
@@ -164,8 +163,7 @@ impl Store {
             anyhow::bail!("enroll token has expired");
         }
 
-        sqlx::query("DELETE FROM enroll_tokens WHERE token = ?1")
-            .bind(enroll_token)
+        sqlx::query!("DELETE FROM enroll_tokens WHERE token = ?1", enroll_token)
             .execute(&mut *tx)
             .await
             .context("failed consuming enroll token")?;
@@ -173,12 +171,14 @@ impl Store {
         let agent_id = format!("agent-{}", Uuid::new_v4());
         let agent_token = format!("tok-{}", Uuid::new_v4());
 
-        sqlx::query("INSERT INTO agents (agent_id, agent_token) VALUES (?1, ?2)")
-            .bind(&agent_id)
-            .bind(&agent_token)
-            .execute(&mut *tx)
-            .await
-            .context("failed persisting agent credentials")?;
+        sqlx::query!(
+            "INSERT INTO agents (agent_id, agent_token) VALUES (?1, ?2)",
+            agent_id,
+            agent_token
+        )
+        .execute(&mut *tx)
+        .await
+        .context("failed persisting agent credentials")?;
 
         tx.commit()
             .await
@@ -194,12 +194,16 @@ impl Store {
     pub async fn issue_enroll_token(&self, ttl: Duration) -> Result<IssuedEnrollToken> {
         let token = format!("enr-{}", Uuid::new_v4());
         let expires_at_unix = now_unix().saturating_add(ttl.as_secs().max(1));
-        sqlx::query("INSERT INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)")
-            .bind(&token)
-            .bind(i64::try_from(expires_at_unix).context("expiry does not fit SQLite integer")?)
-            .execute(&self.pool)
-            .await
-            .context("failed persisting enroll token")?;
+        let expires_at_unix_i64 =
+            i64::try_from(expires_at_unix).context("expiry does not fit SQLite integer")?;
+        sqlx::query!(
+            "INSERT INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)",
+            token,
+            expires_at_unix_i64
+        )
+        .execute(&self.pool)
+        .await
+        .context("failed persisting enroll token")?;
         info!(expires_at_unix, "persisted new enroll token");
         Ok(IssuedEnrollToken {
             enroll_token: token,
@@ -209,8 +213,9 @@ impl Store {
 
     pub async fn list_enroll_tokens(&self) -> Result<Vec<EnrollTokenInfo>> {
         let now = now_unix();
-        let rows = sqlx::query(
-            "SELECT token, expires_at_unix FROM enroll_tokens ORDER BY expires_at_unix, token",
+        let rows = sqlx::query_as!(
+            EnrollTokenRow,
+            r#"SELECT token as "token!", expires_at_unix FROM enroll_tokens ORDER BY expires_at_unix, token"#,
         )
         .fetch_all(&self.pool)
         .await
@@ -218,12 +223,10 @@ impl Store {
 
         rows.into_iter()
             .map(|row| {
-                let enroll_token: String = row.try_get("token")?;
-                let expires_at_unix: i64 = row.try_get("expires_at_unix")?;
-                let expires_at_unix =
-                    u64::try_from(expires_at_unix).context("negative token expiry in state db")?;
+                let expires_at_unix = u64::try_from(row.expires_at_unix)
+                    .context("negative token expiry in state db")?;
                 Ok(EnrollTokenInfo {
-                    enroll_token,
+                    enroll_token: row.token,
                     expires_at_unix,
                     expired: expires_at_unix <= now,
                 })
@@ -232,8 +235,7 @@ impl Store {
     }
 
     pub async fn revoke_enroll_token(&self, token: &str) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM enroll_tokens WHERE token = ?1")
-            .bind(token)
+        let result = sqlx::query!("DELETE FROM enroll_tokens WHERE token = ?1", token)
             .execute(&self.pool)
             .await
             .context("failed removing enroll token")?;
@@ -246,14 +248,12 @@ impl Store {
             .begin()
             .await
             .context("failed starting revoke transaction")?;
-        let result = sqlx::query("DELETE FROM agents WHERE agent_id = ?1")
-            .bind(agent_id)
+        let result = sqlx::query!("DELETE FROM agents WHERE agent_id = ?1", agent_id)
             .execute(&mut *tx)
             .await
             .context("failed removing agent credentials")?;
         if result.rows_affected() > 0 {
-            sqlx::query("DELETE FROM agent_meta WHERE agent_id = ?1")
-                .bind(agent_id)
+            sqlx::query!("DELETE FROM agent_meta WHERE agent_id = ?1", agent_id)
                 .execute(&mut *tx)
                 .await
                 .context("failed removing agent metadata")?;
@@ -265,30 +265,30 @@ impl Store {
     }
 
     pub async fn set_agent_nickname(&self, agent_id: &str, nickname: Option<&str>) -> Result<bool> {
-        let exists =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agents WHERE agent_id = ?1")
-                .bind(agent_id)
-                .fetch_one(&self.pool)
-                .await
-                .context("failed checking agent existence")?;
+        let exists = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM agents WHERE agent_id = ?1"#,
+            agent_id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed checking agent existence")?;
         if exists == 0 {
             return Ok(false);
         }
 
         let normalized = nickname.map(str::trim).filter(|v| !v.is_empty());
         if let Some(value) = normalized {
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO agent_meta (agent_id, nickname) VALUES (?1, ?2)
                  ON CONFLICT(agent_id) DO UPDATE SET nickname = excluded.nickname",
+                agent_id,
+                value
             )
-            .bind(agent_id)
-            .bind(value)
             .execute(&self.pool)
             .await
             .context("failed persisting agent nickname")?;
         } else {
-            sqlx::query("DELETE FROM agent_meta WHERE agent_id = ?1")
-                .bind(agent_id)
+            sqlx::query!("DELETE FROM agent_meta WHERE agent_id = ?1", agent_id)
                 .execute(&self.pool)
                 .await
                 .context("failed clearing agent nickname")?;
@@ -299,18 +299,19 @@ impl Store {
 
     pub async fn stats(&self) -> Result<StateStats> {
         let now = i64::try_from(now_unix()).context("current time does not fit SQLite integer")?;
-        let enroll_token_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM enroll_tokens")
-            .fetch_one(&self.pool)
-            .await
-            .context("failed counting enroll tokens")?;
-        let expired_enroll_token_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM enroll_tokens WHERE expires_at_unix <= ?1",
+        let enroll_token_count =
+            sqlx::query_scalar!(r#"SELECT COUNT(*) as "count!: i64" FROM enroll_tokens"#)
+                .fetch_one(&self.pool)
+                .await
+                .context("failed counting enroll tokens")?;
+        let expired_enroll_token_count = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM enroll_tokens WHERE expires_at_unix <= ?1"#,
+            now
         )
-        .bind(now)
         .fetch_one(&self.pool)
         .await
         .context("failed counting expired enroll tokens")?;
-        let agent_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agents")
+        let agent_count = sqlx::query_scalar!(r#"SELECT COUNT(*) as "count!: i64" FROM agents"#)
             .fetch_one(&self.pool)
             .await
             .context("failed counting agents")?;
@@ -333,8 +334,8 @@ impl Store {
 
     #[cfg_attr(not(unix), allow(dead_code))]
     pub async fn reload_from_disk(&self) -> Result<()> {
-        sqlx::query("SELECT 1")
-            .execute(&self.pool)
+        sqlx::query!(r#"SELECT 1 as "ok!""#)
+            .fetch_one(&self.pool)
             .await
             .context("failed validating SQLite state connection")?;
         info!(path = %self.db_path.display(), "reload requested; SQLite backend does not require in-memory reload");
@@ -342,10 +343,12 @@ impl Store {
     }
 
     pub async fn verify_agent_token(&self, agent_id: &str, token: &str) -> bool {
-        match sqlx::query_scalar::<_, String>("SELECT agent_token FROM agents WHERE agent_id = ?1")
-            .bind(agent_id)
-            .fetch_optional(&self.pool)
-            .await
+        match sqlx::query_scalar!(
+            "SELECT agent_token FROM agents WHERE agent_id = ?1",
+            agent_id
+        )
+        .fetch_optional(&self.pool)
+        .await
         {
             Ok(Some(value)) => value == token,
             Ok(None) => false,
@@ -357,7 +360,7 @@ impl Store {
     }
 
     pub async fn list_agents(&self) -> Vec<String> {
-        match sqlx::query_scalar::<_, String>("SELECT agent_id FROM agents ORDER BY agent_id")
+        match sqlx::query_scalar!(r#"SELECT agent_id as "agent_id!" FROM agents ORDER BY agent_id"#)
             .fetch_all(&self.pool)
             .await
         {
@@ -370,11 +373,11 @@ impl Store {
     }
 
     pub async fn list_agents_with_nicknames(&self) -> Vec<(String, Option<String>)> {
-        let rows = sqlx::query(
-            "SELECT agents.agent_id, agent_meta.nickname
+        let rows = sqlx::query!(
+            r#"SELECT agents.agent_id as "agent_id!", agent_meta.nickname
              FROM agents
              LEFT JOIN agent_meta ON agent_meta.agent_id = agents.agent_id
-             ORDER BY agents.agent_id",
+             ORDER BY agents.agent_id"#,
         )
         .fetch_all(&self.pool)
         .await;
@@ -382,15 +385,12 @@ impl Store {
         match rows {
             Ok(rows) => rows
                 .into_iter()
-                .filter_map(|row| {
-                    let agent_id: String = row.try_get("agent_id").ok()?;
-                    let nickname: Option<String> = row
-                        .try_get::<Option<String>, _>("nickname")
-                        .ok()
-                        .flatten()
+                .map(|row| {
+                    let nickname = row
+                        .nickname
                         .map(|v| v.trim().to_string())
                         .filter(|v| !v.is_empty());
-                    Some((agent_id, nickname))
+                    (row.agent_id, nickname)
                 })
                 .collect(),
             Err(err) => {
@@ -416,17 +416,19 @@ impl Store {
             .begin()
             .await
             .context("failed starting known device transaction")?;
-        sqlx::query(
+        let pinned = if input.pinned { 1_i64 } else { 0_i64 };
+        let now_i64 = i64::try_from(now).context("known device timestamp overflow")?;
+        sqlx::query!(
             "INSERT INTO known_devices
              (device_id, display_name, pinned, created_at_unix, updated_at_unix, notes)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            device_id,
+            display_name,
+            pinned,
+            now_i64,
+            now_i64,
+            notes
         )
-        .bind(&device_id)
-        .bind(&display_name)
-        .bind(if input.pinned { 1_i64 } else { 0_i64 })
-        .bind(i64::try_from(now).context("known device timestamp overflow")?)
-        .bind(i64::try_from(now).context("known device timestamp overflow")?)
-        .bind(&notes)
         .execute(&mut *tx)
         .await
         .context("failed persisting known device")?;
@@ -444,10 +446,12 @@ impl Store {
     }
 
     pub async fn list_known_devices(&self) -> Result<Vec<KnownDevice>> {
-        let rows = sqlx::query(
-            "SELECT device_id, display_name, pinned, created_at_unix, updated_at_unix, notes
+        let rows = sqlx::query_as!(
+            KnownDeviceRow,
+            r#"SELECT device_id as "device_id!", display_name as "display_name!",
+                    pinned, created_at_unix, updated_at_unix, notes
              FROM known_devices
-             ORDER BY pinned DESC, display_name, device_id",
+             ORDER BY pinned DESC, display_name, device_id"#,
         )
         .fetch_all(&self.pool)
         .await
@@ -455,19 +459,21 @@ impl Store {
 
         let mut out = Vec::with_capacity(rows.len());
         for row in rows {
-            let device_id: String = row.try_get("device_id")?;
+            let device_id = row.device_id.clone();
             out.push(self.known_device_from_row(row, &device_id).await?);
         }
         Ok(out)
     }
 
     pub async fn get_known_device(&self, device_id: &str) -> Result<Option<KnownDevice>> {
-        let row = sqlx::query(
-            "SELECT device_id, display_name, pinned, created_at_unix, updated_at_unix, notes
+        let row = sqlx::query_as!(
+            KnownDeviceRow,
+            r#"SELECT device_id as "device_id!", display_name as "display_name!",
+                    pinned, created_at_unix, updated_at_unix, notes
              FROM known_devices
-             WHERE device_id = ?1",
+             WHERE device_id = ?1"#,
+            device_id
         )
-        .bind(device_id)
         .fetch_optional(&self.pool)
         .await
         .context("failed reading known device")?;
@@ -479,8 +485,7 @@ impl Store {
     }
 
     pub async fn forget_known_device(&self, device_id: &str) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM known_devices WHERE device_id = ?1")
-            .bind(device_id)
+        let result = sqlx::query!("DELETE FROM known_devices WHERE device_id = ?1", device_id)
             .execute(&self.pool)
             .await
             .context("failed deleting known device")?;
@@ -499,38 +504,43 @@ impl Store {
             .begin()
             .await
             .context("failed starting device identifier transaction")?;
-        let exists =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM known_devices WHERE device_id = ?1")
-                .bind(device_id)
-                .fetch_one(&mut *tx)
-                .await
-                .context("failed checking known device existence")?;
+        let exists = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM known_devices WHERE device_id = ?1"#,
+            device_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed checking known device existence")?;
         if exists == 0 {
             return Ok(None);
         }
 
         insert_device_identifier_tx(&mut tx, device_id, &identifier, now).await?;
-        sqlx::query("UPDATE known_devices SET updated_at_unix = ?1 WHERE device_id = ?2")
-            .bind(i64::try_from(now).context("known device timestamp overflow")?)
-            .bind(device_id)
-            .execute(&mut *tx)
-            .await
-            .context("failed updating known device timestamp")?;
+        let now_i64 = i64::try_from(now).context("known device timestamp overflow")?;
+        sqlx::query!(
+            "UPDATE known_devices SET updated_at_unix = ?1 WHERE device_id = ?2",
+            now_i64,
+            device_id
+        )
+        .execute(&mut *tx)
+        .await
+        .context("failed updating known device timestamp")?;
         tx.commit()
             .await
             .context("failed committing device identifier transaction")?;
         self.get_known_device(device_id).await
     }
 
+    #[allow(unused)] // we'll get to this
     pub async fn lookup_known_device_by_identifier(
         &self,
         input: DeviceIdentifierInput,
     ) -> Result<Option<KnownDevice>> {
         let identifier = normalize_device_identifier(input)?;
-        let device_id = sqlx::query_scalar::<_, String>(
+        let device_id = sqlx::query_scalar!(
             "SELECT device_id FROM device_identifiers WHERE identifier_key = ?1",
+            identifier.identifier_key
         )
-        .bind(identifier.identifier_key)
         .fetch_optional(&self.pool)
         .await
         .context("failed looking up known device identifier")?;
@@ -538,6 +548,114 @@ impl Store {
             Some(device_id) => self.get_known_device(&device_id).await,
             None => Ok(None),
         }
+    }
+
+    pub async fn upsert_agent_observations(
+        &self,
+        agent_id: &str,
+        observations: Vec<AgentDeviceObservationInput>,
+    ) -> Result<usize> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting observation transaction")?;
+        let mut written = 0usize;
+        for observation in observations {
+            let observation = normalize_agent_observation(agent_id, observation)?;
+            let first_seen_unix = i64::try_from(observation.first_seen_unix)
+                .context("observation first_seen overflow")?;
+            let last_seen_unix = i64::try_from(observation.last_seen_unix)
+                .context("observation last_seen overflow")?;
+            sqlx::query!(
+                "INSERT INTO agent_device_observations
+                 (observation_key, agent_id, kind, mac, ip, hostname,
+                  first_seen_unix, last_seen_unix, last_action)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT(observation_key) DO UPDATE SET
+                   mac = excluded.mac,
+                   ip = excluded.ip,
+                   hostname = excluded.hostname,
+                   first_seen_unix = MIN(agent_device_observations.first_seen_unix, excluded.first_seen_unix),
+                   last_seen_unix = MAX(agent_device_observations.last_seen_unix, excluded.last_seen_unix),
+                   last_action = excluded.last_action",
+                observation.observation_key,
+                observation.agent_id,
+                observation.kind,
+                observation.mac,
+                observation.ip,
+                observation.hostname,
+                first_seen_unix,
+                last_seen_unix,
+                observation.last_action
+            )
+            .execute(&mut *tx)
+            .await
+            .context("failed upserting agent device observation")?;
+
+            let event_id = format!("ode-{}", Uuid::new_v4());
+            sqlx::query!(
+                "INSERT INTO agent_device_observation_events
+                 (event_id, agent_id, kind, action, mac, ip, hostname, ts_unix)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                event_id,
+                observation.agent_id,
+                observation.kind,
+                observation.last_action,
+                observation.mac,
+                observation.ip,
+                observation.hostname,
+                last_seen_unix
+            )
+            .execute(&mut *tx)
+            .await
+            .context("failed appending agent device observation event")?;
+            written = written.saturating_add(1);
+        }
+        tx.commit()
+            .await
+            .context("failed committing observation transaction")?;
+        Ok(written)
+    }
+
+    pub async fn list_agent_observations(
+        &self,
+        agent_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AgentDeviceObservation>> {
+        let limit = limit.clamp(1, 1000);
+        let limit = i64::try_from(limit).context("observation limit overflow")?;
+        let rows = if let Some(agent_id) = agent_id {
+            sqlx::query_as!(
+                AgentObservationRow,
+                r#"SELECT observation_key as "observation_key!", agent_id as "agent_id!",
+                        kind as "kind!", mac, ip, hostname,
+                        first_seen_unix, last_seen_unix, last_action as "last_action!"
+                 FROM agent_device_observations
+                 WHERE agent_id = ?1
+                 ORDER BY last_seen_unix DESC
+                 LIMIT ?2"#,
+                agent_id,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as!(
+                AgentObservationRow,
+                r#"SELECT observation_key as "observation_key!", agent_id as "agent_id!",
+                        kind as "kind!", mac, ip, hostname,
+                        first_seen_unix, last_seen_unix, last_action as "last_action!"
+                 FROM agent_device_observations
+                 ORDER BY last_seen_unix DESC
+                 LIMIT ?1"#,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await
+        }
+        .context("failed listing agent observations")?;
+        rows.into_iter().map(agent_observation_from_row).collect()
     }
 
     pub async fn append_audit_event(&self, input: AuditEventInput) -> Result<AuditEvent> {
@@ -558,30 +676,30 @@ impl Store {
         let key = format!("{:020}:{}", event.ts_unix, event.event_id);
         let metadata_json =
             serde_json::to_string(&event.metadata).context("failed to encode audit metadata")?;
-        sqlx::query(
+        let ts_unix = i64::try_from(event.ts_unix).context("audit timestamp overflow")?;
+        let latency_ms = event
+            .latency_ms
+            .map(i64::try_from)
+            .transpose()
+            .context("audit latency overflow")?;
+        sqlx::query!(
             "INSERT INTO audit_events
              (event_key, event_id, ts_unix, actor_type, actor_id, agent_id, request_id,
               event_type, outcome, latency_ms, message, metadata_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            key,
+            event.event_id,
+            ts_unix,
+            event.actor_type,
+            event.actor_id,
+            event.agent_id,
+            event.request_id,
+            event.event_type,
+            event.outcome,
+            latency_ms,
+            event.message,
+            metadata_json
         )
-        .bind(&key)
-        .bind(&event.event_id)
-        .bind(i64::try_from(event.ts_unix).context("audit timestamp overflow")?)
-        .bind(&event.actor_type)
-        .bind(&event.actor_id)
-        .bind(&event.agent_id)
-        .bind(&event.request_id)
-        .bind(&event.event_type)
-        .bind(&event.outcome)
-        .bind(
-            event
-                .latency_ms
-                .map(i64::try_from)
-                .transpose()
-                .context("audit latency overflow")?,
-        )
-        .bind(&event.message)
-        .bind(metadata_json)
         .execute(&self.pool)
         .await
         .context("failed persisting audit event")?;
@@ -638,10 +756,12 @@ impl Store {
         current: &[AlertState],
     ) -> Result<Vec<AlertTransition>> {
         let mut previous = std::collections::HashMap::<String, AlertState>::new();
-        let rows = sqlx::query(
-            "SELECT alert_id, kind, severity, status, agent_id, message,
-                    value, threshold, last_seen_unix, metadata_json
-             FROM active_alerts",
+        let rows = sqlx::query_as!(
+            AlertStateRow,
+            r#"SELECT alert_id as "alert_id!", kind as "kind!", severity as "severity!",
+                    status as "status!", agent_id, message as "message!",
+                    value, threshold, last_seen_unix, metadata_json as "metadata_json!"
+             FROM active_alerts"#,
         )
         .fetch_all(&self.pool)
         .await
@@ -698,7 +818,7 @@ impl Store {
             .begin()
             .await
             .context("failed starting alert transaction")?;
-        sqlx::query("DELETE FROM active_alerts")
+        sqlx::query!("DELETE FROM active_alerts")
             .execute(&mut *tx)
             .await
             .context("failed clearing active alert snapshot")?;
@@ -724,28 +844,34 @@ impl Store {
         limit: usize,
     ) -> Result<Vec<AlertTransition>> {
         let limit = limit.clamp(1, 500);
+        let limit = i64::try_from(limit).context("alert limit overflow")?;
         let rows = if let Some(since) = since_unix {
-            sqlx::query(
-                "SELECT transition_id, ts_unix, alert_id, kind, agent_id,
-                        from_status, to_status, message, metadata_json
+            let since = i64::try_from(since).context("since_unix overflow")?;
+            sqlx::query_as!(
+                AlertTransitionRow,
+                r#"SELECT transition_id as "transition_id!", ts_unix, alert_id as "alert_id!",
+                        kind as "kind!", agent_id, from_status, to_status as "to_status!",
+                        message as "message!", metadata_json as "metadata_json!"
                  FROM alert_transitions
                  WHERE ts_unix >= ?1
                  ORDER BY transition_key DESC
-                 LIMIT ?2",
+                 LIMIT ?2"#,
+                since,
+                limit
             )
-            .bind(i64::try_from(since).context("since_unix overflow")?)
-            .bind(i64::try_from(limit).context("alert limit overflow")?)
             .fetch_all(&self.pool)
             .await
         } else {
-            sqlx::query(
-                "SELECT transition_id, ts_unix, alert_id, kind, agent_id,
-                        from_status, to_status, message, metadata_json
+            sqlx::query_as!(
+                AlertTransitionRow,
+                r#"SELECT transition_id as "transition_id!", ts_unix, alert_id as "alert_id!",
+                        kind as "kind!", agent_id, from_status, to_status as "to_status!",
+                        message as "message!", metadata_json as "metadata_json!"
                  FROM alert_transitions
                  ORDER BY transition_key DESC
-                 LIMIT ?1",
+                 LIMIT ?1"#,
+                limit
             )
-            .bind(i64::try_from(limit).context("alert limit overflow")?)
             .fetch_all(&self.pool)
             .await
         }
@@ -766,12 +892,13 @@ impl Store {
             }
 
             let marker_key = seeded_enroll_token_key(token);
-            let marker_exists =
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM meta WHERE key = ?1")
-                    .bind(&marker_key)
-                    .fetch_one(&self.pool)
-                    .await
-                    .context("failed reading bootstrap marker")?;
+            let marker_exists = sqlx::query_scalar!(
+                r#"SELECT COUNT(*) as "count!: i64" FROM meta WHERE key = ?1"#,
+                marker_key
+            )
+            .fetch_one(&self.pool)
+            .await
+            .context("failed reading bootstrap marker")?;
             if marker_exists > 0 {
                 continue;
             }
@@ -782,20 +909,24 @@ impl Store {
                 .begin()
                 .await
                 .context("failed starting bootstrap token transaction")?;
-            sqlx::query(
+            let expires_at_i64 = i64::try_from(expires_at).context("token expiry overflow")?;
+            sqlx::query!(
                 "INSERT OR REPLACE INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)",
+                token,
+                expires_at_i64
             )
-            .bind(token)
-            .bind(i64::try_from(expires_at).context("token expiry overflow")?)
             .execute(&mut *tx)
             .await
             .context("failed seeding enroll token")?;
-            sqlx::query("INSERT INTO meta (key, value) VALUES (?1, ?2)")
-                .bind(marker_key)
-                .bind(expires_at.to_le_bytes().to_vec())
-                .execute(&mut *tx)
-                .await
-                .context("failed persisting bootstrap marker")?;
+            let marker_value = expires_at.to_le_bytes().to_vec();
+            sqlx::query!(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2)",
+                marker_key,
+                marker_value
+            )
+            .execute(&mut *tx)
+            .await
+            .context("failed persisting bootstrap marker")?;
             tx.commit()
                 .await
                 .context("failed committing bootstrap token transaction")?;
@@ -805,8 +936,7 @@ impl Store {
 
     async fn gc_expired_enroll_tokens_inner(&self) -> Result<u64> {
         let now = i64::try_from(now_unix()).context("current time does not fit SQLite integer")?;
-        let result = sqlx::query("DELETE FROM enroll_tokens WHERE expires_at_unix <= ?1")
-            .bind(now)
+        let result = sqlx::query!("DELETE FROM enroll_tokens WHERE expires_at_unix <= ?1", now)
             .execute(&self.pool)
             .await
             .context("failed removing expired enroll tokens")?;
@@ -818,8 +948,7 @@ impl Store {
     }
 
     async fn ensure_schema_version(&self) -> Result<()> {
-        match sqlx::query_scalar::<_, Vec<u8>>("SELECT value FROM meta WHERE key = ?1")
-            .bind(SCHEMA_VERSION_KEY)
+        match sqlx::query_scalar!("SELECT value FROM meta WHERE key = ?1", SCHEMA_VERSION_KEY)
             .fetch_optional(&self.pool)
             .await
             .context("failed reading schema version")?
@@ -836,12 +965,15 @@ impl Store {
                 }
             }
             None => {
-                sqlx::query("INSERT INTO meta (key, value) VALUES (?1, ?2)")
-                    .bind(SCHEMA_VERSION_KEY)
-                    .bind(SCHEMA_VERSION.to_le_bytes().to_vec())
-                    .execute(&self.pool)
-                    .await
-                    .context("failed writing schema version")?;
+                let schema_version = SCHEMA_VERSION.to_le_bytes().to_vec();
+                sqlx::query!(
+                    "INSERT INTO meta (key, value) VALUES (?1, ?2)",
+                    SCHEMA_VERSION_KEY,
+                    schema_version
+                )
+                .execute(&self.pool)
+                .await
+                .context("failed writing schema version")?;
                 info!(
                     schema_version = SCHEMA_VERSION,
                     "initialized state schema version"
@@ -852,8 +984,7 @@ impl Store {
     }
 
     async fn schema_version(&self) -> Result<u32> {
-        let raw = sqlx::query_scalar::<_, Vec<u8>>("SELECT value FROM meta WHERE key = ?1")
-            .bind(SCHEMA_VERSION_KEY)
+        let raw = sqlx::query_scalar!("SELECT value FROM meta WHERE key = ?1", SCHEMA_VERSION_KEY)
             .fetch_one(&self.pool)
             .await
             .context("failed reading schema version")?;
@@ -862,34 +993,33 @@ impl Store {
 
     async fn known_device_from_row(
         &self,
-        row: sqlx::sqlite::SqliteRow,
+        row: KnownDeviceRow,
         device_id: &str,
     ) -> Result<KnownDevice> {
-        let pinned: i64 = row.try_get("pinned")?;
-        let created_at_unix: i64 = row.try_get("created_at_unix")?;
-        let updated_at_unix: i64 = row.try_get("updated_at_unix")?;
         let identifiers = self.list_device_identifiers(device_id).await?;
         Ok(KnownDevice {
-            device_id: row.try_get("device_id")?,
-            display_name: row.try_get("display_name")?,
-            pinned: pinned != 0,
-            created_at_unix: u64::try_from(created_at_unix)
+            device_id: row.device_id,
+            display_name: row.display_name,
+            pinned: row.pinned != 0,
+            created_at_unix: u64::try_from(row.created_at_unix)
                 .context("negative known device created timestamp in state db")?,
-            updated_at_unix: u64::try_from(updated_at_unix)
+            updated_at_unix: u64::try_from(row.updated_at_unix)
                 .context("negative known device updated timestamp in state db")?,
-            notes: row.try_get("notes")?,
+            notes: row.notes,
             identifiers,
         })
     }
 
     async fn list_device_identifiers(&self, device_id: &str) -> Result<Vec<DeviceIdentifier>> {
-        let rows = sqlx::query(
-            "SELECT identifier_key, device_id, kind, value, created_at_unix
+        let rows = sqlx::query_as!(
+            DeviceIdentifierRow,
+            r#"SELECT identifier_key as "identifier_key!", device_id as "device_id!",
+                    kind as "kind!", value as "value!", created_at_unix
              FROM device_identifiers
              WHERE device_id = ?1
-             ORDER BY kind, value",
+             ORDER BY kind, value"#,
+            device_id
         )
-        .bind(device_id)
         .fetch_all(&self.pool)
         .await
         .context("failed listing device identifiers")?;
@@ -902,6 +1032,65 @@ struct NormalizedDeviceIdentifier {
     identifier_key: String,
     kind: String,
     value: String,
+}
+
+struct EnrollTokenRow {
+    token: String,
+    expires_at_unix: i64,
+}
+
+struct KnownDeviceRow {
+    device_id: String,
+    display_name: String,
+    pinned: i64,
+    created_at_unix: i64,
+    updated_at_unix: i64,
+    notes: Option<String>,
+}
+
+struct DeviceIdentifierRow {
+    identifier_key: String,
+    device_id: String,
+    kind: String,
+    value: String,
+    created_at_unix: i64,
+}
+
+struct AgentObservationRow {
+    observation_key: String,
+    agent_id: String,
+    kind: String,
+    mac: Option<String>,
+    ip: Option<String>,
+    hostname: Option<String>,
+    first_seen_unix: i64,
+    last_seen_unix: i64,
+    last_action: String,
+}
+
+struct AlertStateRow {
+    alert_id: String,
+    kind: String,
+    severity: String,
+    status: String,
+    agent_id: Option<String>,
+    message: String,
+    value: i64,
+    threshold: i64,
+    last_seen_unix: i64,
+    metadata_json: String,
+}
+
+struct AlertTransitionRow {
+    transition_id: String,
+    ts_unix: i64,
+    alert_id: String,
+    kind: String,
+    agent_id: Option<String>,
+    from_status: Option<String>,
+    to_status: String,
+    message: String,
+    metadata_json: String,
 }
 
 async fn open_sqlite_pool(path: &Path) -> Result<SqlitePool> {
@@ -981,22 +1170,52 @@ fn normalize_device_identifier(input: DeviceIdentifierInput) -> Result<Normalize
     })
 }
 
+fn normalize_agent_observation(
+    agent_id: &str,
+    input: AgentDeviceObservationInput,
+) -> Result<AgentDeviceObservation> {
+    let kind = normalize_required_text(&input.kind, "observation kind")?.to_ascii_lowercase();
+    let action = normalize_required_text(&input.action, "observation action")?.to_ascii_lowercase();
+    let mac = normalize_optional_text(input.mac.as_deref()).map(|value| value.to_ascii_lowercase());
+    let ip = normalize_optional_text(input.ip.as_deref());
+    let hostname = normalize_optional_text(input.hostname.as_deref());
+    let identifier = mac
+        .as_ref()
+        .map(|value| format!("mac:{value}"))
+        .or_else(|| ip.as_ref().map(|value| format!("ip:{value}")))
+        .ok_or_else(|| anyhow::anyhow!("observation requires mac or ip"))?;
+    let observation_key = format!("agent:{agent_id}:{kind}:{identifier}");
+    Ok(AgentDeviceObservation {
+        observation_key,
+        agent_id: agent_id.to_string(),
+        kind,
+        mac,
+        ip,
+        hostname,
+        first_seen_unix: input.first_seen_unix,
+        last_seen_unix: input.last_seen_unix,
+        last_action: action,
+    })
+}
+
 async fn insert_device_identifier_tx(
     tx: &mut Transaction<'_, Sqlite>,
     device_id: &str,
     identifier: &NormalizedDeviceIdentifier,
     created_at_unix: u64,
 ) -> Result<()> {
-    sqlx::query(
+    let created_at_unix =
+        i64::try_from(created_at_unix).context("device identifier timestamp overflow")?;
+    sqlx::query!(
         "INSERT INTO device_identifiers
          (identifier_key, device_id, kind, value, created_at_unix)
          VALUES (?1, ?2, ?3, ?4, ?5)",
+        identifier.identifier_key,
+        device_id,
+        identifier.kind,
+        identifier.value,
+        created_at_unix
     )
-    .bind(&identifier.identifier_key)
-    .bind(device_id)
-    .bind(&identifier.kind)
-    .bind(&identifier.value)
-    .bind(i64::try_from(created_at_unix).context("device identifier timestamp overflow")?)
     .execute(&mut **tx)
     .await
     .with_context(|| {
@@ -1008,15 +1227,30 @@ async fn insert_device_identifier_tx(
     Ok(())
 }
 
-fn device_identifier_from_row(row: sqlx::sqlite::SqliteRow) -> Result<DeviceIdentifier> {
-    let created_at_unix: i64 = row.try_get("created_at_unix")?;
+fn device_identifier_from_row(row: DeviceIdentifierRow) -> Result<DeviceIdentifier> {
     Ok(DeviceIdentifier {
-        identifier_key: row.try_get("identifier_key")?,
-        device_id: row.try_get("device_id")?,
-        kind: row.try_get("kind")?,
-        value: row.try_get("value")?,
-        created_at_unix: u64::try_from(created_at_unix)
+        identifier_key: row.identifier_key,
+        device_id: row.device_id,
+        kind: row.kind,
+        value: row.value,
+        created_at_unix: u64::try_from(row.created_at_unix)
             .context("negative device identifier timestamp in state db")?,
+    })
+}
+
+fn agent_observation_from_row(row: AgentObservationRow) -> Result<AgentDeviceObservation> {
+    Ok(AgentDeviceObservation {
+        observation_key: row.observation_key,
+        agent_id: row.agent_id,
+        kind: row.kind,
+        mac: row.mac,
+        ip: row.ip,
+        hostname: row.hostname,
+        first_seen_unix: u64::try_from(row.first_seen_unix)
+            .context("negative observation first_seen timestamp in state db")?,
+        last_seen_unix: u64::try_from(row.last_seen_unix)
+            .context("negative observation last_seen timestamp in state db")?,
+        last_action: row.last_action,
     })
 }
 
@@ -1320,41 +1554,35 @@ fn audit_event_from_row(row: sqlx::sqlite::SqliteRow) -> Result<AuditEvent> {
     })
 }
 
-fn alert_state_from_row(row: sqlx::sqlite::SqliteRow) -> Result<AlertState> {
-    let value: i64 = row.try_get("value")?;
-    let threshold: i64 = row.try_get("threshold")?;
-    let last_seen_unix: i64 = row.try_get("last_seen_unix")?;
-    let metadata_json: String = row.try_get("metadata_json")?;
+fn alert_state_from_row(row: AlertStateRow) -> Result<AlertState> {
     Ok(AlertState {
-        alert_id: row.try_get("alert_id")?,
-        kind: row.try_get("kind")?,
-        severity: row.try_get("severity")?,
-        status: row.try_get("status")?,
-        agent_id: row.try_get("agent_id")?,
-        message: row.try_get("message")?,
-        value: u64::try_from(value).context("negative active alert value in state db")?,
-        threshold: u64::try_from(threshold)
+        alert_id: row.alert_id,
+        kind: row.kind,
+        severity: row.severity,
+        status: row.status,
+        agent_id: row.agent_id,
+        message: row.message,
+        value: u64::try_from(row.value).context("negative active alert value in state db")?,
+        threshold: u64::try_from(row.threshold)
             .context("negative active alert threshold in state db")?,
-        last_seen_unix: u64::try_from(last_seen_unix)
+        last_seen_unix: u64::try_from(row.last_seen_unix)
             .context("negative active alert timestamp in state db")?,
-        metadata: serde_json::from_str(&metadata_json)
+        metadata: serde_json::from_str(&row.metadata_json)
             .context("failed decoding active alert metadata")?,
     })
 }
 
-fn alert_transition_from_row(row: sqlx::sqlite::SqliteRow) -> Result<AlertTransition> {
-    let ts_unix: i64 = row.try_get("ts_unix")?;
-    let metadata_json: String = row.try_get("metadata_json")?;
+fn alert_transition_from_row(row: AlertTransitionRow) -> Result<AlertTransition> {
     Ok(AlertTransition {
-        transition_id: row.try_get("transition_id")?,
-        ts_unix: u64::try_from(ts_unix).context("negative alert timestamp in state db")?,
-        alert_id: row.try_get("alert_id")?,
-        kind: row.try_get("kind")?,
-        agent_id: row.try_get("agent_id")?,
-        from_status: row.try_get("from_status")?,
-        to_status: row.try_get("to_status")?,
-        message: row.try_get("message")?,
-        metadata: serde_json::from_str(&metadata_json)
+        transition_id: row.transition_id,
+        ts_unix: u64::try_from(row.ts_unix).context("negative alert timestamp in state db")?,
+        alert_id: row.alert_id,
+        kind: row.kind,
+        agent_id: row.agent_id,
+        from_status: row.from_status,
+        to_status: row.to_status,
+        message: row.message,
+        metadata: serde_json::from_str(&row.metadata_json)
             .context("failed decoding alert transition metadata")?,
     })
 }
@@ -1655,6 +1883,38 @@ mod tests {
                 .len()
                 == 1
         );
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn agent_observations_upsert_current_state_and_events() {
+        let (store, dir) = make_store().await;
+
+        let accepted = store
+            .upsert_agent_observations(
+                "agent-a",
+                vec![crate::state::AgentDeviceObservationInput {
+                    kind: "dhcp".into(),
+                    action: "update".into(),
+                    mac: Some("AA:BB:CC:DD:EE:FF".into()),
+                    ip: Some("192.168.1.10".into()),
+                    hostname: Some("lda".into()),
+                    first_seen_unix: 10,
+                    last_seen_unix: 20,
+                }],
+            )
+            .await
+            .expect("observation upsert should succeed");
+        assert_eq!(accepted, 1);
+
+        let rows = store
+            .list_agent_observations(Some("agent-a"), 10)
+            .await
+            .expect("observations should list");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+        assert_eq!(rows[0].hostname.as_deref(), Some("lda"));
 
         cleanup_dir(&dir);
     }

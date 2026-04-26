@@ -3750,6 +3750,7 @@ dependencies = [
  "futures",
  "lda-ipjs",
  "macaddr",
+ "serde",
  "serde_json",
  "tokio",
  "wakey-core",
