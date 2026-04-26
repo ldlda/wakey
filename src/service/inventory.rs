@@ -103,7 +103,7 @@ const fn presence_rank(presence: Presence) -> u8 {
 mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
-    use wakey_core::{DhcpLease, InventoryQueryBuilder, NeighborState};
+    use wakey_core::{DeviceId, DhcpLease, InventoryQueryBuilder, NeighborState};
 
     fn sample_neighbors() -> Vec<NeighborEntry> {
         vec![NeighborEntry {
@@ -153,5 +153,26 @@ mod tests {
 
         let out = merge_devices(sample_neighbors(), sample_leases(), &query);
         assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn merge_devices_uses_ip_observed_id_when_mac_is_absent() {
+        let query = InventoryQueryBuilder::new().build();
+        let out = merge_devices(
+            vec![NeighborEntry {
+                ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)),
+                dev: Some("br-lan".to_string()),
+                mac: None,
+                state: NeighborState::Stale,
+            }],
+            Vec::new(),
+            &query,
+        );
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].id,
+            Some(DeviceId::Ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))))
+        );
     }
 }

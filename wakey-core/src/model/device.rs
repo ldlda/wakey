@@ -1,5 +1,5 @@
 use macaddr::MacAddr;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::net::IpAddr;
 
@@ -32,11 +32,16 @@ impl From<NeighborState> for Presence {
     }
 }
 
-/// MAC-first identifier for a device aggregate.
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize)]
-pub struct DeviceId {
+/// Observed identifier for a discovered device aggregate.
+///
+/// This is not a durable, user-approved identity. The control plane may attach
+/// many observed identifiers to one saved device.
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum DeviceId {
     #[serde(with = "mac")]
-    pub mac: MacAddr,
+    Mac(MacAddr),
+    Ip(IpAddr),
 }
 
 /// Merged view of one discovered network identity.
@@ -91,10 +96,16 @@ impl Device {
         }
 
         let macs: Vec<MacAddr> = macs.into_iter().collect();
+        let ips: Vec<IpAddr> = ips.into_iter().collect();
+        let id = macs
+            .first()
+            .copied()
+            .map(DeviceId::Mac)
+            .or_else(|| ips.first().copied().map(DeviceId::Ip));
         Self {
-            id: macs.first().copied().map(|mac| DeviceId { mac }),
+            id,
             names: names.into_iter().map(|n| n.to_owned()).collect(),
-            ips: ips.into_iter().collect(),
+            ips,
             macs,
             interfaces: interfaces.into_iter().map(|d| d.to_owned()).collect(),
             neighbors,
