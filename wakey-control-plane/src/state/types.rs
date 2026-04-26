@@ -92,6 +92,20 @@ pub struct AgentDeviceObservationView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDeviceObservationEvent {
+    pub event_id: String,
+    pub observation_key: String,
+    pub agent_id: String,
+    pub kind: String,
+    pub action: String,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+    pub hostname: Option<String>,
+    pub ts_unix: u64,
+    pub known_device: Option<KnownDeviceSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnownDeviceSummary {
     pub device_id: String,
     pub display_name: String,

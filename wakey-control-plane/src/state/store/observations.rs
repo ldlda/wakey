@@ -194,4 +194,69 @@ impl Store {
             .map(agent_observation_view_from_row)
             .collect()
     }
+
+    pub async fn list_agent_observation_events(
+        &self,
+        agent_id: Option<&str>,
+        kind: Option<&str>,
+        mac: Option<&str>,
+        ip: Option<&str>,
+        observation_key: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AgentDeviceObservationEvent>> {
+        let limit = limit.clamp(1, 1000);
+        let limit = i64::try_from(limit).context("observation event limit overflow")?;
+        let rows = sqlx::query_as!(
+            AgentObservationEventRow,
+            r#"SELECT events.event_id as "event_id!",
+                    ('agent:' || events.agent_id || ':' || events.kind || ':' ||
+                        CASE
+                            WHEN events.mac IS NOT NULL THEN 'mac:' || events.mac
+                            WHEN events.ip IS NOT NULL THEN 'ip:' || events.ip
+                            ELSE ''
+                        END) as "observation_key!",
+                    events.agent_id as "agent_id!",
+                    events.kind as "kind!",
+                    events.action as "action!",
+                    events.mac,
+                    events.ip,
+                    events.hostname,
+                    events.ts_unix,
+                    known_devices.device_id,
+                    known_devices.display_name,
+                    known_devices.pinned
+             FROM agent_device_observation_events events
+             LEFT JOIN device_identifiers identifiers
+               ON identifiers.identifier_key =
+                  CASE
+                    WHEN events.mac IS NOT NULL THEN 'mac:' || events.mac
+                    WHEN events.ip IS NOT NULL THEN 'ip:' || events.ip
+                  END
+             LEFT JOIN known_devices ON known_devices.device_id = identifiers.device_id
+             WHERE (?1 IS NULL OR events.agent_id = ?1)
+               AND (?2 IS NULL OR events.kind = ?2)
+               AND (?3 IS NULL OR events.mac = ?3)
+               AND (?4 IS NULL OR events.ip = ?4)
+               AND (?5 IS NULL OR ('agent:' || events.agent_id || ':' || events.kind || ':' ||
+                    CASE
+                        WHEN events.mac IS NOT NULL THEN 'mac:' || events.mac
+                        WHEN events.ip IS NOT NULL THEN 'ip:' || events.ip
+                        ELSE ''
+                    END) = ?5)
+             ORDER BY events.ts_unix DESC
+             LIMIT ?6"#,
+            agent_id,
+            kind,
+            mac,
+            ip,
+            observation_key,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed listing agent observation events")?;
+        rows.into_iter()
+            .map(agent_observation_event_from_row)
+            .collect()
+    }
 }

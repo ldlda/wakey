@@ -98,6 +98,10 @@ fn control_api_routes() -> Router<AppState> {
             get(api::list_agent_observations),
         )
         .route(
+            "/api/v1/control/observations/history",
+            get(api::list_agent_observation_history),
+        )
+        .route(
             "/api/v1/control/devices",
             get(api::list_known_devices).post(api::create_known_device),
         )

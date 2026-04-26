@@ -365,3 +365,29 @@ pub(in crate::state::store) fn agent_observation_view_from_row(
         known_device,
     })
 }
+
+pub(in crate::state::store) fn agent_observation_event_from_row(
+    row: AgentObservationEventRow,
+) -> Result<AgentDeviceObservationEvent> {
+    let known_device = match (row.device_id, row.display_name, row.pinned) {
+        (Some(device_id), Some(display_name), Some(pinned)) => Some(KnownDeviceSummary {
+            device_id,
+            display_name,
+            pinned: pinned != 0,
+        }),
+        _ => None,
+    };
+    Ok(AgentDeviceObservationEvent {
+        event_id: row.event_id,
+        observation_key: row.observation_key,
+        agent_id: row.agent_id,
+        kind: row.kind,
+        action: row.action,
+        mac: row.mac,
+        ip: row.ip,
+        hostname: row.hostname,
+        ts_unix: u64::try_from(row.ts_unix)
+            .context("negative observation event timestamp in state db")?,
+        known_device,
+    })
+}

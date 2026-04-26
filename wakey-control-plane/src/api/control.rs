@@ -8,8 +8,8 @@ use tracing::{info, warn};
 use crate::api::json_error;
 use crate::runtime::{AppState, SessionEvent};
 use crate::state::{
-    AgentDeviceObservationInput, AgentDeviceObservationView, AuditEventInput,
-    DeviceIdentifierInput, KnownDeviceInput,
+    AgentDeviceObservationEvent, AgentDeviceObservationInput, AgentDeviceObservationView,
+    AuditEventInput, DeviceIdentifierInput, KnownDeviceInput,
 };
 
 #[derive(Debug, Deserialize)]
@@ -149,6 +149,16 @@ pub struct UploadAgentObservationsResponse {
 #[derive(Debug, Deserialize)]
 pub struct ListObservationsQuery {
     pub agent_id: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListObservationHistoryQuery {
+    pub agent_id: Option<String>,
+    pub kind: Option<String>,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+    pub observation_key: Option<String>,
     pub limit: Option<usize>,
 }
 
@@ -703,6 +713,46 @@ pub async fn list_agent_observations(
     }
 }
 
+pub async fn list_agent_observation_history(
+    State(state): State<AppState>,
+    Query(query): Query<ListObservationHistoryQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let kind = normalized_query_value(query.kind).map(|value| value.to_ascii_lowercase());
+    let mac = normalized_query_value(query.mac).map(|value| value.to_ascii_lowercase());
+    let ip = normalized_query_value(query.ip);
+    let observation_key = normalized_query_value(query.observation_key);
+    match state
+        .store
+        .list_agent_observation_events(
+            query.agent_id.as_deref(),
+            kind.as_deref(),
+            mac.as_deref(),
+            ip.as_deref(),
+            observation_key.as_deref(),
+            query.limit.unwrap_or(500),
+        )
+        .await
+    {
+        Ok(events) => Ok((
+            StatusCode::OK,
+            Json(
+                events
+                    .into_iter()
+                    .map(agent_observation_event_response) // no-op premium
+                    .collect::<Vec<_>>(),
+            ),
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to list agent observation history");
+            Err(json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "list_observation_history_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
 pub async fn state_stats(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
@@ -732,6 +782,18 @@ fn agent_observation_response(
     observation: AgentDeviceObservationView,
 ) -> AgentDeviceObservationView {
     observation
+}
+
+fn agent_observation_event_response(
+    event: AgentDeviceObservationEvent,
+) -> AgentDeviceObservationEvent {
+    event
+}
+
+fn normalized_query_value(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn known_device_response(device: crate::state::KnownDevice) -> KnownDeviceResponse {

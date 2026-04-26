@@ -8,10 +8,10 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::state::types::{
-    AgentDeviceObservation, AgentDeviceObservationInput, AgentDeviceObservationView, AlertState,
-    AlertTransition, AuditEvent, AuditEventFilter, AuditEventInput, DeviceIdentifier,
-    DeviceIdentifierInput, EnrollTokenInfo, IssuedAgent, IssuedEnrollToken, KnownDevice,
-    KnownDeviceInput, KnownDeviceSummary, StateStats,
+    AgentDeviceObservation, AgentDeviceObservationEvent, AgentDeviceObservationInput,
+    AgentDeviceObservationView, AlertState, AlertTransition, AuditEvent, AuditEventFilter,
+    AuditEventInput, DeviceIdentifier, DeviceIdentifierInput, EnrollTokenInfo, IssuedAgent,
+    IssuedEnrollToken, KnownDevice, KnownDeviceInput, KnownDeviceSummary, StateStats,
 };
 
 pub struct Store {
@@ -396,6 +396,40 @@ mod tests {
                 .await
                 .expect("event count should read");
         assert_eq!(event_count, 1);
+
+        store
+            .upsert_agent_observations(
+                "agent-a",
+                vec![crate::state::AgentDeviceObservationInput {
+                    kind: "dhcp".into(),
+                    action: "remove".into(),
+                    mac: Some("AA:BB:CC:DD:EE:FF".into()),
+                    ip: Some("192.168.1.10".into()),
+                    hostname: Some("lda".into()),
+                    first_seen_unix: 10,
+                    last_seen_unix: 30,
+                }],
+            )
+            .await
+            .expect("changed observation upsert should succeed");
+
+        let events = store
+            .list_agent_observation_events(
+                Some("agent-a"),
+                None,
+                Some("aa:bb:cc:dd:ee:ff"),
+                None,
+                None,
+                10,
+            )
+            .await
+            .expect("observation events should list");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].action, "remove");
+        assert_eq!(
+            events[0].observation_key,
+            "agent:agent-a:dhcp:mac:aa:bb:cc:dd:ee:ff"
+        );
 
         cleanup_dir(&dir);
     }

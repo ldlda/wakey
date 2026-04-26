@@ -109,6 +109,19 @@ export type AgentDeviceObservation = {
   known_device: KnownDeviceSummary | null;
 };
 
+export type AgentDeviceObservationEvent = {
+  event_id: string;
+  observation_key: string;
+  agent_id: string;
+  kind: string;
+  action: string;
+  mac: string | null;
+  ip: string | null;
+  hostname: string | null;
+  ts_unix: number;
+  known_device: KnownDeviceSummary | null;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -204,6 +217,26 @@ export function fetchObservations(opts?: {
   params.set("limit", String(opts?.limit ?? 500));
   return request<AgentDeviceObservation[]>(
     `/api/v1/control/observations?${params.toString()}`,
+  );
+}
+
+export function fetchObservationHistory(opts?: {
+  agentId?: string;
+  kind?: string;
+  mac?: string;
+  ip?: string;
+  observationKey?: string;
+  limit?: number;
+}): Promise<AgentDeviceObservationEvent[]> {
+  const params = new URLSearchParams();
+  if (opts?.agentId) params.set("agent_id", opts.agentId);
+  if (opts?.kind) params.set("kind", opts.kind);
+  if (opts?.mac) params.set("mac", opts.mac);
+  if (opts?.ip) params.set("ip", opts.ip);
+  if (opts?.observationKey) params.set("observation_key", opts.observationKey);
+  params.set("limit", String(opts?.limit ?? 500));
+  return request<AgentDeviceObservationEvent[]>(
+    `/api/v1/control/observations/history?${params.toString()}`,
   );
 }
 

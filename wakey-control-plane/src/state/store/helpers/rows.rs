@@ -53,6 +53,21 @@ pub(in crate::state::store) struct AgentObservationViewRow {
     pub(in crate::state::store) pinned: Option<i64>,
 }
 
+pub(in crate::state::store) struct AgentObservationEventRow {
+    pub(in crate::state::store) event_id: String,
+    pub(in crate::state::store) observation_key: String,
+    pub(in crate::state::store) agent_id: String,
+    pub(in crate::state::store) kind: String,
+    pub(in crate::state::store) action: String,
+    pub(in crate::state::store) mac: Option<String>,
+    pub(in crate::state::store) ip: Option<String>,
+    pub(in crate::state::store) hostname: Option<String>,
+    pub(in crate::state::store) ts_unix: i64,
+    pub(in crate::state::store) device_id: Option<String>,
+    pub(in crate::state::store) display_name: Option<String>,
+    pub(in crate::state::store) pinned: Option<i64>,
+}
+
 pub(in crate::state::store) struct ObservationIdentifierRow {
     pub(in crate::state::store) mac: Option<String>,
     pub(in crate::state::store) ip: Option<String>,
