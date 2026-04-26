@@ -88,7 +88,9 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
     let http_client = reqwest::Client::new();
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut observation_sync = interval(Duration::from_secs(60));
+    let mut observation_sync = interval(Duration::from_secs(
+        config.observation_sync_interval_seconds.max(1),
+    ));
     observation_sync.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     loop {
@@ -117,7 +119,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                     Message::Text(text) => {
                         match serde_json::from_str::<ServerMessage>(&text) {
                             Ok(message) => {
-                                handle_server_message(&mut sink, message).await?;
+                                handle_server_message(config, &mut sink, message).await?;
                             }
                             Err(err) => {
                                 // Allow the server to introduce extra frame types without
@@ -163,9 +165,10 @@ struct AgentObservationRequest {
 }
 
 async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig) -> Result<()> {
-    let observations = wakey::list_local_observations()
-        .await
-        .context("failed to read local observations")?;
+    let observations =
+        wakey::wakey_linux::dhcp::list_local_observations_from_path(&config.observation_store_path)
+            .await
+            .context("failed to read local observations")?;
     if observations.is_empty() {
         return Ok(());
     }
@@ -215,7 +218,11 @@ pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
     current_ms.saturating_mul(2).min(cap)
 }
 
-async fn handle_server_message<S>(sink: &mut S, message: ServerMessage) -> Result<()>
+async fn handle_server_message<S>(
+    config: &AgentConfig,
+    sink: &mut S,
+    message: ServerMessage,
+) -> Result<()>
 where
     S: SinkExt<Message> + Unpin,
     <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
@@ -227,7 +234,7 @@ where
         } => {
             let kind = command_kind(&command);
             info!(request_id = %request_id, command = %kind, "received command from control-plane");
-            match dispatch_command(command).await {
+            match dispatch_command(command, config).await {
                 Ok(result) => {
                     info!(request_id = %request_id, command = %kind, "command execution completed");
                     send_command_result(sink, request_id, kind, result).await?;

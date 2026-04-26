@@ -106,6 +106,10 @@ pub struct ReloadArgs {
 
 #[derive(Args)]
 pub struct ObserveArgs {
+    /// Path to the agent config file. If present, local path settings are passed through.
+    #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
+    pub config: PathBuf,
+
     #[command(subcommand)]
     pub command: ObserveCommand,
 }

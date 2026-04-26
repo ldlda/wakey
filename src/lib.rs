@@ -3,6 +3,7 @@
 
 pub mod service;
 pub mod utils;
+pub use wakey_linux;
 
 pub use service::{
     broadcast_wake_targets, get_interface_summaries, get_interface_summary, get_ips, get_leases,

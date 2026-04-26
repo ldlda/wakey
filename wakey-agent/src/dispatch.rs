@@ -1,27 +1,38 @@
 use anyhow::Result;
 use tracing::{debug, info, instrument};
 
+use crate::config::AgentConfig;
 use crate::protocol::{
     AgentCommand, CommandResult, DevsRequest, InventoryRequest, LeasesRequest, WakeRequest,
 };
 
 #[instrument(skip_all)]
-pub async fn dispatch_command(command: AgentCommand) -> Result<CommandResult> {
+pub async fn dispatch_command(
+    command: AgentCommand,
+    config: &AgentConfig,
+) -> Result<CommandResult> {
     let kind = command_kind(&command);
     info!(command = %kind, "dispatching command into local wakey services");
     match command {
-        AgentCommand::Leases(req) => dispatch_leases(req).await,
+        AgentCommand::Leases(req) => dispatch_leases(req, config).await,
         AgentCommand::Devs(req) => dispatch_devs(req).await,
-        AgentCommand::Inventory(req) => dispatch_inventory(req).await,
+        AgentCommand::Inventory(req) => dispatch_inventory(req, config).await,
         AgentCommand::Wake(req) => dispatch_wake(req).await,
     }
 }
 
-async fn dispatch_leases(req: LeasesRequest) -> Result<CommandResult> {
-    let leases = wakey::get_leases(wakey_core::LeaseQuery {
-        include_state: req.include_state,
-    })
+async fn dispatch_leases(req: LeasesRequest, config: &AgentConfig) -> Result<CommandResult> {
+    let leases = wakey::wakey_linux::dhcp::read_dhcp_leases_with_names_from_paths(
+        &config.dhcp_leases_path,
+        &config.observation_store_path,
+        &config.mac_name_cache_path,
+    )
     .await?;
+    let leases = if req.include_state {
+        wakey::wakey_linux::dhcp::enrich_leases_with_nud_state(leases).await
+    } else {
+        wakey::leases_without_state(leases)
+    };
     debug!(
         rows = leases.len(),
         include_state = req.include_state,
@@ -50,8 +61,18 @@ async fn dispatch_devs(req: DevsRequest) -> Result<CommandResult> {
     Ok(CommandResult::Devs { rows: devs })
 }
 
-async fn dispatch_inventory(req: InventoryRequest) -> Result<CommandResult> {
-    let inventory = wakey::inventory(req.into_inventory_query()).await?;
+async fn dispatch_inventory(req: InventoryRequest, config: &AgentConfig) -> Result<CommandResult> {
+    let query = req.into_inventory_query();
+    let neighbors = wakey::wakey_linux::devices::query_neighbors(&query).await?;
+    let leases = wakey::wakey_linux::dhcp::read_dhcp_leases_with_names_from_paths(
+        &config.dhcp_leases_path,
+        &config.observation_store_path,
+        &config.mac_name_cache_path,
+    )
+    .await?;
+    let inventory = wakey_core::DeviceInventory {
+        devices: wakey::merge_devices(neighbors, wakey::leases_without_state(leases), &query),
+    };
     debug!(
         rows = inventory.devices.len(),
         "dispatched inventory command"

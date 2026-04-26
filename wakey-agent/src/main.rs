@@ -95,6 +95,9 @@ async fn main() -> Result<()> {
 fn observe(args: cli::ObserveArgs) -> Result<()> {
     let mut cmd = std::process::Command::new(resolve_wakey_binary());
     cmd.arg("observe");
+    if let Ok(config) = config::load_config(&args.config) {
+        config::apply_local_path_env_to_command(&mut cmd, &config);
+    }
 
     match args.command {
         ObserveCommand::Dhcp(args) => {
@@ -173,6 +176,10 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
             .unwrap_or_else(|| "REPLACE_ME_AGENT_TOKEN".to_string()),
         reconnect_base_ms: 1_000,
         reconnect_max_ms: 30_000,
+        observation_sync_interval_seconds: 60,
+        dhcp_leases_path: "/tmp/dhcp.leases".into(),
+        mac_name_cache_path: "/tmp/wakey_mac_names.json".into(),
+        observation_store_path: "/tmp/wakey_observations.json".into(),
     };
 
     if let Some(path) = &args.config {

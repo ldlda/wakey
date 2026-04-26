@@ -4,6 +4,12 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/wakey-agent/config.toml";
+const WAKEY_DHCP_LEASES_ENV: &str = "WAKEY_DHCP_LEASES";
+const WAKEY_MAC_NAME_CACHE_ENV: &str = "WAKEY_MAC_NAME_CACHE";
+const WAKEY_OBSERVATION_STORE_ENV: &str = "WAKEY_OBSERVATION_STORE";
+const DEFAULT_DHCP_LEASES_PATH: &str = "/tmp/dhcp.leases";
+const DEFAULT_MAC_NAME_CACHE_PATH: &str = "/tmp/wakey_mac_names.json";
+const DEFAULT_OBSERVATION_STORE_PATH: &str = "/tmp/wakey_observations.json";
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentConfig {
@@ -14,6 +20,14 @@ pub struct AgentConfig {
     pub reconnect_base_ms: u64,
     #[serde(default = "default_reconnect_max_ms")]
     pub reconnect_max_ms: u64,
+    #[serde(default = "default_observation_sync_interval_seconds")]
+    pub observation_sync_interval_seconds: u64,
+    #[serde(default = "default_dhcp_leases_path")]
+    pub dhcp_leases_path: PathBuf,
+    #[serde(default = "default_mac_name_cache_path")]
+    pub mac_name_cache_path: PathBuf,
+    #[serde(default = "default_observation_store_path")]
+    pub observation_store_path: PathBuf,
 }
 
 impl fmt::Debug for AgentConfig {
@@ -24,6 +38,13 @@ impl fmt::Debug for AgentConfig {
             .field("agent_token", &"<redacted>")
             .field("reconnect_base_ms", &self.reconnect_base_ms)
             .field("reconnect_max_ms", &self.reconnect_max_ms)
+            .field(
+                "observation_sync_interval_seconds",
+                &self.observation_sync_interval_seconds,
+            )
+            .field("dhcp_leases_path", &self.dhcp_leases_path)
+            .field("mac_name_cache_path", &self.mac_name_cache_path)
+            .field("observation_store_path", &self.observation_store_path)
             .finish()
     }
 }
@@ -34,6 +55,41 @@ const fn default_reconnect_base_ms() -> u64 {
 
 const fn default_reconnect_max_ms() -> u64 {
     30_000
+}
+
+const fn default_observation_sync_interval_seconds() -> u64 {
+    60
+}
+
+fn default_dhcp_leases_path() -> PathBuf {
+    DEFAULT_DHCP_LEASES_PATH.into()
+}
+
+fn default_mac_name_cache_path() -> PathBuf {
+    DEFAULT_MAC_NAME_CACHE_PATH.into()
+}
+
+fn default_observation_store_path() -> PathBuf {
+    DEFAULT_OBSERVATION_STORE_PATH.into()
+}
+
+impl AgentConfig {
+    pub fn local_path_envs(&self) -> Vec<(&'static str, &Path)> {
+        vec![
+            (WAKEY_DHCP_LEASES_ENV, self.dhcp_leases_path.as_path()),
+            (WAKEY_MAC_NAME_CACHE_ENV, self.mac_name_cache_path.as_path()),
+            (
+                WAKEY_OBSERVATION_STORE_ENV,
+                self.observation_store_path.as_path(),
+            ),
+        ]
+    }
+}
+
+pub fn apply_local_path_env_to_command(cmd: &mut std::process::Command, config: &AgentConfig) {
+    for (key, path) in config.local_path_envs() {
+        cmd.env(key, path);
+    }
 }
 
 pub fn load_config(path: &Path) -> Result<AgentConfig> {
@@ -118,12 +174,22 @@ mod tests {
             agent_token: "secret".into(),
             reconnect_base_ms: 123,
             reconnect_max_ms: 456,
+            observation_sync_interval_seconds: 7,
+            dhcp_leases_path: "/tmp/test-dhcp.leases".into(),
+            mac_name_cache_path: "/tmp/test-names.json".into(),
+            observation_store_path: "/tmp/test-observations.json".into(),
         };
 
         save_config(&path, &config).expect("save");
         let loaded = load_config(&path).expect("load");
         assert_eq!(loaded, config);
         assert!(format!("{:?}", loaded).contains("<redacted>"));
+        assert!(
+            loaded
+                .local_path_envs()
+                .iter()
+                .any(|(key, _)| *key == WAKEY_OBSERVATION_STORE_ENV)
+        );
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir_all(&dir);
     }

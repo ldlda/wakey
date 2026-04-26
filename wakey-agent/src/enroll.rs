@@ -60,6 +60,10 @@ pub async fn enroll(
         agent_token: payload.agent_token,
         reconnect_base_ms: 1_000,
         reconnect_max_ms: 30_000,
+        observation_sync_interval_seconds: 60,
+        dhcp_leases_path: "/tmp/dhcp.leases".into(),
+        mac_name_cache_path: "/tmp/wakey_mac_names.json".into(),
+        observation_store_path: "/tmp/wakey_observations.json".into(),
     };
     let backup_path = save_config_with_backup(config_path, &config)?;
     info!(agent_id = %config.agent_id, config_path = %config_path.display(), "agent enrollment succeeded and config was written");
