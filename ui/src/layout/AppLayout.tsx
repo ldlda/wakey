@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 
 const navItems = [
   ["/", "Devices"],
+  ["/observations", "Observed"],
   ["/commands", "Wake Tools"],
   ["/dashboard", "Fleet Health"],
   ["/agents", "Agents"],

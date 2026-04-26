@@ -72,6 +72,43 @@ export type SetAgentNicknameResponse = {
   updated: boolean;
 };
 
+export type DeviceIdentifier = {
+  identifier_key: string;
+  device_id: string;
+  kind: string;
+  value: string;
+  created_at_unix: number;
+};
+
+export type KnownDevice = {
+  device_id: string;
+  display_name: string;
+  pinned: boolean;
+  created_at_unix: number;
+  updated_at_unix: number;
+  notes: string | null;
+  identifiers: DeviceIdentifier[];
+};
+
+export type KnownDeviceSummary = {
+  device_id: string;
+  display_name: string;
+  pinned: boolean;
+};
+
+export type AgentDeviceObservation = {
+  observation_key: string;
+  agent_id: string;
+  kind: string;
+  mac: string | null;
+  ip: string | null;
+  hostname: string | null;
+  first_seen_unix: number;
+  last_seen_unix: number;
+  last_action: string;
+  known_device: KnownDeviceSummary | null;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -150,6 +187,52 @@ export function setAgentNickname(
     {
       method: "PATCH",
       body: JSON.stringify({ nickname: normalized ? normalized : null }),
+    },
+  );
+}
+
+export function fetchKnownDevices(): Promise<KnownDevice[]> {
+  return request<KnownDevice[]>("/api/v1/control/devices");
+}
+
+export function fetchObservations(opts?: {
+  agentId?: string;
+  limit?: number;
+}): Promise<AgentDeviceObservation[]> {
+  const params = new URLSearchParams();
+  if (opts?.agentId) params.set("agent_id", opts.agentId);
+  params.set("limit", String(opts?.limit ?? 500));
+  return request<AgentDeviceObservation[]>(
+    `/api/v1/control/observations?${params.toString()}`,
+  );
+}
+
+export function createKnownDevice(input: {
+  display_name: string;
+  pinned?: boolean;
+  notes?: string | null;
+  identifiers?: { kind: string; value: string }[];
+}): Promise<KnownDevice> {
+  return request<KnownDevice>("/api/v1/control/devices", {
+    method: "POST",
+    body: JSON.stringify({
+      display_name: input.display_name,
+      pinned: input.pinned ?? true,
+      notes: input.notes ?? null,
+      identifiers: input.identifiers ?? [],
+    }),
+  });
+}
+
+export function attachObservationIdentifier(
+  deviceId: string,
+  observationKey: string,
+): Promise<KnownDevice> {
+  return request<KnownDevice>(
+    `/api/v1/control/devices/${encodeURIComponent(deviceId)}/identifiers/from-observation`,
+    {
+      method: "POST",
+      body: JSON.stringify({ observation_key: observationKey }),
     },
   );
 }

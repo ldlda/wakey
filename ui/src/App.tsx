@@ -20,6 +20,7 @@ import { AuditPage } from "@/pages/AuditPage";
 import { CommandsPage } from "@/pages/CommandsPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { DevicesPage } from "@/pages/DevicesPage";
+import { ObservationsPage } from "@/pages/ObservationsPage";
 import { TokensPage } from "@/pages/TokensPage";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -151,6 +152,7 @@ export function App() {
               />
             }
           />
+          <Route path="observations" element={<ObservationsPage />} />
           <Route
             path="agents"
             element={
