@@ -1,16 +1,16 @@
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::state::types::{
-    AlertState, AlertTransition, AuditEvent, AuditEventFilter, AuditEventInput, EnrollTokenInfo,
-    IssuedAgent, IssuedEnrollToken, StateStats,
+    AlertState, AlertTransition, AuditEvent, AuditEventFilter, AuditEventInput, DeviceIdentifier,
+    DeviceIdentifierInput, EnrollTokenInfo, IssuedAgent, IssuedEnrollToken, KnownDevice,
+    KnownDeviceInput, StateStats,
 };
 
 pub struct Store {
@@ -115,47 +115,9 @@ impl Store {
         import_enroll_tokens(&store.pool, &legacy).await?;
         import_agents(&store.pool, &legacy).await?;
         import_agent_meta(&store.pool, &legacy).await?;
-        import_json_tree(
-            &store.pool,
-            &legacy,
-            "audit_events",
-            "audit_events",
-            "event_key",
-            "event_json",
-            |raw| {
-                let event: AuditEvent = serde_json::from_slice(raw)?;
-                Ok(vec![
-                    ("ts_unix", event.ts_unix.to_string()),
-                    ("agent_id", event.agent_id.unwrap_or_default()),
-                    ("request_id", event.request_id.unwrap_or_default()),
-                    ("event_type", event.event_type),
-                    ("outcome", event.outcome),
-                ])
-            },
-        )
-        .await?;
-        import_simple_json_tree(
-            &store.pool,
-            &legacy,
-            "active_alerts",
-            "active_alerts",
-            "alert_id",
-            "alert_json",
-        )
-        .await?;
-        import_json_tree(
-            &store.pool,
-            &legacy,
-            "alert_transitions",
-            "alert_transitions",
-            "transition_key",
-            "transition_json",
-            |raw| {
-                let transition: AlertTransition = serde_json::from_slice(raw)?;
-                Ok(vec![("ts_unix", transition.ts_unix.to_string())])
-            },
-        )
-        .await?;
+        import_audit_events(&store.pool, &legacy).await?;
+        import_active_alerts(&store.pool, &legacy).await?;
+        import_alert_transitions(&store.pool, &legacy).await?;
 
         info!(
             from = %from_sled_state.display(),
@@ -438,6 +400,146 @@ impl Store {
         }
     }
 
+    pub async fn create_known_device(&self, input: KnownDeviceInput) -> Result<KnownDevice> {
+        let display_name = normalize_required_text(&input.display_name, "display_name")?;
+        let notes = normalize_optional_text(input.notes.as_deref());
+        let identifiers = input
+            .identifiers
+            .into_iter()
+            .map(normalize_device_identifier)
+            .collect::<Result<Vec<_>>>()?;
+        let device_id = format!("dev-{}", Uuid::new_v4());
+        let now = now_unix();
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting known device transaction")?;
+        sqlx::query(
+            "INSERT INTO known_devices
+             (device_id, display_name, pinned, created_at_unix, updated_at_unix, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(&device_id)
+        .bind(&display_name)
+        .bind(if input.pinned { 1_i64 } else { 0_i64 })
+        .bind(i64::try_from(now).context("known device timestamp overflow")?)
+        .bind(i64::try_from(now).context("known device timestamp overflow")?)
+        .bind(&notes)
+        .execute(&mut *tx)
+        .await
+        .context("failed persisting known device")?;
+
+        for identifier in &identifiers {
+            insert_device_identifier_tx(&mut tx, &device_id, identifier, now).await?;
+        }
+
+        tx.commit()
+            .await
+            .context("failed committing known device transaction")?;
+        self.get_known_device(&device_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("created known device disappeared"))
+    }
+
+    pub async fn list_known_devices(&self) -> Result<Vec<KnownDevice>> {
+        let rows = sqlx::query(
+            "SELECT device_id, display_name, pinned, created_at_unix, updated_at_unix, notes
+             FROM known_devices
+             ORDER BY pinned DESC, display_name, device_id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed listing known devices")?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let device_id: String = row.try_get("device_id")?;
+            out.push(self.known_device_from_row(row, &device_id).await?);
+        }
+        Ok(out)
+    }
+
+    pub async fn get_known_device(&self, device_id: &str) -> Result<Option<KnownDevice>> {
+        let row = sqlx::query(
+            "SELECT device_id, display_name, pinned, created_at_unix, updated_at_unix, notes
+             FROM known_devices
+             WHERE device_id = ?1",
+        )
+        .bind(device_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed reading known device")?;
+
+        match row {
+            Some(row) => self.known_device_from_row(row, device_id).await.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    pub async fn forget_known_device(&self, device_id: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM known_devices WHERE device_id = ?1")
+            .bind(device_id)
+            .execute(&self.pool)
+            .await
+            .context("failed deleting known device")?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn attach_device_identifier(
+        &self,
+        device_id: &str,
+        input: DeviceIdentifierInput,
+    ) -> Result<Option<KnownDevice>> {
+        let identifier = normalize_device_identifier(input)?;
+        let now = now_unix();
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting device identifier transaction")?;
+        let exists =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM known_devices WHERE device_id = ?1")
+                .bind(device_id)
+                .fetch_one(&mut *tx)
+                .await
+                .context("failed checking known device existence")?;
+        if exists == 0 {
+            return Ok(None);
+        }
+
+        insert_device_identifier_tx(&mut tx, device_id, &identifier, now).await?;
+        sqlx::query("UPDATE known_devices SET updated_at_unix = ?1 WHERE device_id = ?2")
+            .bind(i64::try_from(now).context("known device timestamp overflow")?)
+            .bind(device_id)
+            .execute(&mut *tx)
+            .await
+            .context("failed updating known device timestamp")?;
+        tx.commit()
+            .await
+            .context("failed committing device identifier transaction")?;
+        self.get_known_device(device_id).await
+    }
+
+    pub async fn lookup_known_device_by_identifier(
+        &self,
+        input: DeviceIdentifierInput,
+    ) -> Result<Option<KnownDevice>> {
+        let identifier = normalize_device_identifier(input)?;
+        let device_id = sqlx::query_scalar::<_, String>(
+            "SELECT device_id FROM device_identifiers WHERE identifier_key = ?1",
+        )
+        .bind(identifier.identifier_key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed looking up known device identifier")?;
+        match device_id {
+            Some(device_id) => self.get_known_device(&device_id).await,
+            None => Ok(None),
+        }
+    }
+
     pub async fn append_audit_event(&self, input: AuditEventInput) -> Result<AuditEvent> {
         let event = AuditEvent {
             event_id: format!("evt-{}", Uuid::new_v4()),
@@ -454,19 +556,32 @@ impl Store {
         };
 
         let key = format!("{:020}:{}", event.ts_unix, event.event_id);
-        let value = serde_json::to_string(&event).context("failed to encode audit event")?;
+        let metadata_json =
+            serde_json::to_string(&event.metadata).context("failed to encode audit metadata")?;
         sqlx::query(
             "INSERT INTO audit_events
-             (event_key, event_json, ts_unix, agent_id, request_id, event_type, outcome)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (event_key, event_id, ts_unix, actor_type, actor_id, agent_id, request_id,
+              event_type, outcome, latency_ms, message, metadata_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )
         .bind(&key)
-        .bind(value)
+        .bind(&event.event_id)
         .bind(i64::try_from(event.ts_unix).context("audit timestamp overflow")?)
+        .bind(&event.actor_type)
+        .bind(&event.actor_id)
         .bind(&event.agent_id)
         .bind(&event.request_id)
         .bind(&event.event_type)
         .bind(&event.outcome)
+        .bind(
+            event
+                .latency_ms
+                .map(i64::try_from)
+                .transpose()
+                .context("audit latency overflow")?,
+        )
+        .bind(&event.message)
+        .bind(metadata_json)
         .execute(&self.pool)
         .await
         .context("failed persisting audit event")?;
@@ -475,8 +590,12 @@ impl Store {
 
     pub async fn list_audit_events(&self, filter: AuditEventFilter) -> Result<Vec<AuditEvent>> {
         let limit = filter.limit.clamp(1, 500);
-        let mut builder =
-            sqlx::QueryBuilder::new("SELECT event_json FROM audit_events WHERE 1 = 1");
+        let mut builder = sqlx::QueryBuilder::new(
+            "SELECT event_id, ts_unix, actor_type, actor_id, agent_id, request_id,
+                    event_type, outcome, latency_ms, message, metadata_json
+             FROM audit_events
+             WHERE 1 = 1",
+        );
 
         if let Some(agent_id) = filter.agent_id.as_deref() {
             builder.push(" AND agent_id = ");
@@ -511,12 +630,7 @@ impl Store {
             .await
             .context("failed listing audit events")?;
 
-        rows.into_iter()
-            .map(|row| {
-                let raw: String = row.try_get("event_json")?;
-                serde_json::from_str(&raw).context("failed decoding audit event")
-            })
-            .collect()
+        rows.into_iter().map(audit_event_from_row).collect()
     }
 
     pub async fn sync_alert_transitions(
@@ -524,14 +638,16 @@ impl Store {
         current: &[AlertState],
     ) -> Result<Vec<AlertTransition>> {
         let mut previous = std::collections::HashMap::<String, AlertState>::new();
-        let rows = sqlx::query("SELECT alert_json FROM active_alerts")
-            .fetch_all(&self.pool)
-            .await
-            .context("failed iterating active_alerts table")?;
+        let rows = sqlx::query(
+            "SELECT alert_id, kind, severity, status, agent_id, message,
+                    value, threshold, last_seen_unix, metadata_json
+             FROM active_alerts",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed iterating active_alerts table")?;
         for row in rows {
-            let raw: String = row.try_get("alert_json")?;
-            let alert: AlertState =
-                serde_json::from_str(&raw).context("failed decoding active alert")?;
+            let alert = alert_state_from_row(row).context("failed decoding active alert")?;
             previous.insert(alert.alert_id.clone(), alert);
         }
 
@@ -588,30 +704,12 @@ impl Store {
             .context("failed clearing active alert snapshot")?;
 
         for alert in current {
-            let value = serde_json::to_string(alert).context("failed encoding active alert")?;
-            sqlx::query("INSERT INTO active_alerts (alert_id, alert_json) VALUES (?1, ?2)")
-                .bind(&alert.alert_id)
-                .bind(value)
-                .execute(&mut *tx)
-                .await
-                .context("failed writing active alert snapshot")?;
+            insert_active_alert(&mut tx, alert).await?;
         }
 
         for transition in &transitions {
             let key = format!("{:020}:{}", transition.ts_unix, transition.transition_id);
-            let value =
-                serde_json::to_string(transition).context("failed encoding alert transition")?;
-            sqlx::query(
-                "INSERT INTO alert_transitions
-                 (transition_key, transition_json, ts_unix)
-                 VALUES (?1, ?2, ?3)",
-            )
-            .bind(key)
-            .bind(value)
-            .bind(i64::try_from(transition.ts_unix).context("alert timestamp overflow")?)
-            .execute(&mut *tx)
-            .await
-            .context("failed persisting alert transition")?;
+            insert_alert_transition(&mut tx, &key, transition).await?;
         }
 
         tx.commit()
@@ -628,7 +726,9 @@ impl Store {
         let limit = limit.clamp(1, 500);
         let rows = if let Some(since) = since_unix {
             sqlx::query(
-                "SELECT transition_json FROM alert_transitions
+                "SELECT transition_id, ts_unix, alert_id, kind, agent_id,
+                        from_status, to_status, message, metadata_json
+                 FROM alert_transitions
                  WHERE ts_unix >= ?1
                  ORDER BY transition_key DESC
                  LIMIT ?2",
@@ -639,7 +739,9 @@ impl Store {
             .await
         } else {
             sqlx::query(
-                "SELECT transition_json FROM alert_transitions
+                "SELECT transition_id, ts_unix, alert_id, kind, agent_id,
+                        from_status, to_status, message, metadata_json
+                 FROM alert_transitions
                  ORDER BY transition_key DESC
                  LIMIT ?1",
             )
@@ -649,12 +751,7 @@ impl Store {
         }
         .context("failed listing alert transitions")?;
 
-        rows.into_iter()
-            .map(|row| {
-                let raw: String = row.try_get("transition_json")?;
-                serde_json::from_str(&raw).context("failed decoding alert transition")
-            })
-            .collect()
+        rows.into_iter().map(alert_transition_from_row).collect()
     }
 
     async fn seed_bootstrap_enroll_tokens(
@@ -762,6 +859,49 @@ impl Store {
             .context("failed reading schema version")?;
         decode_schema(raw.as_ref()).context("failed decoding schema version")
     }
+
+    async fn known_device_from_row(
+        &self,
+        row: sqlx::sqlite::SqliteRow,
+        device_id: &str,
+    ) -> Result<KnownDevice> {
+        let pinned: i64 = row.try_get("pinned")?;
+        let created_at_unix: i64 = row.try_get("created_at_unix")?;
+        let updated_at_unix: i64 = row.try_get("updated_at_unix")?;
+        let identifiers = self.list_device_identifiers(device_id).await?;
+        Ok(KnownDevice {
+            device_id: row.try_get("device_id")?,
+            display_name: row.try_get("display_name")?,
+            pinned: pinned != 0,
+            created_at_unix: u64::try_from(created_at_unix)
+                .context("negative known device created timestamp in state db")?,
+            updated_at_unix: u64::try_from(updated_at_unix)
+                .context("negative known device updated timestamp in state db")?,
+            notes: row.try_get("notes")?,
+            identifiers,
+        })
+    }
+
+    async fn list_device_identifiers(&self, device_id: &str) -> Result<Vec<DeviceIdentifier>> {
+        let rows = sqlx::query(
+            "SELECT identifier_key, device_id, kind, value, created_at_unix
+             FROM device_identifiers
+             WHERE device_id = ?1
+             ORDER BY kind, value",
+        )
+        .bind(device_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed listing device identifiers")?;
+        rows.into_iter().map(device_identifier_from_row).collect()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct NormalizedDeviceIdentifier {
+    identifier_key: String,
+    kind: String,
+    value: String,
 }
 
 async fn open_sqlite_pool(path: &Path) -> Result<SqlitePool> {
@@ -813,6 +953,71 @@ fn decode_schema(raw: &[u8]) -> Result<u32> {
 
 fn seeded_enroll_token_key(token: &str) -> String {
     format!("{SEEDED_ENROLL_TOKEN_PREFIX}{token}")
+}
+
+fn normalize_required_text(value: &str, field: &str) -> Result<String> {
+    let normalized = value.trim();
+    if normalized.is_empty() {
+        anyhow::bail!("{field} must not be empty");
+    }
+    Ok(normalized.to_string())
+}
+
+fn normalize_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn normalize_device_identifier(input: DeviceIdentifierInput) -> Result<NormalizedDeviceIdentifier> {
+    let kind = normalize_required_text(&input.kind, "identifier kind")?.to_ascii_lowercase();
+    let value = normalize_required_text(&input.value, "identifier value")?.to_ascii_lowercase();
+    let identifier_key = format!("{kind}:{value}");
+    Ok(NormalizedDeviceIdentifier {
+        identifier_key,
+        kind,
+        value,
+    })
+}
+
+async fn insert_device_identifier_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    device_id: &str,
+    identifier: &NormalizedDeviceIdentifier,
+    created_at_unix: u64,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO device_identifiers
+         (identifier_key, device_id, kind, value, created_at_unix)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(&identifier.identifier_key)
+    .bind(device_id)
+    .bind(&identifier.kind)
+    .bind(&identifier.value)
+    .bind(i64::try_from(created_at_unix).context("device identifier timestamp overflow")?)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| {
+        format!(
+            "failed attaching device identifier {} to {}",
+            identifier.identifier_key, device_id
+        )
+    })?;
+    Ok(())
+}
+
+fn device_identifier_from_row(row: sqlx::sqlite::SqliteRow) -> Result<DeviceIdentifier> {
+    let created_at_unix: i64 = row.try_get("created_at_unix")?;
+    Ok(DeviceIdentifier {
+        identifier_key: row.try_get("identifier_key")?,
+        device_id: row.try_get("device_id")?,
+        kind: row.try_get("kind")?,
+        value: row.try_get("value")?,
+        created_at_unix: u64::try_from(created_at_unix)
+            .context("negative device identifier timestamp in state db")?,
+    })
 }
 
 async fn import_tree_raw(
@@ -904,108 +1109,262 @@ async fn import_agent_meta(pool: &SqlitePool, legacy: &sled::Db) -> Result<()> {
     Ok(())
 }
 
-async fn import_simple_json_tree(
-    pool: &SqlitePool,
-    legacy: &sled::Db,
-    sled_tree: &str,
-    sql_table: &str,
-    key_col: &str,
-    value_col: &str,
-) -> Result<()> {
+async fn import_audit_events(pool: &SqlitePool, legacy: &sled::Db) -> Result<()> {
     let tree = legacy
-        .open_tree(sled_tree)
-        .with_context(|| format!("failed to open legacy {sled_tree} tree"))?;
-    let sql =
-        format!("INSERT OR REPLACE INTO {sql_table} ({key_col}, {value_col}) VALUES (?1, ?2)");
+        .open_tree("audit_events")
+        .context("failed to open legacy audit_events tree")?;
     for item in tree.iter() {
-        let (key, value) =
-            item.with_context(|| format!("failed reading legacy {sled_tree} tree"))?;
-        let key = String::from_utf8(key.to_vec())
-            .with_context(|| format!("legacy {sled_tree} key is not utf-8"))?;
-        let value = String::from_utf8(value.to_vec())
-            .with_context(|| format!("legacy {sled_tree} value is not utf-8"))?;
-        sqlx::query(&sql)
-            .bind(key)
-            .bind(value)
-            .execute(pool)
+        let (key, value) = item.context("failed reading legacy audit event")?;
+        let key = String::from_utf8(key.to_vec()).context("legacy audit key is not utf-8")?;
+        let event: AuditEvent =
+            serde_json::from_slice(value.as_ref()).context("failed decoding legacy audit event")?;
+        insert_audit_event(pool, &key, &event)
             .await
-            .with_context(|| format!("failed importing legacy {sled_tree} row"))?;
+            .context("failed importing legacy audit event")?;
     }
     Ok(())
 }
 
-async fn import_json_tree<F>(
-    pool: &SqlitePool,
-    legacy: &sled::Db,
-    sled_tree: &str,
-    sql_table: &str,
-    _key_col: &str,
-    _value_col: &str,
-    derive_cols: F,
-) -> Result<()>
-where
-    F: Fn(&[u8]) -> Result<Vec<(&'static str, String)>>,
-{
+async fn import_active_alerts(pool: &SqlitePool, legacy: &sled::Db) -> Result<()> {
     let tree = legacy
-        .open_tree(sled_tree)
-        .with_context(|| format!("failed to open legacy {sled_tree} tree"))?;
+        .open_tree("active_alerts")
+        .context("failed to open legacy active_alerts tree")?;
     for item in tree.iter() {
-        let (key, value) =
-            item.with_context(|| format!("failed reading legacy {sled_tree} tree"))?;
-        let key = String::from_utf8(key.to_vec())
-            .with_context(|| format!("legacy {sled_tree} key is not utf-8"))?;
-        let json = String::from_utf8(value.to_vec())
-            .with_context(|| format!("legacy {sled_tree} value is not utf-8"))?;
-        let derived = derive_cols(json.as_bytes())?;
-        match (sql_table, derived.as_slice()) {
-            ("audit_events", cols) => {
-                let ts_unix = i64::from_str(&cols[0].1).context("invalid audit timestamp")?;
-                let agent_id = empty_to_none(&cols[1].1);
-                let request_id = empty_to_none(&cols[2].1);
-                sqlx::query(
-                    "INSERT OR REPLACE INTO audit_events
-                     (event_key, event_json, ts_unix, agent_id, request_id, event_type, outcome)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                )
-                .bind(key)
-                .bind(json)
-                .bind(ts_unix)
-                .bind(agent_id)
-                .bind(request_id)
-                .bind(&cols[3].1)
-                .bind(&cols[4].1)
-                .execute(pool)
-                .await
-                .context("failed importing legacy audit event")?;
-            }
-            ("alert_transitions", cols) => {
-                let ts_unix = i64::from_str(&cols[0].1).context("invalid alert timestamp")?;
-                sqlx::query(
-                    "INSERT OR REPLACE INTO alert_transitions
-                     (transition_key, transition_json, ts_unix)
-                     VALUES (?1, ?2, ?3)",
-                )
-                .bind(key)
-                .bind(json)
-                .bind(ts_unix)
-                .execute(pool)
-                .await
-                .context("failed importing legacy alert transition")?;
-            }
-            _ => unreachable!("unsupported import_json_tree target"),
-        }
+        let (_, value) = item.context("failed reading legacy active alert")?;
+        let alert: AlertState = serde_json::from_slice(value.as_ref())
+            .context("failed decoding legacy active alert")?;
+        insert_active_alert_pool(pool, &alert)
+            .await
+            .context("failed importing legacy active alert")?;
     }
     Ok(())
 }
 
-fn empty_to_none(value: &str) -> Option<&str> {
-    if value.is_empty() { None } else { Some(value) }
+async fn import_alert_transitions(pool: &SqlitePool, legacy: &sled::Db) -> Result<()> {
+    let tree = legacy
+        .open_tree("alert_transitions")
+        .context("failed to open legacy alert_transitions tree")?;
+    for item in tree.iter() {
+        let (key, value) = item.context("failed reading legacy alert transition")?;
+        let key =
+            String::from_utf8(key.to_vec()).context("legacy alert transition key is not utf-8")?;
+        let transition: AlertTransition = serde_json::from_slice(value.as_ref())
+            .context("failed decoding legacy alert transition")?;
+        insert_alert_transition_pool(pool, &key, &transition)
+            .await
+            .context("failed importing legacy alert transition")?;
+    }
+    Ok(())
+}
+
+async fn insert_audit_event(pool: &SqlitePool, key: &str, event: &AuditEvent) -> Result<()> {
+    let metadata_json =
+        serde_json::to_string(&event.metadata).context("failed to encode audit metadata")?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO audit_events
+         (event_key, event_id, ts_unix, actor_type, actor_id, agent_id, request_id,
+          event_type, outcome, latency_ms, message, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+    )
+    .bind(key)
+    .bind(&event.event_id)
+    .bind(i64::try_from(event.ts_unix).context("audit timestamp overflow")?)
+    .bind(&event.actor_type)
+    .bind(&event.actor_id)
+    .bind(&event.agent_id)
+    .bind(&event.request_id)
+    .bind(&event.event_type)
+    .bind(&event.outcome)
+    .bind(
+        event
+            .latency_ms
+            .map(i64::try_from)
+            .transpose()
+            .context("audit latency overflow")?,
+    )
+    .bind(&event.message)
+    .bind(metadata_json)
+    .execute(pool)
+    .await
+    .context("failed persisting audit event")?;
+    Ok(())
+}
+
+async fn insert_active_alert(tx: &mut Transaction<'_, Sqlite>, alert: &AlertState) -> Result<()> {
+    let metadata_json =
+        serde_json::to_string(&alert.metadata).context("failed to encode active alert metadata")?;
+    sqlx::query(
+        "INSERT INTO active_alerts
+         (alert_id, kind, severity, status, agent_id, message, value, threshold,
+          last_seen_unix, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )
+    .bind(&alert.alert_id)
+    .bind(&alert.kind)
+    .bind(&alert.severity)
+    .bind(&alert.status)
+    .bind(&alert.agent_id)
+    .bind(&alert.message)
+    .bind(i64::try_from(alert.value).context("active alert value overflow")?)
+    .bind(i64::try_from(alert.threshold).context("active alert threshold overflow")?)
+    .bind(i64::try_from(alert.last_seen_unix).context("active alert timestamp overflow")?)
+    .bind(metadata_json)
+    .execute(&mut **tx)
+    .await
+    .context("failed writing active alert snapshot")?;
+    Ok(())
+}
+
+async fn insert_active_alert_pool(pool: &SqlitePool, alert: &AlertState) -> Result<()> {
+    let metadata_json =
+        serde_json::to_string(&alert.metadata).context("failed to encode active alert metadata")?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO active_alerts
+         (alert_id, kind, severity, status, agent_id, message, value, threshold,
+          last_seen_unix, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )
+    .bind(&alert.alert_id)
+    .bind(&alert.kind)
+    .bind(&alert.severity)
+    .bind(&alert.status)
+    .bind(&alert.agent_id)
+    .bind(&alert.message)
+    .bind(i64::try_from(alert.value).context("active alert value overflow")?)
+    .bind(i64::try_from(alert.threshold).context("active alert threshold overflow")?)
+    .bind(i64::try_from(alert.last_seen_unix).context("active alert timestamp overflow")?)
+    .bind(metadata_json)
+    .execute(pool)
+    .await
+    .context("failed writing active alert snapshot")?;
+    Ok(())
+}
+
+async fn insert_alert_transition(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    transition: &AlertTransition,
+) -> Result<()> {
+    let metadata_json = serde_json::to_string(&transition.metadata)
+        .context("failed to encode alert transition metadata")?;
+    sqlx::query(
+        "INSERT INTO alert_transitions
+         (transition_key, transition_id, ts_unix, alert_id, kind, agent_id,
+          from_status, to_status, message, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )
+    .bind(key)
+    .bind(&transition.transition_id)
+    .bind(i64::try_from(transition.ts_unix).context("alert timestamp overflow")?)
+    .bind(&transition.alert_id)
+    .bind(&transition.kind)
+    .bind(&transition.agent_id)
+    .bind(&transition.from_status)
+    .bind(&transition.to_status)
+    .bind(&transition.message)
+    .bind(metadata_json)
+    .execute(&mut **tx)
+    .await
+    .context("failed persisting alert transition")?;
+    Ok(())
+}
+
+async fn insert_alert_transition_pool(
+    pool: &SqlitePool,
+    key: &str,
+    transition: &AlertTransition,
+) -> Result<()> {
+    let metadata_json = serde_json::to_string(&transition.metadata)
+        .context("failed to encode alert transition metadata")?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO alert_transitions
+         (transition_key, transition_id, ts_unix, alert_id, kind, agent_id,
+          from_status, to_status, message, metadata_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+    )
+    .bind(key)
+    .bind(&transition.transition_id)
+    .bind(i64::try_from(transition.ts_unix).context("alert timestamp overflow")?)
+    .bind(&transition.alert_id)
+    .bind(&transition.kind)
+    .bind(&transition.agent_id)
+    .bind(&transition.from_status)
+    .bind(&transition.to_status)
+    .bind(&transition.message)
+    .bind(metadata_json)
+    .execute(pool)
+    .await
+    .context("failed persisting alert transition")?;
+    Ok(())
+}
+
+fn audit_event_from_row(row: sqlx::sqlite::SqliteRow) -> Result<AuditEvent> {
+    let ts_unix: i64 = row.try_get("ts_unix")?;
+    let latency_ms: Option<i64> = row.try_get("latency_ms")?;
+    let metadata_json: String = row.try_get("metadata_json")?;
+    Ok(AuditEvent {
+        event_id: row.try_get("event_id")?,
+        ts_unix: u64::try_from(ts_unix).context("negative audit timestamp in state db")?,
+        actor_type: row.try_get("actor_type")?,
+        actor_id: row.try_get("actor_id")?,
+        agent_id: row.try_get("agent_id")?,
+        request_id: row.try_get("request_id")?,
+        event_type: row.try_get("event_type")?,
+        outcome: row.try_get("outcome")?,
+        latency_ms: latency_ms
+            .map(u64::try_from)
+            .transpose()
+            .context("negative audit latency in state db")?,
+        message: row.try_get("message")?,
+        metadata: serde_json::from_str(&metadata_json).context("failed decoding audit metadata")?,
+    })
+}
+
+fn alert_state_from_row(row: sqlx::sqlite::SqliteRow) -> Result<AlertState> {
+    let value: i64 = row.try_get("value")?;
+    let threshold: i64 = row.try_get("threshold")?;
+    let last_seen_unix: i64 = row.try_get("last_seen_unix")?;
+    let metadata_json: String = row.try_get("metadata_json")?;
+    Ok(AlertState {
+        alert_id: row.try_get("alert_id")?,
+        kind: row.try_get("kind")?,
+        severity: row.try_get("severity")?,
+        status: row.try_get("status")?,
+        agent_id: row.try_get("agent_id")?,
+        message: row.try_get("message")?,
+        value: u64::try_from(value).context("negative active alert value in state db")?,
+        threshold: u64::try_from(threshold)
+            .context("negative active alert threshold in state db")?,
+        last_seen_unix: u64::try_from(last_seen_unix)
+            .context("negative active alert timestamp in state db")?,
+        metadata: serde_json::from_str(&metadata_json)
+            .context("failed decoding active alert metadata")?,
+    })
+}
+
+fn alert_transition_from_row(row: sqlx::sqlite::SqliteRow) -> Result<AlertTransition> {
+    let ts_unix: i64 = row.try_get("ts_unix")?;
+    let metadata_json: String = row.try_get("metadata_json")?;
+    Ok(AlertTransition {
+        transition_id: row.try_get("transition_id")?,
+        ts_unix: u64::try_from(ts_unix).context("negative alert timestamp in state db")?,
+        alert_id: row.try_get("alert_id")?,
+        kind: row.try_get("kind")?,
+        agent_id: row.try_get("agent_id")?,
+        from_status: row.try_get("from_status")?,
+        to_status: row.try_get("to_status")?,
+        message: row.try_get("message")?,
+        metadata: serde_json::from_str(&metadata_json)
+            .context("failed decoding alert transition metadata")?,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::time::Duration;
+
+    use crate::state::{DeviceIdentifierInput, KnownDeviceInput};
 
     use super::Store;
 
@@ -1191,6 +1550,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn known_device_can_hold_multiple_manual_mac_identifiers() {
+        let (store, dir) = make_store().await;
+
+        let created = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "lda".into(),
+                pinned: true,
+                notes: Some("windows pc".into()),
+                identifiers: vec![DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "AA:BB:CC:DD:EE:01".into(),
+                }],
+            })
+            .await
+            .expect("known device should create");
+
+        assert_eq!(created.display_name, "lda");
+        assert!(created.pinned);
+        assert_eq!(created.identifiers.len(), 1);
+        assert_eq!(created.identifiers[0].value, "aa:bb:cc:dd:ee:01");
+
+        let updated = store
+            .attach_device_identifier(
+                &created.device_id,
+                DeviceIdentifierInput {
+                    kind: "MAC".into(),
+                    value: "AA:BB:CC:DD:EE:02".into(),
+                },
+            )
+            .await
+            .expect("identifier attach should succeed")
+            .expect("device should exist");
+
+        assert_eq!(updated.identifiers.len(), 2);
+        assert!(
+            updated
+                .identifiers
+                .iter()
+                .any(|identifier| identifier.value == "aa:bb:cc:dd:ee:02")
+        );
+
+        let matched = store
+            .lookup_known_device_by_identifier(DeviceIdentifierInput {
+                kind: "mac".into(),
+                value: "aa:bb:cc:dd:ee:02".into(),
+            })
+            .await
+            .expect("lookup should succeed")
+            .expect("identifier should match");
+        assert_eq!(matched.device_id, created.device_id);
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn known_device_identifier_is_unique_across_devices() {
+        let (store, dir) = make_store().await;
+        let first = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "lda".into(),
+                pinned: true,
+                notes: None,
+                identifiers: vec![DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "aa:bb:cc:dd:ee:ff".into(),
+                }],
+            })
+            .await
+            .expect("first device should create");
+        let second = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "other".into(),
+                pinned: false,
+                notes: None,
+                identifiers: Vec::new(),
+            })
+            .await
+            .expect("second device should create");
+
+        let err = store
+            .attach_device_identifier(
+                &second.device_id,
+                DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "aa:bb:cc:dd:ee:ff".into(),
+                },
+            )
+            .await
+            .expect_err("duplicate identifier should be rejected");
+        assert!(
+            err.to_string()
+                .contains("failed attaching device identifier")
+        );
+
+        let listed = store.list_known_devices().await.expect("list should work");
+        assert_eq!(listed.len(), 2);
+        assert!(
+            listed
+                .iter()
+                .find(|device| device.device_id == first.device_id)
+                .expect("first should remain")
+                .identifiers
+                .len()
+                == 1
+        );
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
     async fn audit_events_append_and_filter() {
         let (store, dir) = make_store().await;
 
@@ -1245,6 +1714,17 @@ mod tests {
             .expect("filtered list should succeed");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].request_id.as_deref(), Some("req-1"));
+
+        let rejected = store
+            .list_audit_events(crate::state::AuditEventFilter {
+                outcome: Some("rejected".into()),
+                limit: 10,
+                ..Default::default()
+            })
+            .await
+            .expect("rejected list should succeed");
+        assert_eq!(rejected.len(), 1);
+        assert_eq!(rejected[0].latency_ms, None);
         cleanup_dir(&dir);
     }
 

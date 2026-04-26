@@ -31,6 +31,40 @@ pub struct StateStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnownDevice {
+    pub device_id: String,
+    pub display_name: String,
+    pub pinned: bool,
+    pub created_at_unix: u64,
+    pub updated_at_unix: u64,
+    pub notes: Option<String>,
+    pub identifiers: Vec<DeviceIdentifier>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceIdentifier {
+    pub identifier_key: String,
+    pub device_id: String,
+    pub kind: String,
+    pub value: String,
+    pub created_at_unix: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct KnownDeviceInput {
+    pub display_name: String,
+    pub pinned: bool,
+    pub notes: Option<String>,
+    pub identifiers: Vec<DeviceIdentifierInput>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeviceIdentifierInput {
+    pub kind: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEvent {
     pub event_id: String,
     pub ts_unix: u64,

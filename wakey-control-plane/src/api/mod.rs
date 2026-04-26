@@ -11,7 +11,8 @@ pub use audit::list_audit_events;
 pub use commands::{list_agents, run_command};
 pub use control::{
     EnrollTokenStatus, IssueEnrollTokenResponse, RevokeAgentResponse, RevokeEnrollTokenResponse,
-    StateStatsResponse, enroll, healthz, issue_enroll_token, list_enroll_tokens, revoke_agent,
+    StateStatsResponse, attach_device_identifier, create_known_device, enroll, forget_known_device,
+    healthz, issue_enroll_token, list_enroll_tokens, list_known_devices, revoke_agent,
     revoke_enroll_token, set_agent_nickname, state_stats,
 };
 

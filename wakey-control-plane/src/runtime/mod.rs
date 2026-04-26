@@ -89,6 +89,18 @@ fn control_api_routes() -> Router<AppState> {
             axum::routing::delete(api::revoke_enroll_token),
         )
         .route("/api/v1/control/state-stats", get(api::state_stats))
+        .route(
+            "/api/v1/control/devices",
+            get(api::list_known_devices).post(api::create_known_device),
+        )
+        .route(
+            "/api/v1/control/devices/{device_id}",
+            axum::routing::delete(api::forget_known_device),
+        )
+        .route(
+            "/api/v1/control/devices/{device_id}/identifiers",
+            post(api::attach_device_identifier),
+        )
         .route("/api/v1/control/audit/events", get(api::list_audit_events))
         .route("/api/v1/control/alerts", get(api::active_alerts))
         .route("/api/v1/control/alerts/history", get(api::alert_history))
