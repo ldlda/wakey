@@ -77,6 +77,27 @@ pub struct AgentDeviceObservation {
     pub last_action: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDeviceObservationView {
+    pub observation_key: String,
+    pub agent_id: String,
+    pub kind: String,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+    pub hostname: Option<String>,
+    pub first_seen_unix: u64,
+    pub last_seen_unix: u64,
+    pub last_action: String,
+    pub known_device: Option<KnownDeviceSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnownDeviceSummary {
+    pub device_id: String,
+    pub display_name: String,
+    pub pinned: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentDeviceObservationInput {
     pub kind: String,

@@ -8,8 +8,8 @@ use tracing::{info, warn};
 use crate::api::json_error;
 use crate::runtime::{AppState, SessionEvent};
 use crate::state::{
-    AgentDeviceObservation, AgentDeviceObservationInput, AuditEventInput, DeviceIdentifierInput,
-    KnownDeviceInput,
+    AgentDeviceObservationInput, AgentDeviceObservationView, AuditEventInput,
+    DeviceIdentifierInput, KnownDeviceInput,
 };
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +89,11 @@ pub struct CreateKnownDeviceRequest {
 pub struct DeviceIdentifierRequest {
     pub kind: String,
     pub value: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AttachObservationIdentifierRequest {
+    pub observation_key: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -592,6 +597,33 @@ pub async fn attach_device_identifier(
     }
 }
 
+pub async fn attach_observation_identifier(
+    State(state): State<AppState>,
+    AxumPath(device_id): AxumPath<String>,
+    Json(req): Json<AttachObservationIdentifierRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    match state
+        .store
+        .attach_observation_identifier(&device_id, &req.observation_key)
+        .await
+    {
+        Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
+        Ok(None) => Err(json_error(
+            StatusCode::NOT_FOUND,
+            "known_device_not_found",
+            "known device not found",
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to attach observation identifier");
+            Err(json_error(
+                StatusCode::BAD_REQUEST,
+                "attach_observation_identifier_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
 pub async fn upload_agent_observations(
     State(state): State<AppState>,
     Json(req): Json<UploadAgentObservationsRequest>,
@@ -648,7 +680,7 @@ pub async fn list_agent_observations(
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
     match state
         .store
-        .list_agent_observations(query.agent_id.as_deref(), query.limit.unwrap_or(500))
+        .list_agent_observation_views(query.agent_id.as_deref(), query.limit.unwrap_or(500))
         .await
     {
         Ok(observations) => Ok((
@@ -696,7 +728,9 @@ pub async fn state_stats(
     }
 }
 
-fn agent_observation_response(observation: AgentDeviceObservation) -> AgentDeviceObservation {
+fn agent_observation_response(
+    observation: AgentDeviceObservationView,
+) -> AgentDeviceObservationView {
     observation
 }
 

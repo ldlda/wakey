@@ -109,6 +109,10 @@ fn control_api_routes() -> Router<AppState> {
             "/api/v1/control/devices/{device_id}/identifiers",
             post(api::attach_device_identifier),
         )
+        .route(
+            "/api/v1/control/devices/{device_id}/identifiers/from-observation",
+            post(api::attach_observation_identifier),
+        )
         .route("/api/v1/control/audit/events", get(api::list_audit_events))
         .route("/api/v1/control/alerts", get(api::active_alerts))
         .route("/api/v1/control/alerts/history", get(api::alert_history))

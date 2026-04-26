@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT mac, ip\n             FROM agent_device_observations\n             WHERE observation_key = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "mac",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "ip",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "2a15f44a37465451a1b7a0f02d64af5278c6803879241d65520a89e45cb05d47"
+}

@@ -8,9 +8,10 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::state::types::{
-    AgentDeviceObservation, AgentDeviceObservationInput, AlertState, AlertTransition, AuditEvent,
-    AuditEventFilter, AuditEventInput, DeviceIdentifier, DeviceIdentifierInput, EnrollTokenInfo,
-    IssuedAgent, IssuedEnrollToken, KnownDevice, KnownDeviceInput, StateStats,
+    AgentDeviceObservation, AgentDeviceObservationInput, AgentDeviceObservationView, AlertState,
+    AlertTransition, AuditEvent, AuditEventFilter, AuditEventInput, DeviceIdentifier,
+    DeviceIdentifierInput, EnrollTokenInfo, IssuedAgent, IssuedEnrollToken, KnownDevice,
+    KnownDeviceInput, KnownDeviceSummary, StateStats,
 };
 
 pub struct Store {
@@ -531,6 +532,42 @@ impl Store {
         self.get_known_device(device_id).await
     }
 
+    pub async fn attach_observation_identifier(
+        &self,
+        device_id: &str,
+        observation_key: &str,
+    ) -> Result<Option<KnownDevice>> {
+        let observation = sqlx::query_as!(
+            ObservationIdentifierRow,
+            r#"SELECT mac, ip
+             FROM agent_device_observations
+             WHERE observation_key = ?1"#,
+            observation_key
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed reading observation identifier")?;
+
+        let Some(observation) = observation else {
+            anyhow::bail!("observation not found");
+        };
+        let input = observation
+            .mac
+            .map(|value| DeviceIdentifierInput {
+                kind: "mac".into(),
+                value,
+            })
+            .or_else(|| {
+                observation.ip.map(|value| DeviceIdentifierInput {
+                    kind: "ip".into(),
+                    value,
+                })
+            })
+            .ok_or_else(|| anyhow::anyhow!("observation has no attachable mac or ip"))?;
+
+        self.attach_device_identifier(device_id, input).await
+    }
+
     #[allow(unused)] // we'll get to this
     pub async fn lookup_known_device_by_identifier(
         &self,
@@ -618,6 +655,7 @@ impl Store {
         Ok(written)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn list_agent_observations(
         &self,
         agent_id: Option<&str>,
@@ -656,6 +694,80 @@ impl Store {
         }
         .context("failed listing agent observations")?;
         rows.into_iter().map(agent_observation_from_row).collect()
+    }
+
+    pub async fn list_agent_observation_views(
+        &self,
+        agent_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<AgentDeviceObservationView>> {
+        let limit = limit.clamp(1, 1000);
+        let limit = i64::try_from(limit).context("observation limit overflow")?;
+        let rows = if let Some(agent_id) = agent_id {
+            sqlx::query_as!(
+                AgentObservationViewRow,
+                r#"SELECT observations.observation_key as "observation_key!",
+                        observations.agent_id as "agent_id!",
+                        observations.kind as "kind!",
+                        observations.mac,
+                        observations.ip,
+                        observations.hostname,
+                        observations.first_seen_unix,
+                        observations.last_seen_unix,
+                        observations.last_action as "last_action!",
+                        known_devices.device_id,
+                        known_devices.display_name,
+                        known_devices.pinned
+                 FROM agent_device_observations observations
+                 LEFT JOIN device_identifiers identifiers
+                   ON identifiers.identifier_key =
+                      CASE
+                        WHEN observations.mac IS NOT NULL THEN 'mac:' || observations.mac
+                        WHEN observations.ip IS NOT NULL THEN 'ip:' || observations.ip
+                      END
+                 LEFT JOIN known_devices ON known_devices.device_id = identifiers.device_id
+                 WHERE observations.agent_id = ?1
+                 ORDER BY observations.last_seen_unix DESC
+                 LIMIT ?2"#,
+                agent_id,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as!(
+                AgentObservationViewRow,
+                r#"SELECT observations.observation_key as "observation_key!",
+                        observations.agent_id as "agent_id!",
+                        observations.kind as "kind!",
+                        observations.mac,
+                        observations.ip,
+                        observations.hostname,
+                        observations.first_seen_unix,
+                        observations.last_seen_unix,
+                        observations.last_action as "last_action!",
+                        known_devices.device_id,
+                        known_devices.display_name,
+                        known_devices.pinned
+                 FROM agent_device_observations observations
+                 LEFT JOIN device_identifiers identifiers
+                   ON identifiers.identifier_key =
+                      CASE
+                        WHEN observations.mac IS NOT NULL THEN 'mac:' || observations.mac
+                        WHEN observations.ip IS NOT NULL THEN 'ip:' || observations.ip
+                      END
+                 LEFT JOIN known_devices ON known_devices.device_id = identifiers.device_id
+                 ORDER BY observations.last_seen_unix DESC
+                 LIMIT ?1"#,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await
+        }
+        .context("failed listing agent observation views")?;
+        rows.into_iter()
+            .map(agent_observation_view_from_row)
+            .collect()
     }
 
     pub async fn append_audit_event(&self, input: AuditEventInput) -> Result<AuditEvent> {
@@ -1056,6 +1168,7 @@ struct DeviceIdentifierRow {
     created_at_unix: i64,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 struct AgentObservationRow {
     observation_key: String,
     agent_id: String,
@@ -1066,6 +1179,26 @@ struct AgentObservationRow {
     first_seen_unix: i64,
     last_seen_unix: i64,
     last_action: String,
+}
+
+struct AgentObservationViewRow {
+    observation_key: String,
+    agent_id: String,
+    kind: String,
+    mac: Option<String>,
+    ip: Option<String>,
+    hostname: Option<String>,
+    first_seen_unix: i64,
+    last_seen_unix: i64,
+    last_action: String,
+    device_id: Option<String>,
+    display_name: Option<String>,
+    pinned: Option<i64>,
+}
+
+struct ObservationIdentifierRow {
+    mac: Option<String>,
+    ip: Option<String>,
 }
 
 struct AlertStateRow {
@@ -1238,6 +1371,7 @@ fn device_identifier_from_row(row: DeviceIdentifierRow) -> Result<DeviceIdentifi
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn agent_observation_from_row(row: AgentObservationRow) -> Result<AgentDeviceObservation> {
     Ok(AgentDeviceObservation {
         observation_key: row.observation_key,
@@ -1251,6 +1385,33 @@ fn agent_observation_from_row(row: AgentObservationRow) -> Result<AgentDeviceObs
         last_seen_unix: u64::try_from(row.last_seen_unix)
             .context("negative observation last_seen timestamp in state db")?,
         last_action: row.last_action,
+    })
+}
+
+fn agent_observation_view_from_row(
+    row: AgentObservationViewRow,
+) -> Result<AgentDeviceObservationView> {
+    let known_device = match (row.device_id, row.display_name, row.pinned) {
+        (Some(device_id), Some(display_name), Some(pinned)) => Some(KnownDeviceSummary {
+            device_id,
+            display_name,
+            pinned: pinned != 0,
+        }),
+        _ => None,
+    };
+    Ok(AgentDeviceObservationView {
+        observation_key: row.observation_key,
+        agent_id: row.agent_id,
+        kind: row.kind,
+        mac: row.mac,
+        ip: row.ip,
+        hostname: row.hostname,
+        first_seen_unix: u64::try_from(row.first_seen_unix)
+            .context("negative observation first_seen timestamp in state db")?,
+        last_seen_unix: u64::try_from(row.last_seen_unix)
+            .context("negative observation last_seen timestamp in state db")?,
+        last_action: row.last_action,
+        known_device,
     })
 }
 
@@ -1915,6 +2076,139 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
         assert_eq!(rows[0].hostname.as_deref(), Some("lda"));
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn agent_observation_views_include_matching_known_device() {
+        let (store, dir) = make_store().await;
+
+        let device = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "lda".into(),
+                pinned: true,
+                notes: None,
+                identifiers: vec![DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "aa:bb:cc:dd:ee:ff".into(),
+                }],
+            })
+            .await
+            .expect("known device should create");
+
+        store
+            .upsert_agent_observations(
+                "agent-a",
+                vec![
+                    crate::state::AgentDeviceObservationInput {
+                        kind: "dhcp".into(),
+                        action: "update".into(),
+                        mac: Some("AA:BB:CC:DD:EE:FF".into()),
+                        ip: Some("192.168.1.10".into()),
+                        hostname: Some("lda".into()),
+                        first_seen_unix: 10,
+                        last_seen_unix: 20,
+                    },
+                    crate::state::AgentDeviceObservationInput {
+                        kind: "dhcp".into(),
+                        action: "update".into(),
+                        mac: Some("00:11:22:33:44:55".into()),
+                        ip: Some("192.168.1.11".into()),
+                        hostname: Some("guest".into()),
+                        first_seen_unix: 11,
+                        last_seen_unix: 21,
+                    },
+                ],
+            )
+            .await
+            .expect("observation upsert should succeed");
+
+        let rows = store
+            .list_agent_observation_views(Some("agent-a"), 10)
+            .await
+            .expect("observation views should list");
+        assert_eq!(rows.len(), 2);
+
+        let known = rows
+            .iter()
+            .find(|row| row.mac.as_deref() == Some("aa:bb:cc:dd:ee:ff"))
+            .expect("known observation should be present");
+        let known_device = known
+            .known_device
+            .as_ref()
+            .expect("known observation should join device");
+        assert_eq!(known_device.device_id, device.device_id);
+        assert_eq!(known_device.display_name, "lda");
+        assert!(known_device.pinned);
+
+        let unknown = rows
+            .iter()
+            .find(|row| row.mac.as_deref() == Some("00:11:22:33:44:55"))
+            .expect("unknown observation should be present");
+        assert!(unknown.known_device.is_none());
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn observation_identifier_can_be_attached_to_known_device() {
+        let (store, dir) = make_store().await;
+
+        let device = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "lda".into(),
+                pinned: true,
+                notes: None,
+                identifiers: Vec::new(),
+            })
+            .await
+            .expect("known device should create");
+
+        store
+            .upsert_agent_observations(
+                "agent-a",
+                vec![crate::state::AgentDeviceObservationInput {
+                    kind: "dhcp".into(),
+                    action: "update".into(),
+                    mac: Some("AA:BB:CC:DD:EE:FF".into()),
+                    ip: Some("192.168.1.10".into()),
+                    hostname: Some("lda".into()),
+                    first_seen_unix: 10,
+                    last_seen_unix: 20,
+                }],
+            )
+            .await
+            .expect("observation upsert should succeed");
+
+        let observation = store
+            .list_agent_observations(Some("agent-a"), 10)
+            .await
+            .expect("observations should list")
+            .pop()
+            .expect("observation should exist");
+
+        let updated = store
+            .attach_observation_identifier(&device.device_id, &observation.observation_key)
+            .await
+            .expect("observation identifier should attach")
+            .expect("device should exist");
+
+        assert_eq!(updated.identifiers.len(), 1);
+        assert_eq!(updated.identifiers[0].kind, "mac");
+        assert_eq!(updated.identifiers[0].value, "aa:bb:cc:dd:ee:ff");
+
+        let views = store
+            .list_agent_observation_views(Some("agent-a"), 10)
+            .await
+            .expect("observation views should list");
+        assert_eq!(
+            views[0]
+                .known_device
+                .as_ref()
+                .map(|device| device.device_id.as_str()),
+            Some(device.device_id.as_str())
+        );
 
         cleanup_dir(&dir);
     }
