@@ -33,6 +33,8 @@ pub enum Command {
     Wake(WakeArgs),
     /// Show condensed network interface summaries.
     Devs(DevsArgs),
+    /// Record local hotplug observations.
+    Observe(ObserveArgs),
 }
 
 #[derive(Args)]
@@ -114,6 +116,42 @@ pub struct DevsArgs {
     /// Print machine-readable JSON instead of a table.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Args)]
+pub struct ObserveArgs {
+    #[command(subcommand)]
+    pub command: ObserveCommand,
+}
+
+#[derive(Subcommand)]
+pub enum ObserveCommand {
+    /// Observe a dnsmasq DHCP lease event.
+    Dhcp(ObserveDhcpArgs),
+    /// Observe a neighbor-table event.
+    Neigh(ObserveNeighArgs),
+}
+
+#[derive(Args)]
+pub struct ObserveDhcpArgs {
+    #[arg(long)]
+    pub action: String,
+    #[arg(long)]
+    pub mac: macaddr::MacAddr,
+    #[arg(long)]
+    pub ip: Option<IpAddr>,
+    #[arg(long)]
+    pub hostname: Option<String>,
+}
+
+#[derive(Args)]
+pub struct ObserveNeighArgs {
+    #[arg(long)]
+    pub action: String,
+    #[arg(long)]
+    pub mac: Option<macaddr::MacAddr>,
+    #[arg(long)]
+    pub ip: Option<IpAddr>,
 }
 
 pub fn init_tracing(verbose: u8) {
@@ -206,6 +244,23 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", table::render_devs_table(&devs));
             }
         }
+        Command::Observe(args) => match args.command {
+            ObserveCommand::Dhcp(args) => {
+                let changed = wakey::observe_dhcp_event(
+                    &args.action,
+                    args.mac,
+                    args.ip,
+                    args.hostname.as_deref(),
+                )
+                .await?;
+                println!("observed=dhcp changed={changed}");
+            }
+            ObserveCommand::Neigh(args) => {
+                let changed =
+                    wakey::observe_neighbor_event(&args.action, args.mac, args.ip).await?;
+                println!("observed=neigh changed={changed}");
+            }
+        },
     }
 
     Ok(())

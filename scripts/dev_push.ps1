@@ -68,8 +68,12 @@ try {
     $initDestTmp = "$User@${HostName}:$initTmp"
     $localDeploy = Join-Path $repoRoot 'scripts/remote_deploy_wakey.sh'
     $localInit = Join-Path $repoRoot 'scripts/init/openwrt/wakey'
+    $localDhcpHotplug = Join-Path $repoRoot 'scripts/hotplug/openwrt/dhcp/95-wakey'
+    $localNeighHotplug = Join-Path $repoRoot 'scripts/hotplug/openwrt/neigh/95-wakey'
     $deployTmp = '/var/tmp/remote_deploy_wakey.sh'
     $deployPreferred = '/root/.bin/remote_deploy_wakey.sh'
+    $dhcpHotplugTmp = '/var/tmp/wakey.hotplug.dhcp.tmp'
+    $neighHotplugTmp = '/var/tmp/wakey.hotplug.neigh.tmp'
 
     # Push binaries
     Invoke-Scp -Local $localBin -Dest $destTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
@@ -78,6 +82,12 @@ try {
     # Push OpenWrt init script unless explicitly skipped
     if (-not $SkipInitScript -and (Test-Path $localInit)) {
         Invoke-Scp -Local $localInit -Dest $initDestTmp -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
+    }
+    if (Test-Path $localDhcpHotplug) {
+        Invoke-Scp -Local $localDhcpHotplug -Dest "$User@${HostName}:$dhcpHotplugTmp" -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
+    }
+    if (Test-Path $localNeighHotplug) {
+        Invoke-Scp -Local $localNeighHotplug -Dest "$User@${HostName}:$neighHotplugTmp" -Pass $Pass -HostKey $HostKey -Port $Port -Quiet:$Quiet -ForcePassword:$ForcePassword
     }
 
     # Push deploy helper if exists
@@ -103,6 +113,16 @@ if [ -f $initTmp ]; then
 fi
 "@
 })
+if [ -f $dhcpHotplugTmp ]; then
+    sed -i "s/\r$//" $dhcpHotplugTmp 2>/dev/null || true
+    mkdir -p /etc/hotplug.d/dhcp
+    cp -f $dhcpHotplugTmp /etc/hotplug.d/dhcp/95-wakey
+fi
+if [ -f $neighHotplugTmp ]; then
+    sed -i "s/\r$//" $neighHotplugTmp 2>/dev/null || true
+    mkdir -p /etc/hotplug.d/neigh
+    cp -f $neighHotplugTmp /etc/hotplug.d/neigh/95-wakey
+fi
 "@
     $remoteCmd = "sh -lc '$($script -replace "`r",'')'"
     if ($Quiet) { $remoteCmd += " >/dev/null 2>&1" }

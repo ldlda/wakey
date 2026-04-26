@@ -1,6 +1,7 @@
 use std::io::{self, ErrorKind};
 use std::net::IpAddr;
 
+use macaddr::MacAddr;
 use wakey_core::{DhcpLease, DhcpLeaseWithState};
 
 const MAC_NAME_CACHE: &str = "/tmp/wakey_mac_names.json";
@@ -19,6 +20,45 @@ async fn save_mac_name_cache(map: &std::collections::BTreeMap<String, String>) -
     let s = serde_json::to_string(map).map_err(io::Error::other)?;
     let _ = tokio::fs::write(MAC_NAME_CACHE, s).await;
     Ok(())
+}
+
+/// Observe a DHCP hotplug event and update the local MAC-to-name cache.
+pub async fn observe_dhcp_event(
+    action: &str,
+    mac: MacAddr,
+    _ip: Option<IpAddr>,
+    hostname: Option<&str>,
+) -> io::Result<bool> {
+    if !matches!(action, "add" | "update" | "old") {
+        return Ok(false);
+    }
+
+    let Some(hostname) = hostname
+        .map(str::trim)
+        .filter(|v| !v.is_empty() && *v != "*")
+    else {
+        return Ok(false);
+    };
+
+    let mut cache = load_mac_name_cache().await.unwrap_or_default();
+    let mac_s = mac.to_string();
+    if cache.get(&mac_s).map(|v| v == hostname).unwrap_or(false) {
+        return Ok(false);
+    }
+
+    cache.insert(mac_s, hostname.to_string());
+    save_mac_name_cache(&cache).await?;
+    Ok(true)
+}
+
+/// Observe a neighbor hotplug event. This is currently a no-op placeholder for
+/// keeping DHCP and neighbor hook commands symmetrical.
+pub async fn observe_neighbor_event(
+    _action: &str,
+    _mac: Option<MacAddr>,
+    _ip: Option<IpAddr>,
+) -> io::Result<bool> {
+    Ok(false)
 }
 
 /// Parse one `dnsmasq`-style DHCP lease line.

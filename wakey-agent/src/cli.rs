@@ -28,6 +28,8 @@ pub enum Command {
     InitConfig(InitConfigArgs),
     /// Reload a running agent daemon by sending SIGHUP.
     Reload(ReloadArgs),
+    /// Pass local hotplug observations through to the wakey CLI.
+    Observe(ObserveArgs),
 }
 
 #[derive(Args)]
@@ -100,4 +102,40 @@ pub struct ReloadArgs {
     /// Path to pid file for reload signaling.
     #[arg(long, default_value = DEFAULT_PID_FILE)]
     pub pid_file: PathBuf,
+}
+
+#[derive(Args)]
+pub struct ObserveArgs {
+    #[command(subcommand)]
+    pub command: ObserveCommand,
+}
+
+#[derive(Subcommand)]
+pub enum ObserveCommand {
+    /// Observe a dnsmasq DHCP lease event.
+    Dhcp(ObserveDhcpArgs),
+    /// Observe a neighbor-table event.
+    Neigh(ObserveNeighArgs),
+}
+
+#[derive(Args)]
+pub struct ObserveDhcpArgs {
+    #[arg(long)]
+    pub action: String,
+    #[arg(long)]
+    pub mac: String,
+    #[arg(long)]
+    pub ip: Option<String>,
+    #[arg(long)]
+    pub hostname: Option<String>,
+}
+
+#[derive(Args)]
+pub struct ObserveNeighArgs {
+    #[arg(long)]
+    pub action: String,
+    #[arg(long)]
+    pub mac: Option<String>,
+    #[arg(long)]
+    pub ip: Option<String>,
 }

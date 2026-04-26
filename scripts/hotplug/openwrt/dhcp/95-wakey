@@ -1,0 +1,17 @@
+#!/bin/sh
+
+BIN="/root/.bin/wakey-agent"
+[ -x "$BIN" ] || BIN="$(command -v wakey-agent 2>/dev/null)"
+[ -n "$BIN" ] || exit 0
+[ -n "$ACTION" ] || exit 0
+[ -n "$MACADDR" ] || exit 0
+
+if [ -n "$IPADDR" ] && [ -n "$HOSTNAME" ]; then
+    "$BIN" observe dhcp --action "$ACTION" --mac "$MACADDR" --ip "$IPADDR" --hostname "$HOSTNAME" >/dev/null 2>&1 || true
+elif [ -n "$IPADDR" ]; then
+    "$BIN" observe dhcp --action "$ACTION" --mac "$MACADDR" --ip "$IPADDR" >/dev/null 2>&1 || true
+elif [ -n "$HOSTNAME" ]; then
+    "$BIN" observe dhcp --action "$ACTION" --mac "$MACADDR" --hostname "$HOSTNAME" >/dev/null 2>&1 || true
+else
+    "$BIN" observe dhcp --action "$ACTION" --mac "$MACADDR" >/dev/null 2>&1 || true
+fi

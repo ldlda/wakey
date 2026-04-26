@@ -9,6 +9,7 @@ pub use service::{
     inventory, leases_without_state, merge_devices, resolve_devices, resolve_query,
     resolve_selector, resolve_wake_targets, wake_explicit, wake_from_query, wake_targets,
 };
+pub use wakey_linux::dhcp::{observe_dhcp_event, observe_neighbor_event};
 
 #[cfg(test)]
 mod tests {

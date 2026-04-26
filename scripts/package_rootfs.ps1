@@ -71,6 +71,21 @@ Get-ChildItem (Join-Path $root 'scripts/init/openwrt') -File | ForEach-Object {
     Set-Content -NoNewline -LiteralPath $dest -Value $content -Encoding UTF8
 }
 
+# Copy OpenWrt hotplug hooks.
+$hotplugSrc = Join-Path $root 'scripts/hotplug/openwrt'
+if (Test-Path $hotplugSrc) {
+    Get-ChildItem $hotplugSrc -Directory | ForEach-Object {
+        $hotplugTypeDir = Join-Path $staging ("etc/hotplug.d/" + $_.Name)
+        New-Item -ItemType Directory -Force -Path $hotplugTypeDir | Out-Null
+        Get-ChildItem $_.FullName -File | ForEach-Object {
+            $dest = Join-Path $hotplugTypeDir $_.Name
+            $content = Get-Content -Raw -LiteralPath $_.FullName
+            $content = $content -replace "`r`n", "`n"
+            Set-Content -NoNewline -LiteralPath $dest -Value $content -Encoding UTF8
+        }
+    }
+}
+
 # Copy helper scripts intended for /etc/ldlda_help
 $helpSrc = Join-Path $root 'scripts/ldlda_help'
 if (Test-Path $helpSrc) {

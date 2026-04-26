@@ -9,7 +9,7 @@ mod tracing;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Command, InitConfigArgs};
+use cli::{Cli, Command, InitConfigArgs, ObserveCommand};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -86,9 +86,64 @@ async fn main() -> Result<()> {
             ::tracing::info!(pid_file = %args.pid_file.display(), "wakey-agent command: reload");
             serve::reload_daemon(&args.pid_file)?
         }
+        Command::Observe(args) => observe(args)?,
     }
 
     Ok(())
+}
+
+fn observe(args: cli::ObserveArgs) -> Result<()> {
+    let mut cmd = std::process::Command::new(resolve_wakey_binary());
+    cmd.arg("observe");
+
+    match args.command {
+        ObserveCommand::Dhcp(args) => {
+            cmd.arg("dhcp")
+                .arg("--action")
+                .arg(args.action)
+                .arg("--mac")
+                .arg(args.mac);
+            if let Some(ip) = args.ip {
+                cmd.arg("--ip").arg(ip);
+            }
+            if let Some(hostname) = args.hostname {
+                cmd.arg("--hostname").arg(hostname);
+            }
+        }
+        ObserveCommand::Neigh(args) => {
+            cmd.arg("neigh").arg("--action").arg(args.action);
+            if let Some(mac) = args.mac {
+                cmd.arg("--mac").arg(mac);
+            }
+            if let Some(ip) = args.ip {
+                cmd.arg("--ip").arg(ip);
+            }
+        }
+    }
+
+    let status = cmd.status()?;
+    if !status.success() {
+        anyhow::bail!("wakey observe exited with {status}");
+    }
+    Ok(())
+}
+
+fn resolve_wakey_binary() -> std::path::PathBuf {
+    if let Ok(current) = std::env::current_exe()
+        && let Some(dir) = current.parent()
+    {
+        let sibling = dir.join("wakey");
+        if sibling.exists() {
+            return sibling;
+        }
+    }
+
+    let root_bin = std::path::PathBuf::from("/root/.bin/wakey");
+    if root_bin.exists() {
+        return root_bin;
+    }
+
+    "wakey".into()
 }
 
 fn init_config(args: InitConfigArgs) -> Result<()> {
