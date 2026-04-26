@@ -14,6 +14,10 @@ pub struct Cli {
     #[arg(short = 'v', long = "verbose", action = ArgAction::Count, global = true)]
     pub verbose: u8,
 
+    /// Path to the agent config file for commands that use agent config.
+    #[arg(long, global = true)]
+    pub config: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -28,6 +32,9 @@ pub enum Command {
     InitConfig(InitConfigArgs),
     /// Reload a running agent daemon by sending SIGHUP.
     Reload(ReloadArgs),
+    /// Upload local observations to the control plane once and exit.
+    #[command(visible_alias = "sync")]
+    SyncObservations(SyncObservationsArgs),
     /// Pass local hotplug observations through to the wakey CLI.
     Observe(ObserveArgs),
 }
@@ -76,6 +83,10 @@ pub struct InitConfigArgs {
     #[arg(long)]
     pub config: Option<PathBuf>,
 
+    /// Existing agent config to use as a base before applying explicit overrides.
+    #[arg(long)]
+    pub from_config: Option<PathBuf>,
+
     /// Print config to stdout.
     #[arg(long, conflicts_with = "config")]
     pub stdout: bool,
@@ -105,9 +116,16 @@ pub struct ReloadArgs {
 }
 
 #[derive(Args)]
+pub struct SyncObservationsArgs {
+    /// Path to the agent config file.
+    #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
+    pub config: PathBuf,
+}
+
+#[derive(Args)]
 pub struct ObserveArgs {
     /// Path to the agent config file. If present, local path settings are passed through.
-    #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
+    #[arg(long, global = true, default_value = config::DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
 
     #[command(subcommand)]

@@ -15,13 +15,20 @@ use cli::{Cli, Command, InitConfigArgs, ObserveCommand};
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     tracing::init(cli.verbose);
+    let global_config = cli.config.as_deref();
 
     match cli.command {
-        Command::Serve(args) => {
+        Command::Serve(mut args) => {
+            if let Some(config) = global_config {
+                args.config = config.to_path_buf();
+            }
             ::tracing::info!("wakey-agent command: serve");
             serve::serve(args).await?
         }
-        Command::Enroll(args) => {
+        Command::Enroll(mut args) => {
+            if let Some(config) = global_config {
+                args.config = config.to_path_buf();
+            }
             let resolved_server_url = if let Some(server_url) = args.server_url.as_deref() {
                 server_url.to_string()
             } else {
@@ -81,12 +88,34 @@ async fn main() -> Result<()> {
                 );
             }
         }
-        Command::InitConfig(args) => init_config(args)?,
+        Command::InitConfig(mut args) => {
+            if let Some(config) = global_config
+                && args.config.is_none()
+                && !args.stdout
+            {
+                args.config = Some(config.to_path_buf());
+            }
+            init_config(args)?
+        }
         Command::Reload(args) => {
             ::tracing::info!(pid_file = %args.pid_file.display(), "wakey-agent command: reload");
             serve::reload_daemon(&args.pid_file)?
         }
-        Command::Observe(args) => observe(args)?,
+        Command::SyncObservations(mut args) => {
+            if let Some(config) = global_config {
+                args.config = config.to_path_buf();
+            }
+            ::tracing::info!(config = %args.config.display(), "wakey-agent command: sync-observations");
+            let cfg = config::load_config(&args.config)?;
+            let accepted = session::sync_observations_once(&cfg).await?;
+            println!("observations_synced={accepted}");
+        }
+        Command::Observe(mut args) => {
+            if let Some(config) = global_config {
+                args.config = config.to_path_buf();
+            }
+            observe(args)?
+        }
     }
 
     Ok(())
@@ -164,23 +193,31 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
         );
     }
 
-    let cfg = config::AgentConfig {
-        server_url: args
-            .server_url
-            .unwrap_or_else(|| "https://wakey.ldlda.com".to_string()),
-        agent_id: args
-            .agent_id
-            .unwrap_or_else(|| "REPLACE_ME_AGENT_ID".to_string()),
-        agent_token: args
-            .agent_token
-            .unwrap_or_else(|| "REPLACE_ME_AGENT_TOKEN".to_string()),
-        reconnect_base_ms: 1_000,
-        reconnect_max_ms: 30_000,
-        observation_sync_interval_seconds: 60,
-        dhcp_leases_path: "/tmp/dhcp.leases".into(),
-        mac_name_cache_path: "/tmp/wakey_mac_names.json".into(),
-        observation_store_path: "/tmp/wakey_observations.json".into(),
+    let mut cfg = if let Some(from_config) = &args.from_config {
+        config::load_config(from_config)?
+    } else {
+        config::AgentConfig {
+            server_url: "https://wakey.ldlda.com".to_string(),
+            agent_id: "REPLACE_ME_AGENT_ID".to_string(),
+            agent_token: "REPLACE_ME_AGENT_TOKEN".to_string(),
+            reconnect_base_ms: 1_000,
+            reconnect_max_ms: 30_000,
+            observation_sync_interval_seconds: 60,
+            dhcp_leases_path: "/tmp/dhcp.leases".into(),
+            mac_name_cache_path: "/tmp/wakey_mac_names.json".into(),
+            observation_store_path: "/tmp/wakey_observations.json".into(),
+        }
     };
+
+    if let Some(server_url) = args.server_url {
+        cfg.server_url = server_url;
+    }
+    if let Some(agent_id) = args.agent_id {
+        cfg.agent_id = agent_id;
+    }
+    if let Some(agent_token) = args.agent_token {
+        cfg.agent_token = agent_token;
+    }
 
     if let Some(path) = &args.config {
         config::save_config(path, &cfg)?;

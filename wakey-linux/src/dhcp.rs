@@ -167,6 +167,7 @@ pub async fn observe_dhcp_event(
     hostname: Option<&str>,
 ) -> io::Result<bool> {
     if !matches!(action, "add" | "update" | "old" | "remove") {
+        // old not emitted by hotplug
         return Ok(false);
     }
 
@@ -228,6 +229,7 @@ pub async fn observe_neighbor_event(
     ip: Option<IpAddr>,
 ) -> io::Result<bool> {
     if !matches!(action, "add" | "update" | "old" | "remove") {
+        // update and remove not emitted by hotplug
         return Ok(false);
     }
     let Some(key) = mac

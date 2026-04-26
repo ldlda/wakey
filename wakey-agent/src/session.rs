@@ -164,13 +164,18 @@ struct AgentObservationRequest {
     last_seen_unix: u64,
 }
 
-async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig) -> Result<()> {
+pub async fn sync_observations_once(config: &AgentConfig) -> Result<usize> {
+    let client = reqwest::Client::new();
+    send_agent_observations(&client, config).await
+}
+
+async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig) -> Result<usize> {
     let observations =
         wakey::wakey_linux::dhcp::list_local_observations_from_path(&config.observation_store_path)
             .await
             .context("failed to read local observations")?;
     if observations.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     let url = observations_url(&config.server_url)?;
@@ -210,7 +215,7 @@ async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig)
         observations = payload.observations.len(),
         "synced local observations"
     );
-    Ok(())
+    Ok(payload.observations.len())
 }
 
 pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
