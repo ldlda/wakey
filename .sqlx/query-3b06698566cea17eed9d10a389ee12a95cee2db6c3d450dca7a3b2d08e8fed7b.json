@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT mac, ip\n             FROM agent_device_observations\n             WHERE observation_key = ?1",
+  "query": "SELECT mac, ip\n         FROM agent_device_observations\n         WHERE observation_key = ?1",
   "describe": {
     "columns": [
       {
@@ -22,5 +22,5 @@
       true
     ]
   },
-  "hash": "2a15f44a37465451a1b7a0f02d64af5278c6803879241d65520a89e45cb05d47"
+  "hash": "3b06698566cea17eed9d10a389ee12a95cee2db6c3d450dca7a3b2d08e8fed7b"
 }

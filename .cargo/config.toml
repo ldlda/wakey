@@ -16,6 +16,10 @@ cw = "c --target=x86_64-pc-windows-msvc"
 bw = "b --target=x86_64-pc-windows-msvc"
 tw = "t --target=x86_64-pc-windows-msvc"
 
+check-all = "check --workspace --all-features --all-targets"
+clippy-all = "clippy --workspace --all-features --all-targets"
+fmt-all = "fmt --all"
+
 # idk below
 ldabr = "b -r --target=armv7-unknown-linux-musleabihf"
 t = "test -- --nocapture --test-threads=1"

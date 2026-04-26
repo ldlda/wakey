@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT mac, ip, hostname, first_seen_unix, last_seen_unix,\n                  last_action as \"last_action!\"\n           FROM agent_device_observations\n           WHERE observation_key = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "mac",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "ip",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "hostname",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "first_seen_unix",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_seen_unix",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_action!",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "92775bf2e3b9f772d108bb8d0cd1aebbe01357ed70dc2af7b50ee348e668b319"
+}
