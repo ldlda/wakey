@@ -94,6 +94,15 @@ fn control_api_routes() -> Router<AppState> {
         )
         .route("/api/v1/control/state-stats", get(api::state_stats))
         .route(
+            "/api/v1/control/fleet/devices",
+            get(api::list_fleet_devices),
+        )
+        .route(
+            "/api/v1/control/fleet/devices/refresh",
+            post(api::refresh_fleet_devices),
+        )
+        .route("/api/v1/control/fleet/wake", post(api::wake_fleet_device))
+        .route(
             "/api/v1/control/observations",
             get(api::list_agent_observations),
         )

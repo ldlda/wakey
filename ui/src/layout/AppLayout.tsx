@@ -1,18 +1,27 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
-import { Moon, Sun } from "lucide-react";
+import { ChevronDown, Moon, Sun } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const navItems = [
   ["/", "Devices"],
-  ["/observations", "Observed"],
-  ["/commands", "Wake Tools"],
   ["/dashboard", "Fleet Health"],
+] as const;
+
+const adminItems = [
   ["/agents", "Agents"],
-  ["/audit", "Audit"],
-  ["/alerts", "Alerts"],
   ["/tokens", "Tokens"],
+  ["/alerts", "Alerts"],
+  ["/observations", "Raw Observations"],
+  ["/commands", "Command Runner"],
+  ["/audit", "Audit"],
 ] as const;
 
 type Theme = "light" | "dark";
@@ -42,10 +51,10 @@ export function AppLayout() {
       <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            Wakey Operator UI
+            Wakey
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Find devices fast and wake them reliably
+            Fleet devices, presence, and wake controls
           </p>
         </div>
         <Button
@@ -70,7 +79,7 @@ export function AppLayout() {
         </Button>
       </header>
 
-      <nav className="mb-3 flex flex-wrap gap-2">
+      <nav className="mb-3 flex flex-wrap items-center gap-2">
         {navItems.map(([to, label]) => (
           <NavLink
             key={to}
@@ -78,7 +87,7 @@ export function AppLayout() {
             end={to === "/"}
             className={({ isActive }) =>
               [
-                "rounded-full border px-3 py-1.5 text-sm transition-colors",
+                "rounded-md border px-3 py-1.5 text-sm transition-colors",
                 isActive
                   ? "border-primary/60 bg-primary/10 text-foreground"
                   : "border-border bg-card text-muted-foreground hover:text-foreground",
@@ -88,6 +97,21 @@ export function AppLayout() {
             {label}
           </NavLink>
         ))}
+        <DropdownMenu>
+          <DropdownMenuTrigger className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground">
+            Admin / Debug
+            <ChevronDown className="size-4" aria-hidden />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-48">
+            {adminItems.map(([to, label]) => (
+              <DropdownMenuItem key={to}>
+                <NavLink className="w-full" to={to}>
+                  {label}
+                </NavLink>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </nav>
 
       <main>

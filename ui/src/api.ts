@@ -122,6 +122,63 @@ export type AgentDeviceObservationEvent = {
   known_device: KnownDeviceSummary | null;
 };
 
+export type FleetDeviceAgent = {
+  agent_id: string;
+  nickname?: string | null;
+  connected: boolean;
+  last_seen_unix: number;
+};
+
+export type FleetWakeRoute = {
+  route_id: string;
+  agent_id: string;
+  nickname?: string | null;
+  connected: boolean;
+  mac: string | null;
+  ip: string | null;
+  hostname: string | null;
+  source: string;
+  last_seen_unix: number;
+  wakeable: boolean;
+};
+
+export type FleetDevice = {
+  device_key: string;
+  display_name: string;
+  known_device: KnownDeviceSummary | null;
+  pinned: boolean;
+  ips: string[];
+  macs: string[];
+  hostnames: string[];
+  agents: FleetDeviceAgent[];
+  sources: string[];
+  first_seen_unix: number | null;
+  last_seen_unix: number | null;
+  presence: string;
+  route_candidates: FleetWakeRoute[];
+  recommended_route: FleetWakeRoute | null;
+};
+
+export type RefreshFleetDevicesResponse = {
+  total_accepted: number;
+  agents: {
+    agent_id: string;
+    status: string;
+    accepted: number;
+    error: string | null;
+  }[];
+};
+
+export type WakeFleetDeviceResponse = {
+  route: FleetWakeRoute;
+  command: {
+    request_id: string;
+    status: string;
+    result?: unknown;
+    error?: { code: string; message: string; retryable?: boolean | null };
+  };
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -208,6 +265,57 @@ export function fetchKnownDevices(): Promise<KnownDevice[]> {
   return request<KnownDevice[]>("/api/v1/control/devices");
 }
 
+export function fetchFleetDevices(opts?: {
+  query?: string;
+  presence?: string;
+  known?: string;
+  agentId?: string;
+  limit?: number;
+}): Promise<FleetDevice[]> {
+  const params = new URLSearchParams();
+  if (opts?.query) params.set("query", opts.query);
+  if (opts?.presence && opts.presence !== "all") {
+    params.set("presence", opts.presence);
+  }
+  if (opts?.known && opts.known !== "all") params.set("known", opts.known);
+  if (opts?.agentId) params.set("agent_id", opts.agentId);
+  params.set("limit", String(opts?.limit ?? 500));
+  return request<FleetDevice[]>(
+    `/api/v1/control/fleet/devices?${params.toString()}`,
+  );
+}
+
+export function refreshFleetDevices(input?: {
+  agentIds?: string[];
+  timeoutMs?: number;
+}): Promise<RefreshFleetDevicesResponse> {
+  return request<RefreshFleetDevicesResponse>(
+    "/api/v1/control/fleet/devices/refresh",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        agent_ids: input?.agentIds ?? [],
+        timeout_ms: input?.timeoutMs ?? null,
+      }),
+    },
+  );
+}
+
+export function wakeFleetDevice(input: {
+  deviceKey: string;
+  routeId?: string | null;
+  timeoutMs?: number;
+}): Promise<WakeFleetDeviceResponse> {
+  return request<WakeFleetDeviceResponse>("/api/v1/control/fleet/wake", {
+    method: "POST",
+    body: JSON.stringify({
+      device_key: input.deviceKey,
+      route_id: input.routeId ?? null,
+      timeout_ms: input.timeoutMs ?? null,
+    }),
+  });
+}
+
 export function fetchObservations(opts?: {
   agentId?: string;
   limit?: number;
@@ -266,6 +374,32 @@ export function attachObservationIdentifier(
     {
       method: "POST",
       body: JSON.stringify({ observation_key: observationKey }),
+    },
+  );
+}
+
+export function attachDeviceIdentifier(
+  deviceId: string,
+  identifier: { kind: string; value: string },
+): Promise<KnownDevice> {
+  return request<KnownDevice>(
+    `/api/v1/control/devices/${encodeURIComponent(deviceId)}/identifiers`,
+    {
+      method: "POST",
+      body: JSON.stringify(identifier),
+    },
+  );
+}
+
+export function mergeKnownDevice(
+  targetDeviceId: string,
+  sourceDeviceId: string,
+): Promise<KnownDevice> {
+  return request<KnownDevice>(
+    `/api/v1/control/devices/${encodeURIComponent(targetDeviceId)}/merge`,
+    {
+      method: "POST",
+      body: JSON.stringify({ source_device_id: sourceDeviceId }),
     },
   );
 }

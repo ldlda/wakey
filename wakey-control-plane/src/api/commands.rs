@@ -58,14 +58,26 @@ pub async fn run_command(
     AxumPath(agent_id): AxumPath<String>,
     Json(req): Json<RelayCommandRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    match relay_agent_command(&state, &agent_id, req.command, req.timeout_ms).await {
+        Ok(response) => Ok((StatusCode::OK, Json(response))),
+        Err(err) => Err(err),
+    }
+}
+
+pub async fn relay_agent_command(
+    state: &AppState,
+    agent_id: &str,
+    command: AgentCommand,
+    timeout_ms: Option<u64>,
+) -> Result<RelayCommandResponse, (StatusCode, Json<serde_json::Value>)> {
     let request_id_string = format!("req-{}", Uuid::new_v4());
-    let command = command_kind(&req.command);
+    let command_kind = command_kind(&command);
     let started = Instant::now();
     let span = info_span!(
         "relay_command",
         agent_id = %agent_id,
         request_id = %request_id_string,
-        command = %command,
+        command = %command_kind,
     );
     let _span_guard = span.enter();
 
@@ -79,7 +91,7 @@ pub async fn run_command(
 
     let tx = {
         let sessions = state.sessions.read().await;
-        sessions.get(&agent_id).map(|session| session.tx.clone())
+        sessions.get(agent_id).map(|session| session.tx.clone())
     }
     .ok_or_else(|| {
         warn!("command rejected: agent not connected");
@@ -103,13 +115,13 @@ pub async fn run_command(
         .append_audit_event(AuditEventInput {
             actor_type: "admin_api".into(),
             actor_id: None,
-            agent_id: Some(agent_id.clone()),
+            agent_id: Some(agent_id.to_string()),
             request_id: Some(request_id_string.clone()),
             event_type: "command_dispatch".into(),
             outcome: "sent".into(),
             latency_ms: None,
             message: "dispatched command to connected agent".into(),
-            metadata: serde_json::json!({ "command": command }),
+            metadata: serde_json::json!({ "command": command_kind }),
         })
         .await
     {
@@ -118,7 +130,7 @@ pub async fn run_command(
 
     if let Err(err) = tx.send(SessionEvent::Message(ServerMessage::Command {
         request_id,
-        command: req.command,
+        command,
     })) {
         state.pending.lock().await.remove(&request_id_string);
         warn!(error = %err, "failed sending command to agent session");
@@ -127,13 +139,13 @@ pub async fn run_command(
             .append_audit_event(AuditEventInput {
                 actor_type: "admin_api".into(),
                 actor_id: None,
-                agent_id: Some(agent_id.clone()),
+                agent_id: Some(agent_id.to_string()),
                 request_id: Some(request_id_string.clone()),
                 event_type: "command_dispatch".into(),
                 outcome: "send_failed".into(),
                 latency_ms: Some(started.elapsed().as_millis() as u64),
                 message: err.to_string(),
-                metadata: serde_json::json!({ "command": command }),
+                metadata: serde_json::json!({ "command": command_kind }),
             })
             .await
         {
@@ -147,7 +159,7 @@ pub async fn run_command(
     }
 
     let timeout = std::time::Duration::from_millis(
-        req.timeout_ms
+        timeout_ms
             .unwrap_or(state.command_timeout.as_millis() as u64)
             .max(1),
     );
@@ -160,13 +172,13 @@ pub async fn run_command(
                 .append_audit_event(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
-                    agent_id: Some(agent_id.clone()),
+                    agent_id: Some(agent_id.to_string()),
                     request_id: Some(request_id_string.clone()),
                     event_type: "command_result".into(),
                     outcome: "ok".into(),
                     latency_ms: Some(started.elapsed().as_millis() as u64),
                     message: "agent command completed".into(),
-                    metadata: serde_json::json!({ "command": command }),
+                    metadata: serde_json::json!({ "command": command_kind }),
                 })
                 .await
             {
@@ -186,13 +198,13 @@ pub async fn run_command(
                 .append_audit_event(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
-                    agent_id: Some(agent_id.clone()),
+                    agent_id: Some(agent_id.to_string()),
                     request_id: Some(request_id_string.clone()),
                     event_type: "command_result".into(),
                     outcome: "error".into(),
                     latency_ms: Some(started.elapsed().as_millis() as u64),
                     message: error.message.clone(),
-                    metadata: serde_json::json!({ "command": command, "code": error.code }),
+                    metadata: serde_json::json!({ "command": command_kind, "code": error.code }),
                 })
                 .await
             {
@@ -212,13 +224,13 @@ pub async fn run_command(
                 .append_audit_event(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
-                    agent_id: Some(agent_id.clone()),
+                    agent_id: Some(agent_id.to_string()),
                     request_id: Some(request_id_string.clone()),
                     event_type: "command_result".into(),
                     outcome: "response_dropped".into(),
                     latency_ms: Some(started.elapsed().as_millis() as u64),
                     message: "agent response channel dropped".into(),
-                    metadata: serde_json::json!({ "command": command }),
+                    metadata: serde_json::json!({ "command": command_kind }),
                 })
                 .await
             {
@@ -241,13 +253,13 @@ pub async fn run_command(
                 .append_audit_event(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
-                    agent_id: Some(agent_id.clone()),
+                    agent_id: Some(agent_id.to_string()),
                     request_id: Some(request_id_string.clone()),
                     event_type: "command_result".into(),
                     outcome: "timeout".into(),
                     latency_ms: Some(started.elapsed().as_millis() as u64),
                     message: "agent command timed out".into(),
-                    metadata: serde_json::json!({ "command": command, "timeout_ms": timeout.as_millis() as u64 }),
+                    metadata: serde_json::json!({ "command": command_kind, "timeout_ms": timeout.as_millis() as u64 }),
                 })
                 .await
             {
@@ -261,7 +273,7 @@ pub async fn run_command(
         }
     };
 
-    Ok((StatusCode::OK, Json(response)))
+    Ok(response)
 }
 
 fn command_kind(command: &AgentCommand) -> &'static str {
