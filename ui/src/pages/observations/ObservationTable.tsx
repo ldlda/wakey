@@ -95,9 +95,7 @@ export function ObservationTable({
                     </span>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {observation.known_device.pinned
-                      ? "pinned"
-                      : "not pinned"}
+                    {observation.known_device.pinned ? "pinned" : "not pinned"}
                   </span>
                 </div>
               ) : (

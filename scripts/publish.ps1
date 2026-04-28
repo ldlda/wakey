@@ -42,6 +42,7 @@ if ($versionProvided) {
 }
 
 # Ensure build ok
+$env:SQLX_OFFLINE = 'true'
 cargo fmt
 cargo build --release
 

@@ -7,7 +7,10 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
-import { identifierSummary, observationLabel } from "@/pages/observations/utils";
+import {
+  identifierSummary,
+  observationLabel,
+} from "@/pages/observations/utils";
 
 type Props = {
   observation: AgentDeviceObservation;
@@ -81,7 +84,11 @@ export function ObservationIdentityActions({
           placeholder={`Create as ${observationLabel(observation)}`}
           disabled={busy || !attachable}
         />
-        <Button size="sm" disabled={busy || !attachable} onClick={onCreateAndAttach}>
+        <Button
+          size="sm"
+          disabled={busy || !attachable}
+          onClick={onCreateAndAttach}
+        >
           Create
         </Button>
       </div>

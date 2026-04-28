@@ -17,5 +17,9 @@ cd "$ROOT"
 DATABASE_URL="$DATABASE_URL" cargo sqlx database create
 DATABASE_URL="$DATABASE_URL" cargo sqlx migrate run --source wakey-control-plane/migrations
 DATABASE_URL="$DATABASE_URL" cargo sqlx prepare --workspace -- -p wakey-control-plane --all-targets --all-features
+rm -rf wakey-control-plane/.sqlx
+mkdir -p wakey-control-plane/.sqlx
+cp .sqlx/*.json wakey-control-plane/.sqlx/
 
 echo "SQLx metadata prepared in $ROOT/.sqlx"
+echo "SQLx package metadata mirrored in $ROOT/wakey-control-plane/.sqlx"

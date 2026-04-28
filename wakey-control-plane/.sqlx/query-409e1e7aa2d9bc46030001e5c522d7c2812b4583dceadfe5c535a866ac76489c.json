@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT observations.observation_key as \"observation_key!\",\n                        observations.agent_id as \"agent_id!\",\n                        observations.kind as \"kind!\",\n                        observations.mac,\n                        observations.ip,\n                        observations.hostname,\n                        observations.first_seen_unix,\n                        observations.last_seen_unix,\n                        observations.last_action as \"last_action!\",\n                        known_devices.device_id,\n                        known_devices.display_name,\n                        known_devices.pinned\n                 FROM agent_device_observations observations\n                 LEFT JOIN device_identifiers identifiers\n                   ON identifiers.identifier_key =\n                      CASE\n                        WHEN observations.mac IS NOT NULL THEN 'mac:' || observations.mac\n                        WHEN observations.ip IS NOT NULL THEN 'ip:' || observations.ip\n                      END\n                 LEFT JOIN known_devices ON known_devices.device_id = identifiers.device_id\n                 ORDER BY observations.last_seen_unix DESC\n                 LIMIT ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "observation_key!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "agent_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "kind!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "mac",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "ip",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "hostname",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "first_seen_unix",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_seen_unix",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_action!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "device_id",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "display_name",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "pinned",
+        "ordinal": 11,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "409e1e7aa2d9bc46030001e5c522d7c2812b4583dceadfe5c535a866ac76489c"
+}

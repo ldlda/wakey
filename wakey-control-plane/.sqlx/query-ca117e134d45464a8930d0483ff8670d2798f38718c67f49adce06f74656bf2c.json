@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT transition_id as \"transition_id!\", ts_unix, alert_id as \"alert_id!\",\n                        kind as \"kind!\", agent_id, from_status, to_status as \"to_status!\",\n                        message as \"message!\", metadata_json as \"metadata_json!\"\n                 FROM alert_transitions\n                 WHERE ts_unix >= ?1\n                 ORDER BY transition_key DESC\n                 LIMIT ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "transition_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "ts_unix",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "alert_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "kind!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "agent_id",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "from_status",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "to_status!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "message!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "metadata_json!",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ca117e134d45464a8930d0483ff8670d2798f38718c67f49adce06f74656bf2c"
+}

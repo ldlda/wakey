@@ -210,9 +210,7 @@ export function ObservationsPage() {
             setNewNames((prev) => ({ ...prev, [observationKey]: name }))
           }
           onAttachExisting={(observation) => void attachExisting(observation)}
-          onCreateAndAttach={(observation) =>
-            void createAndAttach(observation)
-          }
+          onCreateAndAttach={(observation) => void createAndAttach(observation)}
           onOpenHistory={setHistoryObservation}
         />
 

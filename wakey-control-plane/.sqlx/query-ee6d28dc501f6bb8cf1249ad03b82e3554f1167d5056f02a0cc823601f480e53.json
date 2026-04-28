@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM enroll_tokens WHERE expires_at_unix <= ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "ee6d28dc501f6bb8cf1249ad03b82e3554f1167d5056f02a0cc823601f480e53"
+}

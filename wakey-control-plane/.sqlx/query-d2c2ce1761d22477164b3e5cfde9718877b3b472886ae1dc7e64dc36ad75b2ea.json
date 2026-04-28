@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE known_devices SET updated_at_unix = ?1 WHERE device_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "d2c2ce1761d22477164b3e5cfde9718877b3b472886ae1dc7e64dc36ad75b2ea"
+}

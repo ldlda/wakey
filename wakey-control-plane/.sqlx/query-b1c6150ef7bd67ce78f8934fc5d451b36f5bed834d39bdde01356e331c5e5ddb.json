@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM known_devices WHERE device_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b1c6150ef7bd67ce78f8934fc5d451b36f5bed834d39bdde01356e331c5e5ddb"
+}

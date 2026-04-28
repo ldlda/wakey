@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT 1 as \"ok!\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "ok!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2c0dd5d9be90cc716da219c75c2d3b75dae8c0902c64ef5baa96c902f23abc5d"
+}

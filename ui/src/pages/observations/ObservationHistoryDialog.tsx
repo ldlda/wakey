@@ -56,7 +56,9 @@ export function ObservationHistoryDialog({
         <DialogHeader>
           <DialogTitle>Observation History</DialogTitle>
           <DialogDescription>
-            {observation ? observationLabel(observation) : "No observation selected"}
+            {observation
+              ? observationLabel(observation)
+              : "No observation selected"}
           </DialogDescription>
         </DialogHeader>
 
@@ -84,7 +86,9 @@ export function ObservationHistoryDialog({
                 {formatSeen(event.ts_unix)}
               </span>
               <span>
-                <Badge variant={event.action === "remove" ? "outline" : "secondary"}>
+                <Badge
+                  variant={event.action === "remove" ? "outline" : "secondary"}
+                >
                   {observationStateLabel(event.action)}
                 </Badge>
               </span>

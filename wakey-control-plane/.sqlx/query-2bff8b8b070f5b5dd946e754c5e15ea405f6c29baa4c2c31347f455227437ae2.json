@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO known_devices\n             (device_id, display_name, pinned, created_at_unix, updated_at_unix, notes)\n             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "2bff8b8b070f5b5dd946e754c5e15ea405f6c29baa4c2c31347f455227437ae2"
+}
