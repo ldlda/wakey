@@ -3701,7 +3701,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "wakey"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3722,7 +3722,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-agent"
-version = "0.1.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -3746,7 +3746,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-control-plane"
-version = "0.1.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -3774,7 +3774,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "macaddr",
  "serde",
@@ -3785,7 +3785,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-linux"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "futures",

@@ -198,7 +198,8 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
       if (sort.key === "last_seen") {
         return dir * ((a.last_seen_unix ?? 0) - (b.last_seen_unix ?? 0));
       }
-      if (sort.key === "agents") return dir * (a.agents.length - b.agents.length);
+      if (sort.key === "agents")
+        return dir * (a.agents.length - b.agents.length);
       if (sort.key === "ip") {
         return dir * (a.ips[0] ?? "").localeCompare(b.ips[0] ?? "");
       }
@@ -220,7 +221,8 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
             <div>
               <CardTitle>Devices</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                {devices.length} fleet rows from stored observations and known devices
+                {devices.length} fleet rows from stored observations and known
+                devices
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -239,7 +241,9 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
                 disabled={refreshing || connectedCount === 0}
               >
                 <RefreshCw className="size-4" aria-hidden />
-                {refreshing ? "Collecting" : `Collect fleet (${connectedCount})`}
+                {refreshing
+                  ? "Collecting"
+                  : `Collect fleet (${connectedCount})`}
               </Button>
             </div>
           </div>
@@ -272,9 +276,20 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
             />
             <label className="grid gap-1 text-sm text-muted-foreground">
               <span>Agent</span>
-              <Select value={agentId} onValueChange={(value) => setAgentId(value ?? "all")}>
+              <Select
+                value={agentId}
+                onValueChange={(value) => setAgentId(value ?? "all")}
+              >
                 <SelectTrigger>
-                  <span>{agentId === "all" ? "all agents" : agentLabel(agentId, agents.find((agent) => agent.agent_id === agentId)?.nickname)}</span>
+                  <span>
+                    {agentId === "all"
+                      ? "all agents"
+                      : agentLabel(
+                          agentId,
+                          agents.find((agent) => agent.agent_id === agentId)
+                            ?.nickname,
+                        )}
+                  </span>
                 </SelectTrigger>
                 <SelectContent alignItemWithTrigger={false}>
                   <SelectItem value="all">all agents</SelectItem>
@@ -413,7 +428,11 @@ function FleetDeviceRow({
       </span>
       <span className="min-w-0 text-muted-foreground xl:truncate">
         <MobileLabel label="Agents" />
-        {summarize(device.agents.map((agent) => agentLabel(agent.agent_id, agent.nickname)))}
+        {summarize(
+          device.agents.map((agent) =>
+            agentLabel(agent.agent_id, agent.nickname),
+          ),
+        )}
       </span>
       <span className="text-muted-foreground">
         <MobileLabel label="Last seen" />
@@ -544,9 +563,13 @@ function FleetDeviceDetailsDialog({
         <DialogHeader>
           <div className="flex min-w-0 items-start justify-between gap-3 pr-8">
             <div className="min-w-0">
-              <DialogTitle className="truncate">{device.display_name}</DialogTitle>
+              <DialogTitle className="truncate">
+                {device.display_name}
+              </DialogTitle>
               <DialogDescription>
-                {device.known_device ? "Remembered fleet device" : "Observed fleet device"}
+                {device.known_device
+                  ? "Remembered fleet device"
+                  : "Observed fleet device"}
               </DialogDescription>
             </div>
             <PresenceBadge presence={device.presence} />
@@ -562,10 +585,16 @@ function FleetDeviceDetailsDialog({
         <div className="grid gap-3 md:grid-cols-2">
           <DetailBlock label="IPs" values={device.ips} onCopy={onCopy} />
           <DetailBlock label="MACs" values={device.macs} onCopy={onCopy} />
-          <DetailBlock label="Hostnames" values={device.hostnames} onCopy={onCopy} />
+          <DetailBlock
+            label="Hostnames"
+            values={device.hostnames}
+            onCopy={onCopy}
+          />
           <DetailBlock
             label="Agents"
-            values={device.agents.map((agent) => agentLabel(agent.agent_id, agent.nickname))}
+            values={device.agents.map((agent) =>
+              agentLabel(agent.agent_id, agent.nickname),
+            )}
             onCopy={onCopy}
           />
         </div>
@@ -584,7 +613,10 @@ function FleetDeviceDetailsDialog({
               {busy ? "Waking" : "Wake"}
             </Button>
           </div>
-          <Select value={routeId} onValueChange={(value) => setRouteId(value ?? "")}>
+          <Select
+            value={routeId}
+            onValueChange={(value) => setRouteId(value ?? "")}
+          >
             <SelectTrigger>
               <span>
                 {selectedRoute
@@ -613,21 +645,32 @@ function FleetDeviceDetailsDialog({
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder="Device name"
               />
-              <Button onClick={() => void createRemembered()} disabled={!identifiers.length}>
+              <Button
+                onClick={() => void createRemembered()}
+                disabled={!identifiers.length}
+              >
                 Remember device
               </Button>
             </div>
           )}
           <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <Select value={targetDeviceId} onValueChange={(value) => setTargetDeviceId(value ?? "")}>
+            <Select
+              value={targetDeviceId}
+              onValueChange={(value) => setTargetDeviceId(value ?? "")}
+            >
               <SelectTrigger>
                 <span>
                   {targetDeviceId
-                    ? knownDevices.find((known) => known.device_id === targetDeviceId)?.display_name
+                    ? knownDevices.find(
+                        (known) => known.device_id === targetDeviceId,
+                      )?.display_name
                     : "Select known device"}
                 </span>
               </SelectTrigger>
-              <SelectContent className="max-w-[min(92vw,30rem)]" alignItemWithTrigger={false}>
+              <SelectContent
+                className="max-w-[min(92vw,30rem)]"
+                alignItemWithTrigger={false}
+              >
                 {otherKnownDevices.map((known) => (
                   <SelectItem key={known.device_id} value={known.device_id}>
                     {known.display_name}
@@ -651,7 +694,9 @@ function FleetDeviceDetailsDialog({
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Proposed identifiers: {identifiers.map((id) => `${id.kind}:${id.value}`).join(", ") || "-"}
+            Proposed identifiers:{" "}
+            {identifiers.map((id) => `${id.kind}:${id.value}`).join(", ") ||
+              "-"}
           </p>
         </div>
 
@@ -719,7 +764,10 @@ function DetailBlock({
               onClick={() => onCopy(label, value)}
             >
               <span className="min-w-0 truncate">{value}</span>
-              <Copy className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <Copy
+                className="size-3.5 shrink-0 text-muted-foreground"
+                aria-hidden
+              />
             </button>
           ))
         ) : (
@@ -771,7 +819,9 @@ function presenceRank(presence: string): number {
   return 0;
 }
 
-function identifiersFor(device: FleetDevice): { kind: string; value: string }[] {
+function identifiersFor(
+  device: FleetDevice,
+): { kind: string; value: string }[] {
   return [
     ...device.macs.map((value) => ({ kind: "mac", value })),
     ...device.ips.map((value) => ({ kind: "ip", value })),
@@ -785,6 +835,8 @@ function agentLabel(agentId: string, nickname?: string | null): string {
 
 function routeLabel(route: FleetWakeRoute): string {
   const status = route.connected ? "connected" : "offline";
-  const target = route.mac ? `${route.mac}${route.ip ? ` / ${route.ip}` : ""}` : route.ip ?? "-";
+  const target = route.mac
+    ? `${route.mac}${route.ip ? ` / ${route.ip}` : ""}`
+    : (route.ip ?? "-");
   return `${agentLabel(route.agent_id, route.nickname)} · ${target} · ${route.source} · ${status}`;
 }

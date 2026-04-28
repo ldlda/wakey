@@ -50,9 +50,7 @@ export function AppLayout() {
     <div className="mx-auto max-w-7xl p-4">
       <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Wakey
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Wakey</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Fleet devices, presence, and wake controls
           </p>
