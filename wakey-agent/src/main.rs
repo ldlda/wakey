@@ -124,12 +124,21 @@ async fn main() -> Result<()> {
 fn observe(args: cli::ObserveArgs) -> Result<()> {
     let mut cmd = std::process::Command::new(resolve_wakey_binary());
     cmd.arg("observe");
+    let config_path = args.config.clone();
     if let Ok(config) = config::load_config(&args.config) {
         config::apply_local_path_env_to_command(&mut cmd, &config);
     }
 
     match args.command {
         ObserveCommand::Dhcp(args) => {
+            ::tracing::debug!(
+                action = %args.action,
+                mac = %args.mac,
+                ip = ?args.ip,
+                hostname = ?args.hostname,
+                config = %config_path.display(),
+                "forwarding dhcp observation to wakey"
+            );
             cmd.arg("dhcp")
                 .arg("--action")
                 .arg(args.action)
@@ -143,6 +152,13 @@ fn observe(args: cli::ObserveArgs) -> Result<()> {
             }
         }
         ObserveCommand::Neigh(args) => {
+            ::tracing::debug!(
+                action = %args.action,
+                mac = ?args.mac,
+                ip = ?args.ip,
+                config = %config_path.display(),
+                "forwarding neighbor observation to wakey"
+            );
             cmd.arg("neigh").arg("--action").arg(args.action);
             if let Some(mac) = args.mac {
                 cmd.arg("--mac").arg(mac);
@@ -154,6 +170,7 @@ fn observe(args: cli::ObserveArgs) -> Result<()> {
     }
 
     let status = cmd.status()?;
+    ::tracing::debug!(%status, "wakey observe exited");
     if !status.success() {
         anyhow::bail!("wakey observe exited with {status}");
     }

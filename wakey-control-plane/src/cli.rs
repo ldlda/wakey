@@ -244,10 +244,10 @@ pub struct StateStatsArgs {
 // not the greatest thing ive used, this and the migration code gets deleted shortly anyways
 #[derive(Args)]
 pub struct ImportSledStateArgs {
-    #[arg(long)]
+    #[arg(long, visible_alias = "from")]
     pub from_sled_state: PathBuf,
 
-    #[arg(long)]
+    #[arg(long, visible_alias = "to")]
     pub to_state_file: PathBuf,
 
     #[arg(long)]
