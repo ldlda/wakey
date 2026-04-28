@@ -90,6 +90,9 @@ pub struct InitConfigArgs {
     #[arg(long = "config-file", alias = "config")]
     pub config_file: Option<PathBuf>,
 
+    #[arg(long)]
+    pub from_config: Option<PathBuf>,
+
     #[arg(long, conflicts_with = "config_file")]
     pub stdout: bool,
 
@@ -126,8 +129,8 @@ pub struct InitConfigArgs {
     #[arg(long)]
     pub telemetry_service_name: Option<String>,
 
-    #[arg(long)]
-    pub telemetry_json_logs: bool,
+    #[arg(long, num_args = 0..=1, default_missing_value = "true")]
+    pub telemetry_json_logs: Option<bool>,
 
     #[arg(long)]
     pub force: bool,
@@ -238,6 +241,7 @@ pub struct StateStatsArgs {
     pub target: AdminTargetArgs,
 }
 
+// not the greatest thing ive used, this and the migration code gets deleted shortly anyways
 #[derive(Args)]
 pub struct ImportSledStateArgs {
     #[arg(long)]
