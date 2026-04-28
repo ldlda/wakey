@@ -47,7 +47,7 @@ export function ObservationsPage() {
     [],
   );
   const [devices, setDevices] = useState<KnownDevice[]>([]);
-  const [filter, setFilter] = useState<Filter>("unknown");
+  const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [selectedDevices, setSelectedDevices] = useState<
     Record<string, string>
