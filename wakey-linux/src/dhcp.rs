@@ -6,7 +6,8 @@ mod observations;
 
 pub use leases::{
     enrich_leases_with_nud_state, parse_dhcp_lease_line, read_dhcp_leases,
-    read_dhcp_leases_from_path, read_dhcp_leases_with_names, read_dhcp_leases_with_names_from_paths,
+    read_dhcp_leases_from_path, read_dhcp_leases_with_names,
+    read_dhcp_leases_with_names_from_paths,
 };
 pub use observations::{
     LocalDeviceObservation, LocalObservationStore, ObservedDhcpClient, ObservedNeighbor,
@@ -21,7 +22,6 @@ const DEFAULT_OBSERVATION_STORE: &str = "/tmp/wakey_observations.json";
 const DHCP_LEASES_ENV: &str = "WAKEY_DHCP_LEASES";
 const MAC_NAME_CACHE_ENV: &str = "WAKEY_MAC_NAME_CACHE";
 const OBSERVATION_STORE_ENV: &str = "WAKEY_OBSERVATION_STORE";
-
 
 pub(crate) fn now_unix() -> u64 {
     SystemTime::now()

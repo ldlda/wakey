@@ -1,7 +1,8 @@
 use anyhow::Result;
+use tracing::{debug, warn};
 use wakey_core::{
-    Device, DeviceInventory, DhcpLease, DhcpLeaseWithState, InventoryQuery, NeighborEntry,
-    Presence, Query,
+    Device, DeviceInventory, DeviceObservationFact, DhcpLease, DhcpLeaseWithState, InventoryQuery,
+    NeighborEntry, Presence, Query,
 };
 
 use crate::service::leases::get_leases;
@@ -24,9 +25,25 @@ pub async fn inventory(query: InventoryQuery) -> Result<DeviceInventory> {
         include_state: false,
     })
     .await?;
-    Ok(DeviceInventory {
-        devices: merge_devices(neighbors, leases, &query),
-    })
+    let observations = match wakey_linux::dhcp::list_local_observations().await {
+        Ok(observations) => observations
+            .into_iter()
+            .filter_map(local_observation_to_fact)
+            .collect::<Vec<_>>(),
+        Err(err) => {
+            warn!(error = %err, "failed reading local hook observations for inventory");
+            Vec::new()
+        }
+    };
+    debug!(
+        neighbors = neighbors.len(),
+        leases = leases.len(),
+        observations = observations.len(),
+        "building device inventory"
+    );
+    let devices = merge_devices_with_observations(neighbors, leases, observations, &query);
+    debug!(devices = devices.len(), "merged device inventory");
+    Ok(DeviceInventory { devices })
 }
 
 /// Merge raw neighbor entries and DHCP leases into device aggregates.
@@ -38,25 +55,52 @@ pub fn merge_devices(
     leases: Vec<DhcpLeaseWithState>,
     query: &InventoryQuery,
 ) -> Vec<Device> {
+    merge_devices_with_observations(neighbors, leases, Vec::new(), query)
+}
+
+/// Merge raw neighbor entries, DHCP leases, and hook observations into device
+/// aggregates.
+pub fn merge_devices_with_observations(
+    neighbors: Vec<NeighborEntry>,
+    leases: Vec<DhcpLeaseWithState>,
+    observations: Vec<DeviceObservationFact>,
+    query: &InventoryQuery,
+) -> Vec<Device> {
     use std::collections::BTreeMap;
 
-    let mut by_mac: BTreeMap<String, (Vec<NeighborEntry>, Vec<DhcpLease>)> = BTreeMap::new();
+    type DeviceParts = (
+        Vec<NeighborEntry>,
+        Vec<DhcpLease>,
+        Vec<DeviceObservationFact>,
+    );
+
+    let mut by_key: BTreeMap<String, DeviceParts> = BTreeMap::new();
 
     for row in neighbors {
         let key = row
             .mac
             .map(|m| m.to_string())
             .unwrap_or_else(|| format!("ip:{}", row.ip));
-        by_mac.entry(key).or_default().0.push(row);
+        by_key.entry(key).or_default().0.push(row);
     }
     for lease in leases {
         let key = lease.lease_line.mac.to_string();
-        by_mac.entry(key).or_default().1.push(lease.lease_line);
+        by_key.entry(key).or_default().1.push(lease.lease_line);
+    }
+    for observation in observations {
+        let key = observation
+            .mac
+            .map(|mac| mac.to_string())
+            .or_else(|| observation.ip.map(|ip| format!("ip:{ip}")))
+            .unwrap_or_else(|| "unknown".to_string());
+        by_key.entry(key).or_default().2.push(observation);
     }
 
-    let mut devices: Vec<Device> = by_mac
+    let mut devices: Vec<Device> = by_key
         .into_values()
-        .map(|(neighbors, leases)| Device::from_parts(neighbors, leases))
+        .map(|(neighbors, leases, observations)| {
+            Device::from_parts_with_observations(neighbors, leases, observations)
+        })
         .collect();
 
     let mut texts = Vec::new();
@@ -88,6 +132,42 @@ pub fn merge_devices(
             .then_with(|| a.names.first().cmp(&b.names.first()))
     });
     devices
+}
+
+pub fn local_observation_to_fact(
+    observation: wakey_linux::dhcp::LocalDeviceObservation,
+) -> Option<DeviceObservationFact> {
+    let mac = match observation.mac.as_deref() {
+        Some(raw) => match raw.parse() {
+            Ok(mac) => Some(mac),
+            Err(err) => {
+                warn!(
+                    mac = raw,
+                    error = %err,
+                    "ignoring invalid observed mac in inventory"
+                );
+                None
+            }
+        },
+        None => None,
+    };
+    if mac.is_none() && observation.ip.is_none() {
+        warn!(
+            kind = %observation.kind,
+            action = %observation.action,
+            "ignoring hook observation without mac or ip"
+        );
+        return None;
+    }
+    Some(DeviceObservationFact {
+        kind: observation.kind,
+        action: observation.action,
+        mac,
+        ip: observation.ip,
+        hostname: observation.hostname,
+        first_seen_unix: Some(observation.first_seen_unix),
+        last_seen_unix: Some(observation.last_seen_unix),
+    })
 }
 
 const fn presence_rank(presence: Presence) -> u8 {
@@ -174,5 +254,55 @@ mod tests {
             out[0].id,
             Some(DeviceId::Ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))))
         );
+    }
+
+    #[test]
+    fn merge_devices_preserves_hook_observation_facts() {
+        let query = InventoryQueryBuilder::new().build();
+        let out = merge_devices_with_observations(
+            Vec::new(),
+            Vec::new(),
+            vec![DeviceObservationFact {
+                kind: "dhcp".into(),
+                action: "update".into(),
+                mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
+                ip: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 30))),
+                hostname: Some("lda".into()),
+                first_seen_unix: Some(10),
+                last_seen_unix: Some(20),
+            }],
+            &query,
+        );
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].names, vec!["lda".to_string()]);
+        assert_eq!(
+            out[0].id,
+            Some(DeviceId::Mac("aa:bb:cc:dd:ee:ff".parse().expect("mac")))
+        );
+        assert_eq!(out[0].observations.len(), 1);
+        assert_eq!(out[0].presence, Presence::Unknown);
+    }
+
+    #[test]
+    fn merge_devices_marks_remove_only_observation_offline() {
+        let query = InventoryQueryBuilder::new().build();
+        let out = merge_devices_with_observations(
+            Vec::new(),
+            Vec::new(),
+            vec![DeviceObservationFact {
+                kind: "neigh".into(),
+                action: "remove".into(),
+                mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
+                ip: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 30))),
+                hostname: None,
+                first_seen_unix: Some(10),
+                last_seen_unix: Some(20),
+            }],
+            &query,
+        );
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].presence, Presence::Offline);
     }
 }

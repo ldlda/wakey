@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use crate::config::AgentConfig;
 use crate::protocol::{
@@ -70,8 +70,33 @@ async fn dispatch_inventory(req: InventoryRequest, config: &AgentConfig) -> Resu
         &config.mac_name_cache_path,
     )
     .await?;
+    let observations = match wakey::wakey_linux::dhcp::list_local_observations_from_path(
+        &config.observation_store_path,
+    )
+    .await
+    {
+        Ok(observations) => observations
+            .into_iter()
+            .filter_map(wakey::local_observation_to_fact)
+            .collect::<Vec<_>>(),
+        Err(err) => {
+            warn!(error = %err, "failed reading local hook observations for inventory command");
+            Vec::new()
+        }
+    };
+    debug!(
+        neighbors = neighbors.len(),
+        leases = leases.len(),
+        observations = observations.len(),
+        "dispatching inventory with merged sources"
+    );
     let inventory = wakey_core::DeviceInventory {
-        devices: wakey::merge_devices(neighbors, wakey::leases_without_state(leases), &query),
+        devices: wakey::merge_devices_with_observations(
+            neighbors,
+            wakey::leases_without_state(leases),
+            observations,
+            &query,
+        ),
     };
     debug!(
         rows = inventory.devices.len(),

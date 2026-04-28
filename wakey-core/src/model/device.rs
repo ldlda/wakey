@@ -44,6 +44,24 @@ pub enum DeviceId {
     Ip(IpAddr),
 }
 
+/// One raw source fact used while building a device aggregate.
+///
+/// These are intentionally source-shaped and non-durable. They preserve details
+/// from hooks and live inventory so higher layers can explain why a device looks
+/// online, stale, or unknown without reverse-engineering flattened fields.
+#[skip_serializing_none]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize)]
+pub struct DeviceObservationFact {
+    pub kind: String,
+    pub action: String,
+    #[serde(with = "mac::option_mac")]
+    pub mac: Option<MacAddr>,
+    pub ip: Option<IpAddr>,
+    pub hostname: Option<String>,
+    pub first_seen_unix: Option<u64>,
+    pub last_seen_unix: Option<u64>,
+}
+
 /// Merged view of one discovered network identity.
 ///
 /// This aggregates facts from DHCP leases and neighbor-table rows into a more
@@ -59,12 +77,22 @@ pub struct Device {
     pub interfaces: Vec<String>,
     pub neighbors: Vec<NeighborEntry>,
     pub leases: Vec<DhcpLease>,
+    pub observations: Vec<DeviceObservationFact>,
     pub presence: Presence,
 }
 
 impl Device {
     /// Merge raw neighbor and DHCP facts into one device aggregate.
     pub fn from_parts(neighbors: Vec<NeighborEntry>, leases: Vec<DhcpLease>) -> Self {
+        Self::from_parts_with_observations(neighbors, leases, Vec::new())
+    }
+
+    /// Merge raw neighbor, DHCP, and hook observation facts into one aggregate.
+    pub fn from_parts_with_observations(
+        neighbors: Vec<NeighborEntry>,
+        leases: Vec<DhcpLease>,
+        observations: Vec<DeviceObservationFact>,
+    ) -> Self {
         use std::collections::BTreeSet;
 
         let mut names = BTreeSet::new();
@@ -94,6 +122,34 @@ impl Device {
             )
             .into();
         }
+        let mut observed_non_remove = false;
+        for observation in &observations {
+            if let Some(name) = observation.hostname.as_deref() {
+                names.insert(name);
+            }
+            if let Some(ip) = observation.ip {
+                ips.insert(ip);
+            }
+            if let Some(mac) = observation.mac {
+                macs.insert(mac);
+            }
+            if observation.action != "remove" {
+                observed_non_remove = true;
+            }
+            presence = std::cmp::max(
+                presence_rank(presence),
+                presence_rank(observation_presence(observation)),
+            )
+            .into();
+        }
+
+        if neighbors.is_empty()
+            && leases.is_empty()
+            && !observed_non_remove
+            && !observations.is_empty()
+        {
+            presence = Presence::Offline;
+        }
 
         let macs: Vec<MacAddr> = macs.into_iter().collect();
         let ips: Vec<IpAddr> = ips.into_iter().collect();
@@ -110,8 +166,17 @@ impl Device {
             interfaces: interfaces.into_iter().map(|d| d.to_owned()).collect(),
             neighbors,
             leases,
+            observations,
             presence,
         }
+    }
+}
+
+fn observation_presence(observation: &DeviceObservationFact) -> Presence {
+    match (observation.kind.as_str(), observation.action.as_str()) {
+        (_, "remove") => Presence::Offline,
+        ("neigh", "add" | "update" | "old") => Presence::LikelyOnline,
+        _ => Presence::Unknown,
     }
 }
 

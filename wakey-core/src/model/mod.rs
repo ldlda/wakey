@@ -5,7 +5,7 @@ mod neighbor;
 mod query;
 mod wake;
 
-pub use device::{Device, DeviceId, DeviceInventory, Presence};
+pub use device::{Device, DeviceId, DeviceInventory, DeviceObservationFact, Presence};
 pub use dhcp::{DhcpLease, DhcpLeaseWithState, LeaseQuery};
 pub use interface::{InterfaceAddr, InterfaceSummary};
 pub use neighbor::{NeighborEntry, NeighborParseError, NeighborState, parse_neighbor_line};

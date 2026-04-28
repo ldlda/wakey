@@ -99,19 +99,19 @@ async fn save_observation_store(store: &LocalObservationStore) -> io::Result<()>
 
 pub async fn list_local_observations() -> io::Result<Vec<LocalDeviceObservation>> {
     let store = load_observation_store().await?;
-    list_local_observations_from_store(store)
+    Ok(list_local_observations_from_store(store))
 }
 
 pub async fn list_local_observations_from_path(
     path: impl AsRef<std::path::Path>,
 ) -> io::Result<Vec<LocalDeviceObservation>> {
     let store = load_observation_store_from_path(path).await?;
-    list_local_observations_from_store(store)
+    Ok(list_local_observations_from_store(store))
 }
 
 fn list_local_observations_from_store(
     store: LocalObservationStore,
-) -> io::Result<Vec<LocalDeviceObservation>> {
+) -> Vec<LocalDeviceObservation> {
     let mut out = Vec::with_capacity(store.dhcp_clients.len() + store.neighbors.len());
     out.extend(
         store
@@ -148,7 +148,7 @@ fn list_local_observations_from_store(
             .then(a.mac.cmp(&b.mac))
             .then(a.ip.cmp(&b.ip))
     });
-    Ok(out)
+    out
 }
 
 /// Observe a DHCP hotplug event and update the local MAC-to-name cache.
