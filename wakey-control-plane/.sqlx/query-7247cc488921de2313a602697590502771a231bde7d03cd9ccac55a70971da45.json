@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE device_identifiers SET device_id = ?1 WHERE device_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "7247cc488921de2313a602697590502771a231bde7d03cd9ccac55a70971da45"
+}

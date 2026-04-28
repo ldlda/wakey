@@ -73,6 +73,75 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
+    pub async fn merge_known_devices(
+        &self,
+        target_device_id: &str,
+        source_device_id: &str,
+    ) -> Result<Option<KnownDevice>> {
+        if target_device_id == source_device_id {
+            return self.get_known_device(target_device_id).await;
+        }
+
+        let now = now_unix();
+        let now_i64 = i64::try_from(now).context("known device timestamp overflow")?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting known device merge transaction")?;
+
+        let target_exists = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM known_devices WHERE device_id = ?1"#,
+            target_device_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed checking target known device existence")?;
+        if target_exists == 0 {
+            return Ok(None);
+        }
+
+        let source_exists = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM known_devices WHERE device_id = ?1"#,
+            source_device_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed checking source known device existence")?;
+        if source_exists == 0 {
+            return Ok(None);
+        }
+
+        sqlx::query!(
+            "UPDATE device_identifiers SET device_id = ?1 WHERE device_id = ?2",
+            target_device_id,
+            source_device_id
+        )
+        .execute(&mut *tx)
+        .await
+        .context("failed moving source identifiers to target device")?;
+        sqlx::query!(
+            "DELETE FROM known_devices WHERE device_id = ?1",
+            source_device_id
+        )
+        .execute(&mut *tx)
+        .await
+        .context("failed deleting merged source known device")?;
+        sqlx::query!(
+            "UPDATE known_devices SET updated_at_unix = ?1 WHERE device_id = ?2",
+            now_i64,
+            target_device_id
+        )
+        .execute(&mut *tx)
+        .await
+        .context("failed updating merged target known device timestamp")?;
+
+        tx.commit()
+            .await
+            .context("failed committing known device merge transaction")?;
+        self.get_known_device(target_device_id).await
+    }
+
     pub async fn attach_device_identifier(
         &self,
         device_id: &str,

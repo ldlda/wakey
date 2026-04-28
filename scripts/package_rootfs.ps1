@@ -82,6 +82,9 @@ if (Test-Path $hotplugSrc) {
             $content = Get-Content -Raw -LiteralPath $_.FullName
             $content = $content -replace "`r`n", "`n"
             Set-Content -NoNewline -LiteralPath $dest -Value $content -Encoding UTF8
+            if (Get-Command chmod -ErrorAction SilentlyContinue) {
+                chmod +x $dest
+            }
         }
     }
 }

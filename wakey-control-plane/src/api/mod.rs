@@ -14,8 +14,8 @@ pub use control::{
     StateStatsResponse, attach_device_identifier, attach_observation_identifier,
     create_known_device, enroll, forget_known_device, healthz, issue_enroll_token,
     list_agent_observation_history, list_agent_observations, list_enroll_tokens,
-    list_known_devices, revoke_agent, revoke_enroll_token, set_agent_nickname, state_stats,
-    upload_agent_observations,
+    list_known_devices, merge_known_device, request_agent_observation_sync, revoke_agent,
+    revoke_enroll_token, set_agent_nickname, state_stats, upload_agent_observations,
 };
 
 pub fn json_error(

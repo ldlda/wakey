@@ -64,6 +64,40 @@ sudo_cmd() {
     fail 'root privileges are required for install/restart steps; set SUDO or run as root'
 }
 
+priv() {
+    if [ "$(id -u)" -ne 0 ]; then
+        $SUDO_BIN "$@"
+    else
+        "$@"
+    fi
+}
+
+restore_label() {
+    path=$1
+    if command -v restorecon >/dev/null 2>&1; then
+        priv restorecon "$path" || true
+    fi
+}
+
+install_executable_force() {
+    src=$1
+    dst=$2
+    dir=$(dirname "$dst")
+    tmp="$dst.new.$$"
+    old="$dst.old.$$"
+
+    priv mkdir -p "$dir"
+    priv rm -f "$tmp"
+    priv cp -f "$src" "$tmp"
+    priv chmod 0755 "$tmp"
+    if [ -e "$dst" ]; then
+        priv mv -f "$dst" "$old" || true
+    fi
+    priv mv -f "$tmp" "$dst"
+    priv rm -f "$old"
+    restore_label "$dst"
+}
+
 main() {
     REPO_URL="${WAKEY_CC_REPO_URL:-https://git.ldlda.com/lda/wakey.git}"
     REF="${WAKEY_CC_REF:-main}"
@@ -124,26 +158,20 @@ main() {
     [ -f "$STAGING/bin/wakey-control-plane" ] || fail 'bundle missing bin/wakey-control-plane'
     [ -f "$STAGING/ui/dist/index.html" ] || fail 'bundle missing ui/dist/index.html'
 
-    if [ "$(id -u)" -ne 0 ] && [ -n "$SUDO_BIN" ]; then
-        $SUDO_BIN mkdir -p "$ROOT"
-        $SUDO_BIN cp -a "$STAGING/." "$ROOT/"
-    else
-        mkdir -p "$ROOT"
-        cp -a "$STAGING/." "$ROOT/"
-    fi
+    priv mkdir -p "$ROOT"
+    install_executable_force \
+        "$STAGING/bin/wakey-control-plane" \
+        "$ROOT/bin/wakey-control-plane"
+    priv cp -a "$STAGING/ui" "$ROOT/"
+    priv cp -a "$STAGING/scripts" "$ROOT/"
+    priv cp -a "$STAGING/deploy" "$ROOT/"
 
     if [ -z "${WAKEY_CC_NO_RESTART:-}" ] && command -v systemctl >/dev/null 2>&1; then
         if systemctl list-unit-files "$SERVICE" >/dev/null 2>&1; then
             log "restarting $SERVICE"
-            if [ "$(id -u)" -ne 0 ] && [ -n "$SUDO_BIN" ]; then
-                $SUDO_BIN systemctl daemon-reload
-                $SUDO_BIN systemctl restart "$SERVICE"
-                $SUDO_BIN systemctl --no-pager --full status "$SERVICE" | sed -n '1,16p'
-            else
-                systemctl daemon-reload
-                systemctl restart "$SERVICE"
-                systemctl --no-pager --full status "$SERVICE" | sed -n '1,16p'
-            fi
+            priv systemctl daemon-reload
+            priv systemctl restart "$SERVICE"
+            priv systemctl --no-pager --full status "$SERVICE" | sed -n '1,16p'
         else
             log "service $SERVICE not installed; skipped restart"
         fi

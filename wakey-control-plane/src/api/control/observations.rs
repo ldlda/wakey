@@ -1,12 +1,13 @@
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use tracing::warn;
+use wakey_agent::protocol::ServerMessage;
 
 use crate::api::json_error;
-use crate::runtime::AppState;
+use crate::runtime::{AppState, SessionEvent};
 use crate::state::{
     AgentDeviceObservationEvent, AgentDeviceObservationInput, AgentDeviceObservationView,
 };
@@ -33,6 +34,12 @@ pub struct AgentObservationRequest {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct UploadAgentObservationsResponse {
     pub accepted: usize,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct RequestAgentObservationSyncResponse {
+    pub agent_id: String,
+    pub requested: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +131,43 @@ pub async fn list_agent_observations(
             Err(json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_observations_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
+pub async fn request_agent_observation_sync(
+    State(state): State<AppState>,
+    AxumPath(agent_id): AxumPath<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let tx = {
+        let sessions = state.sessions.read().await;
+        sessions.get(&agent_id).map(|session| session.tx.clone())
+    };
+    let Some(tx) = tx else {
+        return Ok((
+            StatusCode::NOT_FOUND,
+            Json(RequestAgentObservationSyncResponse {
+                agent_id,
+                requested: false,
+            }),
+        ));
+    };
+
+    match tx.send(SessionEvent::Message(ServerMessage::SyncObservations)) {
+        Ok(()) => Ok((
+            StatusCode::OK,
+            Json(RequestAgentObservationSyncResponse {
+                agent_id,
+                requested: true,
+            }),
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to request agent observation sync");
+            Err(json_error(
+                StatusCode::BAD_GATEWAY,
+                "agent_observation_sync_request_failed",
                 &err.to_string(),
             ))
         }

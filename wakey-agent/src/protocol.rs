@@ -131,6 +131,17 @@ pub struct WakeRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentObservation {
+    pub kind: String,
+    pub action: String,
+    pub mac: Option<String>,
+    pub ip: Option<IpAddr>,
+    pub hostname: Option<String>,
+    pub first_seen_unix: u64,
+    pub last_seen_unix: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentCommand {
     Leases(LeasesRequest),
@@ -161,6 +172,10 @@ pub enum ClientMessage {
     Heartbeat {
         agent_id: String,
     },
+    Observations {
+        agent_id: String,
+        observations: Vec<AgentObservation>,
+    },
     Result {
         request_id: RequestId,
         result: CommandResult,
@@ -178,6 +193,7 @@ pub enum ServerMessage {
         request_id: RequestId,
         command: AgentCommand,
     },
+    SyncObservations,
 }
 
 #[cfg(test)]
@@ -214,5 +230,25 @@ mod tests {
         let json = serde_json::to_string(&msg).expect("serialize");
         assert!(json.contains("\"type\":\"result\""));
         assert!(json.contains("\"kind\":\"devs\""));
+    }
+
+    #[test]
+    fn observations_message_serializes() {
+        let msg = ClientMessage::Observations {
+            agent_id: "agent-a".into(),
+            observations: vec![AgentObservation {
+                kind: "dhcp".into(),
+                action: "update".into(),
+                mac: Some("aa:bb:cc:dd:ee:ff".into()),
+                ip: Some("192.168.1.10".parse().expect("ip")),
+                hostname: Some("lda".into()),
+                first_seen_unix: 10,
+                last_seen_unix: 20,
+            }],
+        };
+
+        let json = serde_json::to_string(&msg).expect("serialize");
+        assert!(json.contains("\"type\":\"observations\""));
+        assert!(json.contains("\"kind\":\"dhcp\""));
     }
 }

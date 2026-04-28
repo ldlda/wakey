@@ -9,7 +9,7 @@ use tracing::{debug, error, info, info_span, warn};
 
 use crate::config::AgentConfig;
 use crate::dispatch::dispatch_command;
-use crate::protocol::{AgentCommand, ClientMessage, ErrorPayload, ServerMessage};
+use crate::protocol::{AgentCommand, AgentObservation, ClientMessage, ErrorPayload, ServerMessage};
 
 pub async fn run(config: AgentConfig) -> Result<()> {
     let mut backoff = config.reconnect_base_ms.max(100);
@@ -85,13 +85,13 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
     .await?;
     info!(agent_id = %config.agent_id, "agent websocket session authenticated");
 
-    let http_client = reqwest::Client::new();
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut observation_sync = interval(Duration::from_secs(
         config.observation_sync_interval_seconds.max(1),
     ));
     observation_sync.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    observation_sync.reset();
 
     loop {
         tokio::select! {
@@ -102,7 +102,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                 debug!(agent_id = %config.agent_id, "heartbeat sent");
             }
             _ = observation_sync.tick() => {
-                if let Err(err) = send_agent_observations(&http_client, config).await {
+                if let Err(err) = send_agent_observations_ws(&mut sink, config).await {
                     warn!(agent_id = %config.agent_id, error = %err, "failed to sync local observations");
                 }
             }
@@ -119,7 +119,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                     Message::Text(text) => {
                         match serde_json::from_str::<ServerMessage>(&text) {
                             Ok(message) => {
-                                handle_server_message(config, &mut sink, message).await?;
+                                handle_server_message(config, &mut sink, &mut observation_sync, message).await?;
                             }
                             Err(err) => {
                                 // Allow the server to introduce extra frame types without
@@ -150,18 +150,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
 struct UploadAgentObservationsRequest {
     agent_id: String,
     agent_token: String,
-    observations: Vec<AgentObservationRequest>,
-}
-
-#[derive(Debug, Serialize)]
-struct AgentObservationRequest {
-    kind: String,
-    action: String,
-    mac: Option<String>,
-    ip: Option<IpAddr>,
-    hostname: Option<String>,
-    first_seen_unix: u64,
-    last_seen_unix: u64,
+    observations: Vec<AgentObservation>,
 }
 
 pub async fn sync_observations_once(config: &AgentConfig) -> Result<usize> {
@@ -170,10 +159,7 @@ pub async fn sync_observations_once(config: &AgentConfig) -> Result<usize> {
 }
 
 async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig) -> Result<usize> {
-    let observations =
-        wakey::wakey_linux::dhcp::list_local_observations_from_path(&config.observation_store_path)
-            .await
-            .context("failed to read local observations")?;
+    let observations = load_agent_observations(config).await?;
     if observations.is_empty() {
         return Ok(0);
     }
@@ -182,18 +168,7 @@ async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig)
     let payload = UploadAgentObservationsRequest {
         agent_id: config.agent_id.clone(),
         agent_token: config.agent_token.clone(),
-        observations: observations
-            .into_iter()
-            .map(|observation| AgentObservationRequest {
-                kind: observation.kind,
-                action: observation.action,
-                mac: observation.mac,
-                ip: observation.ip,
-                hostname: observation.hostname,
-                first_seen_unix: observation.first_seen_unix,
-                last_seen_unix: observation.last_seen_unix,
-            })
-            .collect(),
+        observations,
     };
 
     let response = client
@@ -218,6 +193,47 @@ async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig)
     Ok(payload.observations.len())
 }
 
+async fn send_agent_observations_ws<S>(sink: &mut S, config: &AgentConfig) -> Result<usize>
+where
+    S: SinkExt<Message> + Unpin,
+    <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
+{
+    let observations = load_agent_observations(config).await?;
+    if observations.is_empty() {
+        return Ok(0);
+    }
+    let count = observations.len();
+    send_json(
+        sink,
+        &ClientMessage::Observations {
+            agent_id: config.agent_id.clone(),
+            observations,
+        },
+    )
+    .await?;
+    debug!(agent_id = %config.agent_id, observations = count, "sent observations over websocket");
+    Ok(count)
+}
+
+async fn load_agent_observations(config: &AgentConfig) -> Result<Vec<AgentObservation>> {
+    let observations =
+        wakey::wakey_linux::dhcp::list_local_observations_from_path(&config.observation_store_path)
+            .await
+            .context("failed to read local observations")?;
+    Ok(observations
+        .into_iter()
+        .map(|observation| AgentObservation {
+            kind: observation.kind,
+            action: observation.action,
+            mac: observation.mac,
+            ip: observation.ip,
+            hostname: observation.hostname,
+            first_seen_unix: observation.first_seen_unix,
+            last_seen_unix: observation.last_seen_unix,
+        })
+        .collect())
+}
+
 pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
     let cap = max_ms.max(current_ms);
     current_ms.saturating_mul(2).min(cap)
@@ -226,6 +242,7 @@ pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
 async fn handle_server_message<S>(
     config: &AgentConfig,
     sink: &mut S,
+    observation_sync: &mut tokio::time::Interval,
     message: ServerMessage,
 ) -> Result<()>
 where
@@ -260,6 +277,11 @@ where
                     .await?;
                 }
             }
+        }
+        ServerMessage::SyncObservations => {
+            info!("received observation sync request from control-plane");
+            send_agent_observations_ws(sink, config).await?;
+            observation_sync.reset();
         }
     }
     Ok(())
@@ -336,6 +358,7 @@ fn client_message_kind(message: &ClientMessage) -> &'static str {
         ClientMessage::Hello { .. } => "hello",
         ClientMessage::Auth { .. } => "auth",
         ClientMessage::Heartbeat { .. } => "heartbeat",
+        ClientMessage::Observations { .. } => "observations",
         ClientMessage::Result { .. } => "result",
         ClientMessage::Error { .. } => "error",
     }

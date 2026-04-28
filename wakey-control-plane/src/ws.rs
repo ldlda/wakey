@@ -8,7 +8,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
-use wakey_agent::protocol::{ErrorPayload, RequestId};
+use wakey_agent::protocol::{AgentObservation, ErrorPayload, RequestId, ServerMessage};
 
 use crate::runtime::{AgentReply, AgentSession, AppState, SessionEvent};
 use crate::state::AuditEventInput;
@@ -25,6 +25,10 @@ enum IncomingClientMessage {
     },
     Heartbeat {
         agent_id: String,
+    },
+    Observations {
+        agent_id: String,
+        observations: Vec<AgentObservation>,
     },
     Result {
         request_id: RequestId,
@@ -238,6 +242,7 @@ async fn process_agent_text(
             {
                 warn!(error = %err, "failed to append audit event for auth success");
             }
+            let _ = tx.send(SessionEvent::Message(ServerMessage::SyncObservations));
         }
         IncomingClientMessage::Heartbeat { agent_id } => {
             if authed_agent_id.as_deref() != Some(agent_id.as_str()) {
@@ -245,6 +250,40 @@ async fn process_agent_text(
             }
             ensure_current_session(state, &agent_id, connection_id).await?;
             debug!(agent_id = %agent_id, "heartbeat received");
+        }
+        IncomingClientMessage::Observations {
+            agent_id,
+            observations,
+        } => {
+            if authed_agent_id.as_deref() != Some(agent_id.as_str()) {
+                anyhow::bail!("observations for unauthenticated or mismatched agent");
+            }
+            ensure_current_session(state, &agent_id, connection_id).await?;
+            let inputs = observations
+                .into_iter()
+                .map(|observation| crate::state::AgentDeviceObservationInput {
+                    kind: observation.kind,
+                    action: observation.action,
+                    mac: observation.mac,
+                    ip: observation.ip.map(|ip| ip.to_string()),
+                    hostname: observation.hostname,
+                    first_seen_unix: observation.first_seen_unix,
+                    last_seen_unix: observation.last_seen_unix,
+                })
+                .collect();
+            match state
+                .store
+                .upsert_agent_observations(&agent_id, inputs)
+                .await
+            {
+                Ok(accepted) => {
+                    debug!(agent_id = %agent_id, accepted, "agent websocket observations accepted");
+                }
+                Err(err) => {
+                    warn!(agent_id = %agent_id, error = %err, "failed to store websocket observations");
+                    anyhow::bail!("failed to store observations: {err}");
+                }
+            }
         }
         IncomingClientMessage::Result { request_id, result } => {
             let agent_id = authed_agent_id

@@ -102,12 +102,20 @@ fn control_api_routes() -> Router<AppState> {
             get(api::list_agent_observation_history),
         )
         .route(
+            "/api/v1/control/agents/{agent_id}/observations/sync",
+            post(api::request_agent_observation_sync),
+        )
+        .route(
             "/api/v1/control/devices",
             get(api::list_known_devices).post(api::create_known_device),
         )
         .route(
             "/api/v1/control/devices/{device_id}",
             axum::routing::delete(api::forget_known_device),
+        )
+        .route(
+            "/api/v1/control/devices/{device_id}/merge",
+            post(api::merge_known_device),
         )
         .route(
             "/api/v1/control/devices/{device_id}/identifiers",

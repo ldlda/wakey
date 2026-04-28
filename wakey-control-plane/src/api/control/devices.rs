@@ -56,6 +56,11 @@ pub struct ForgetKnownDeviceResponse {
     pub forgotten: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MergeKnownDeviceRequest {
+    pub source_device_id: String,
+}
+
 pub async fn create_known_device(
     State(state): State<AppState>,
     Json(req): Json<CreateKnownDeviceRequest>,
@@ -187,6 +192,33 @@ pub async fn attach_observation_identifier(
             Err(json_error(
                 StatusCode::BAD_REQUEST,
                 "attach_observation_identifier_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
+pub async fn merge_known_device(
+    State(state): State<AppState>,
+    AxumPath(device_id): AxumPath<String>,
+    Json(req): Json<MergeKnownDeviceRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    match state
+        .store
+        .merge_known_devices(&device_id, &req.source_device_id)
+        .await
+    {
+        Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
+        Ok(None) => Err(json_error(
+            StatusCode::NOT_FOUND,
+            "known_device_not_found",
+            "target or source known device not found",
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to merge known devices");
+            Err(json_error(
+                StatusCode::BAD_REQUEST,
+                "merge_known_device_failed",
                 &err.to_string(),
             ))
         }

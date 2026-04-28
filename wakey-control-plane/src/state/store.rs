@@ -338,6 +338,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn merge_known_devices_moves_identifiers_and_deletes_source() {
+        let (store, dir) = make_store().await;
+        let target = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "lda".into(),
+                pinned: true,
+                notes: None,
+                identifiers: vec![DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "aa:bb:cc:dd:ee:01".into(),
+                }],
+            })
+            .await
+            .expect("target should create");
+        let source = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "lda duplicate".into(),
+                pinned: false,
+                notes: None,
+                identifiers: vec![DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "aa:bb:cc:dd:ee:02".into(),
+                }],
+            })
+            .await
+            .expect("source should create");
+
+        let merged = store
+            .merge_known_devices(&target.device_id, &source.device_id)
+            .await
+            .expect("merge should succeed")
+            .expect("target should remain");
+
+        assert_eq!(merged.device_id, target.device_id);
+        assert_eq!(merged.identifiers.len(), 2);
+        assert!(
+            merged
+                .identifiers
+                .iter()
+                .any(|identifier| identifier.value == "aa:bb:cc:dd:ee:02")
+        );
+        assert!(
+            store
+                .get_known_device(&source.device_id)
+                .await
+                .expect("source lookup should work")
+                .is_none()
+        );
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
     async fn agent_observations_upsert_current_state_and_events() {
         let (store, dir) = make_store().await;
 

@@ -5,7 +5,7 @@ mod stats;
 
 pub use devices::{
     attach_device_identifier, attach_observation_identifier, create_known_device,
-    forget_known_device, list_known_devices,
+    forget_known_device, list_known_devices, merge_known_device,
 };
 pub use enroll::{
     EnrollTokenStatus, IssueEnrollTokenResponse, RevokeAgentResponse, RevokeEnrollTokenResponse,
@@ -13,6 +13,7 @@ pub use enroll::{
     set_agent_nickname,
 };
 pub use observations::{
-    list_agent_observation_history, list_agent_observations, upload_agent_observations,
+    list_agent_observation_history, list_agent_observations, request_agent_observation_sync,
+    upload_agent_observations,
 };
 pub use stats::{StateStatsResponse, state_stats};

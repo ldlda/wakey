@@ -104,8 +104,10 @@ main() {
     # Ensure execute bits on staged files we know should be executable
     for f in \
         "$STAGING/etc/init.d/"* \
+        "$STAGING/etc/hotplug.d/"*/* \
         "$STAGING/etc/ldlda_help/"*.sh \
         "$STAGING/root/.bin/wakey" \
+        "$STAGING/root/.bin/wakey-agent" \
         "$STAGING/root/.bin/kill_wakey.sh" \
         "$STAGING/root/.bin/remote_deploy_wakey.sh"; do
         [ -e "$f" ] && chmod +x "$f" 2>/dev/null || true
@@ -114,10 +116,13 @@ main() {
     # Normalize line endings for shell scripts (avoid CRLF issues on OpenWrt)
     for f in \
         "$STAGING/etc/init.d/"* \
+        "$STAGING/etc/hotplug.d/"*/* \
         "$STAGING/etc/ldlda_help/"*.sh \
         "$STAGING/root/.bin/"*.sh; do
         [ -f "$f" ] && sed -i 's/\r$//' "$f" 2>/dev/null || true
     done
+
+    chown -R root:root "$STAGING" 2>/dev/null || true
 
     # Copy staged tree into /
     tar -C "$STAGING" -cf - . | tar -C / -xpf - || fail "install copy failed"
