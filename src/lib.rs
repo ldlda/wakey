@@ -7,9 +7,9 @@ pub use wakey_linux;
 
 pub use service::{
     broadcast_wake_targets, get_interface_summaries, get_interface_summary, get_ips, get_leases,
-    inventory, leases_without_state, local_observation_to_fact, merge_devices,
-    merge_devices_with_observations, resolve_devices, resolve_query, resolve_selector,
-    resolve_wake_targets, wake_explicit, wake_from_query, wake_targets,
+    get_leases_with_neighbor_state, inventory, leases_without_state, local_observation_to_fact,
+    merge_devices, merge_devices_with_observations, resolve_devices, resolve_query,
+    resolve_selector, resolve_wake_targets, wake_explicit, wake_from_query, wake_targets,
 };
 pub use wakey_linux::dhcp::{list_local_observations, observe_dhcp_event, observe_neighbor_event};
 

@@ -293,7 +293,7 @@ function buildCommandPayload(
     return { command: { kind: "devs", dev: null, up_only: false } };
   }
   if (kind === "leases") {
-    return { command: { kind: "leases", include_state: true } };
+    return { command: { kind: "leases", include_state: false } };
   }
   if (kind === "inventory") {
     return {

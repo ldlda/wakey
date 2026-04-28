@@ -109,9 +109,7 @@ pub async fn list_local_observations_from_path(
     Ok(list_local_observations_from_store(store))
 }
 
-fn list_local_observations_from_store(
-    store: LocalObservationStore,
-) -> Vec<LocalDeviceObservation> {
+fn list_local_observations_from_store(store: LocalObservationStore) -> Vec<LocalDeviceObservation> {
     let mut out = Vec::with_capacity(store.dhcp_clients.len() + store.neighbors.len());
     out.extend(
         store

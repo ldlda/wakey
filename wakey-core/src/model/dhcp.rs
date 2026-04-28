@@ -25,8 +25,13 @@ pub struct DhcpLeaseWithState {
     pub nud_state: Option<NeighborState>,
 }
 
-/// Options for lease retrieval from the service layer.
+/// Legacy options for lease retrieval from the service layer.
+///
+/// Prefer inventory for device state; lease rows are now best treated as a raw
+/// dnsmasq snapshot.
+#[deprecated(note = "prefer get_leases() or inventory; neighbor state belongs in inventory")]
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct LeaseQuery {
+    #[deprecated(note = "prefer inventory for device state")]
     pub include_state: bool,
 }

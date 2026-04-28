@@ -1,16 +1,22 @@
 use anyhow::{Context, Result};
-use wakey_core::{DhcpLease, DhcpLeaseWithState, LeaseQuery};
+use wakey_core::{DhcpLease, DhcpLeaseWithState};
 
-/// Read DHCP leases and optionally enrich them with current neighbor-state data.
-pub async fn get_leases(query: LeaseQuery) -> Result<Vec<DhcpLeaseWithState>> {
+/// Read DHCP leases from dnsmasq plus remembered hook names.
+pub async fn get_leases() -> Result<Vec<DhcpLeaseWithState>> {
     let leases = wakey_linux::dhcp::read_dhcp_leases_with_names()
         .await
         .context("failed to read DHCP leases")?;
-    if query.include_state {
-        Ok(wakey_linux::dhcp::enrich_leases_with_nud_state(leases).await)
-    } else {
-        Ok(leases_without_state(leases))
-    }
+    Ok(leases_without_state(leases))
+}
+
+/// Read DHCP leases and enrich them with current neighbor state.
+///
+/// Prefer inventory for device status; this exists for the legacy leases view.
+pub async fn get_leases_with_neighbor_state() -> Result<Vec<DhcpLeaseWithState>> {
+    let leases = wakey_linux::dhcp::read_dhcp_leases_with_names()
+        .await
+        .context("failed to read DHCP leases")?;
+    Ok(wakey_linux::dhcp::enrich_leases_with_nud_state(leases).await)
 }
 
 /// Wrap raw DHCP leases in the current service output shape without neighbor state.

@@ -9,7 +9,7 @@ pub use inventory::{
     inventory, local_observation_to_fact, merge_devices, merge_devices_with_observations,
     resolve_devices,
 };
-pub use leases::{get_leases, leases_without_state};
+pub use leases::{get_leases, get_leases_with_neighbor_state, leases_without_state};
 pub use query::{resolve_query, resolve_selector};
 pub use wake::{
     broadcast_wake_targets, resolve_wake_targets, wake_explicit, wake_from_query, wake_targets,

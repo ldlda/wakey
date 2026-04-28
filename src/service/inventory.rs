@@ -21,10 +21,7 @@ pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
 /// directly from raw Linux source rows.
 pub async fn inventory(query: InventoryQuery) -> Result<DeviceInventory> {
     let neighbors = wakey_linux::devices::query_neighbors(&query).await?;
-    let leases = get_leases(wakey_core::LeaseQuery {
-        include_state: false,
-    })
-    .await?;
+    let leases = get_leases().await?;
     let observations = match wakey_linux::dhcp::list_local_observations().await {
         Ok(observations) => observations
             .into_iter()

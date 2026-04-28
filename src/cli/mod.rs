@@ -39,8 +39,11 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct LeasesArgs {
-    /// Include best-known current neighbor state for each lease IP.
-    #[arg(long)]
+    /// Legacy: include neighbor state on lease rows. Prefer `wakey inventory`.
+    #[arg(
+        long,
+        help = "Deprecated: include neighbor state on lease rows. Prefer `wakey inventory`."
+    )]
     pub include_state: bool,
     /// Print machine-readable JSON instead of a table.
     #[arg(long)]
@@ -201,10 +204,11 @@ pub async fn run(cli: Cli) -> Result<()> {
                 json = args.json,
                 "dispatching leases command"
             );
-            let leases = wakey::get_leases(wakey_core::LeaseQuery {
-                include_state: args.include_state,
-            })
-            .await?;
+            let leases = if args.include_state {
+                wakey::get_leases_with_neighbor_state().await?
+            } else {
+                wakey::get_leases().await?
+            };
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&leases)?);
             } else {
