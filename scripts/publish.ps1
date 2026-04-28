@@ -86,7 +86,7 @@ if ($Publish) {
 }
 
 if ($Tag -and $Version) {
-    git tag -f "v$Version"
+    git tag -f -a "v$Version" -m "Release $Version"
     git push -f origin "v$Version"
     Write-Host "Pushed tag: v$Version"
 
