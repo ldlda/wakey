@@ -23,15 +23,11 @@ const ReactCompilerConfig = {
 
 export default defineConfig({
   plugins: [
-    react(
-      process.env.UI_REACT_COMPILER === "1"
-        ? {
-            babel: {
-              plugins: [["babel-plugin-react-compiler", ReactCompilerConfig]],
-            },
-          }
-        : undefined,
-    ),
+    react({
+      babel: {
+        plugins: [["babel-plugin-react-compiler", ReactCompilerConfig]],
+      },
+    }),
     tailwindcss(),
   ],
   base: "/ui/",
