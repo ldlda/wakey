@@ -179,4 +179,61 @@ mod tests {
 
         let _ = tokio::fs::remove_file(observation_path).await;
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn neighbor_observation_migrates_coarse_mac_key_to_mac_ip_pair() {
+        let observation_path = temp_file("neighbor-observations-migrate");
+        let _observation_guard = EnvGuard::set(OBSERVATION_STORE_ENV, &observation_path);
+        let mut neighbors = std::collections::BTreeMap::new();
+        neighbors.insert(
+            "mac:aa:bb:cc:dd:ee:ff".to_string(),
+            ObservedNeighbor {
+                key: "mac:aa:bb:cc:dd:ee:ff".to_string(),
+                mac: Some("aa:bb:cc:dd:ee:ff".to_string()),
+                ip: None,
+                first_seen_unix: 1,
+                last_seen_unix: 1,
+                last_action: "add".to_string(),
+            },
+        );
+        let fixture = LocalObservationStore {
+            dhcp_clients: Default::default(),
+            neighbors,
+        };
+        tokio::fs::write(
+            &observation_path,
+            serde_json::to_string(&fixture).expect("fixture should serialize"),
+        )
+        .await
+        .expect("fixture should write");
+
+        observe_neighbor_event(
+            "update",
+            Some("aa:bb:cc:dd:ee:ff".parse().expect("mac should parse")),
+            Some("192.168.1.2".parse().expect("ip should parse")),
+        )
+        .await
+        .expect("observation should write");
+
+        let store = load_observation_store()
+            .await
+            .expect("observation store should read");
+        assert!(!store.neighbors.contains_key("mac:aa:bb:cc:dd:ee:ff"));
+        let row = store
+            .neighbors
+            .get("mac:aa:bb:cc:dd:ee:ff:ip:192.168.1.2")
+            .expect("coarse key should migrate to pair key");
+        assert_eq!(row.first_seen_unix, 1);
+        assert_eq!(row.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+        assert_eq!(
+            row.ip
+                .expect("ip should be carried into migrated row")
+                .to_string(),
+            "192.168.1.2"
+        );
+        assert_eq!(row.last_action, "update");
+
+        let _ = tokio::fs::remove_file(observation_path).await;
+    }
 }

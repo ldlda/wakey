@@ -230,26 +230,19 @@ pub async fn observe_neighbor_event(
     let mac = mac.map(|value| value.to_string().to_ascii_lowercase());
     let mut store = load_observation_store().await.unwrap_or_default();
     let mut changed = false;
-    store
+    let alias_keys = neighbor_observation_alias_keys(mac.as_deref(), ip, &key);
+    let mut row = store
         .neighbors
-        .entry(key.clone())
-        .and_modify(|row| {
-            if row.mac != mac
-                || row.ip != ip
-                || row.last_action != action
-                || row.last_seen_unix != now
-            {
-                row.mac = mac.clone();
-                row.ip = ip;
-                row.last_action = action.clone();
-                row.last_seen_unix = now;
-                changed = true;
-            }
+        .remove(&key)
+        .or_else(|| {
+            alias_keys
+                .iter()
+                .find_map(|alias| store.neighbors.remove(alias))
         })
-        .or_insert_with(|| {
+        .unwrap_or_else(|| {
             changed = true;
             ObservedNeighbor {
-                key,
+                key: key.clone(),
                 mac: mac.clone(),
                 ip,
                 first_seen_unix: now,
@@ -257,6 +250,25 @@ pub async fn observe_neighbor_event(
                 last_action: action.clone(),
             }
         });
+    for alias in alias_keys {
+        if store.neighbors.remove(&alias).is_some() {
+            changed = true;
+        }
+    }
+    if row.key != key
+        || row.mac != mac
+        || row.ip != ip
+        || row.last_action != action
+        || row.last_seen_unix != now
+    {
+        row.key = key.clone();
+        row.mac = mac.clone();
+        row.ip = ip;
+        row.last_action = action.clone();
+        row.last_seen_unix = now;
+        changed = true;
+    }
+    store.neighbors.insert(key, row);
     if let (Some(mac), Some(ip)) = (mac.as_deref(), ip)
         && !is_offline_neighbor_action(&action)
     {
@@ -294,6 +306,22 @@ fn neighbor_observation_key(mac: Option<MacAddr>, ip: Option<IpAddr>) -> Option<
         (None, Some(ip)) => Some(format!("ip:{ip}")),
         (None, None) => None,
     }
+}
+
+fn neighbor_observation_alias_keys(
+    mac: Option<&str>,
+    ip: Option<IpAddr>,
+    primary_key: &str,
+) -> Vec<String> {
+    let mut keys = Vec::with_capacity(2);
+    if let Some(mac) = mac {
+        keys.push(format!("mac:{mac}"));
+    }
+    if let Some(ip) = ip {
+        keys.push(format!("ip:{ip}"));
+    }
+    keys.retain(|key| key != primary_key);
+    keys
 }
 
 fn mark_replaced_neighbor_ips_removed(
