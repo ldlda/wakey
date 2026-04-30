@@ -35,7 +35,7 @@ export function ObservationTable({
 }: Props) {
   return (
     <div className="grid gap-2 overflow-x-auto">
-      <div className="grid min-w-[76rem] grid-cols-[minmax(10rem,1.2fr)_minmax(8rem,0.8fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_minmax(16rem,1.3fr)_7rem] gap-2 rounded-md border bg-muted/60 px-3 py-2 text-sm">
+      <div className="grid min-w-304 grid-cols-[minmax(10rem,1.2fr)_minmax(8rem,0.8fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_minmax(16rem,1.3fr)_7rem] gap-2 rounded-md border bg-muted/60 px-3 py-2 text-sm">
         <span>Device</span>
         <span>Network</span>
         <span>Agent</span>
@@ -49,7 +49,7 @@ export function ObservationTable({
         return (
           <div
             key={observation.observation_key}
-            className="grid min-w-[76rem] grid-cols-[minmax(10rem,1.2fr)_minmax(8rem,0.8fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_minmax(16rem,1.3fr)_7rem] gap-2 rounded-md border bg-card px-3 py-2 text-sm"
+            className="grid min-w-304 grid-cols-[minmax(10rem,1.2fr)_minmax(8rem,0.8fr)_minmax(8rem,0.8fr)_minmax(9rem,0.8fr)_minmax(16rem,1.3fr)_7rem] gap-2 rounded-md border bg-card px-3 py-2 text-sm"
           >
             <div className="min-w-0">
               <div className="truncate font-medium">

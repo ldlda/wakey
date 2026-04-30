@@ -69,7 +69,7 @@ export function ObservationHistoryDialog({
         )}
 
         <div className="max-h-[60vh] overflow-auto rounded-md border">
-          <div className="grid min-w-[44rem] grid-cols-[10rem_8rem_9rem_minmax(8rem,1fr)_minmax(8rem,1fr)] gap-2 border-b bg-muted/60 px-3 py-2 text-xs font-medium text-muted-foreground">
+          <div className="grid min-w-176 grid-cols-[10rem_8rem_9rem_minmax(8rem,1fr)_minmax(8rem,1fr)] gap-2 border-b bg-muted/60 px-3 py-2 text-xs font-medium text-muted-foreground">
             <span>Time</span>
             <span>State</span>
             <span>Source</span>
@@ -80,7 +80,7 @@ export function ObservationHistoryDialog({
           {events.map((event) => (
             <div
               key={event.event_id}
-              className="grid min-w-[44rem] grid-cols-[10rem_8rem_9rem_minmax(8rem,1fr)_minmax(8rem,1fr)] gap-2 border-b px-3 py-2 text-sm last:border-b-0"
+              className="grid min-w-176 grid-cols-[10rem_8rem_9rem_minmax(8rem,1fr)_minmax(8rem,1fr)] gap-2 border-b px-3 py-2 text-sm last:border-b-0"
             >
               <span className="truncate text-muted-foreground">
                 {formatSeen(event.ts_unix)}
