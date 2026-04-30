@@ -1,8 +1,10 @@
 use std::io::{self, ErrorKind};
 use std::net::IpAddr;
+use std::str::FromStr;
 
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
+use wakey_core::NeighborState;
 
 use super::{mac_name_cache_path, now_unix, observation_store_path};
 
@@ -218,14 +220,11 @@ pub async fn observe_neighbor_event(
     mac: Option<MacAddr>,
     ip: Option<IpAddr>,
 ) -> io::Result<bool> {
-    if !matches!(action, "add" | "update" | "old" | "remove") {
-        // update and remove not emitted by hotplug
+    let action = normalize_neighbor_action(action, mac, ip).await;
+    if !is_neighbor_observation_action(&action) {
         return Ok(false);
     }
-    let Some(key) = mac
-        .map(|value| format!("mac:{}", value.to_string().to_ascii_lowercase()))
-        .or_else(|| ip.map(|value| format!("ip:{}", value)))
-    else {
+    let Some(key) = neighbor_observation_key(mac, ip) else {
         return Ok(false);
     };
 
@@ -244,7 +243,7 @@ pub async fn observe_neighbor_event(
             {
                 row.mac = mac.clone();
                 row.ip = ip;
-                row.last_action = action.to_string();
+                row.last_action = action.clone();
                 row.last_seen_unix = now;
                 changed = true;
             }
@@ -253,15 +252,105 @@ pub async fn observe_neighbor_event(
             changed = true;
             ObservedNeighbor {
                 key,
-                mac,
+                mac: mac.clone(),
                 ip,
                 first_seen_unix: now,
                 last_seen_unix: now,
-                last_action: action.to_string(),
+                last_action: action.clone(),
             }
         });
+    if let (Some(mac), Some(ip)) = (mac.as_deref(), ip)
+        && !is_offline_neighbor_action(&action)
+    {
+        mark_replaced_neighbor_ips_removed(&mut store, mac, ip, now, &mut changed);
+    }
     if changed {
         save_observation_store(&store).await?;
     }
     Ok(changed)
+}
+
+async fn normalize_neighbor_action(
+    action: &str,
+    mac: Option<MacAddr>,
+    ip: Option<IpAddr>,
+) -> String {
+    let action = action.trim().to_ascii_lowercase();
+    if action == "remove" || action == "del" {
+        return "remove".into();
+    }
+    if NeighborState::from_str(&action).is_ok() {
+        return action;
+    }
+    if matches!(action.as_str(), "add" | "update" | "old") {
+        if let Some(state) = current_neighbor_state(mac, ip).await {
+            return state.as_ip_neigh_arg().into();
+        }
+        return action;
+    }
+    action
+}
+
+async fn current_neighbor_state(mac: Option<MacAddr>, ip: Option<IpAddr>) -> Option<NeighborState> {
+    let ips = ip.into_iter().collect::<Vec<_>>();
+    let macs = mac.into_iter().collect::<Vec<_>>();
+    let rows = crate::devices::get_neighbors(&[] as &[&str], &ips, &[] as &[&str], &[], &macs)
+        .await
+        .ok()?;
+    rows.into_iter()
+        .filter(|row| ip.is_none_or(|expected| row.ip == expected))
+        .filter(|row| mac.is_none_or(|expected| row.mac == Some(expected)))
+        .map(|row| row.state)
+        .max()
+}
+
+fn is_neighbor_observation_action(action: &str) -> bool {
+    matches!(action, "add" | "update" | "old" | "remove" | "del")
+        || NeighborState::from_str(action).is_ok()
+}
+
+fn is_offline_neighbor_action(action: &str) -> bool {
+    matches!(action, "remove" | "failed")
+}
+
+fn neighbor_observation_key(mac: Option<MacAddr>, ip: Option<IpAddr>) -> Option<String> {
+    match (mac, ip) {
+        (Some(mac), Some(ip)) => Some(format!(
+            "mac:{}:ip:{ip}",
+            mac.to_string().to_ascii_lowercase()
+        )),
+        (Some(mac), None) => Some(format!("mac:{}", mac.to_string().to_ascii_lowercase())),
+        (None, Some(ip)) => Some(format!("ip:{ip}")),
+        (None, None) => None,
+    }
+}
+
+fn mark_replaced_neighbor_ips_removed(
+    store: &mut LocalObservationStore,
+    mac: &str,
+    current_ip: IpAddr,
+    now: u64,
+    changed: &mut bool,
+) {
+    for row in store.neighbors.values_mut() {
+        let Some(row_ip) = row.ip else {
+            continue;
+        };
+        if row.mac.as_deref() == Some(mac)
+            && row_ip != current_ip
+            && same_ip_family(row_ip, current_ip)
+            && !is_offline_neighbor_action(&row.last_action)
+        {
+            row.last_action = "remove".into();
+            row.last_seen_unix = now;
+            *changed = true;
+        }
+    }
+}
+
+fn same_ip_family(a: IpAddr, b: IpAddr) -> bool {
+    matches!(
+        (a, b),
+        (IpAddr::V4(_), IpAddr::V4(_)) | (IpAddr::V6(_), IpAddr::V6(_))
+    )
 }

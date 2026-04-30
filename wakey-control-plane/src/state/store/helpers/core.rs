@@ -259,10 +259,7 @@ pub(in crate::state::store) fn normalize_agent_observation(
     let mac = normalize_optional_text(input.mac.as_deref()).map(|value| value.to_ascii_lowercase());
     let ip = normalize_optional_text(input.ip.as_deref());
     let hostname = normalize_optional_text(input.hostname.as_deref());
-    let identifier = mac
-        .as_ref()
-        .map(|value| format!("mac:{value}"))
-        .or_else(|| ip.as_ref().map(|value| format!("ip:{value}")))
+    let identifier = observation_identifier(&kind, mac.as_deref(), ip.as_deref())
         .ok_or_else(|| anyhow::anyhow!("observation requires mac or ip"))?;
     let observation_key = format!("agent:{agent_id}:{kind}:{identifier}");
     Ok(AgentDeviceObservation {
@@ -276,6 +273,15 @@ pub(in crate::state::store) fn normalize_agent_observation(
         last_seen_unix: input.last_seen_unix,
         last_action: action,
     })
+}
+
+fn observation_identifier(kind: &str, mac: Option<&str>, ip: Option<&str>) -> Option<String> {
+    match (kind, mac, ip) {
+        ("neigh", Some(mac), Some(ip)) => Some(format!("mac:{mac}:ip:{ip}")),
+        (_, Some(mac), _) => Some(format!("mac:{mac}")),
+        (_, None, Some(ip)) => Some(format!("ip:{ip}")),
+        (_, None, None) => None,
+    }
 }
 
 pub(in crate::state::store) async fn insert_device_identifier_tx(

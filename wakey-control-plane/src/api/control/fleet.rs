@@ -323,6 +323,13 @@ pub async fn wake_fleet_device(
             "selected route agent is not connected",
         ));
     }
+    if !route.wakeable {
+        return Err(json_error(
+            StatusCode::BAD_REQUEST,
+            "wake_route_unavailable",
+            "selected route is not wakeable",
+        ));
+    }
 
     let mac = mac.parse().map_err(|err| {
         json_error(
@@ -530,6 +537,7 @@ fn add_observation_to_entry(
     observation: AgentDeviceObservation,
     context: &FleetBuildContext,
 ) {
+    let observation_offline = observation_is_offline(&observation);
     if let Some(summary) = observation_known_device(&observation, context)
         && entry.known_device.is_none()
     {
@@ -540,7 +548,7 @@ fn add_observation_to_entry(
     if let Some(mac) = observation.mac.as_deref() {
         entry.macs.insert(mac.to_string());
     }
-    if let Some(ip) = observation.ip.as_deref() {
+    if !observation_offline && let Some(ip) = observation.ip.as_deref() {
         entry.ips.insert(ip.to_string());
     }
     if let Some(hostname) = observation.hostname.as_deref() {
@@ -595,7 +603,7 @@ fn add_observation_to_entry(
         observation.ip.as_deref(),
         &observation.kind,
     );
-    let wakeable = status.connected && observation.mac.is_some();
+    let wakeable = status.connected && observation.mac.is_some() && !observation_offline;
     entry.routes.insert(
         route_id.clone(),
         FleetWakeRoute {
@@ -612,7 +620,7 @@ fn add_observation_to_entry(
         },
     );
     if let Some(route) = entry.routes.get_mut(&route_id) {
-        route.wakeable = route.connected && route.mac.is_some();
+        route.wakeable = route.connected && route.mac.is_some() && !observation_offline;
     }
 }
 
@@ -744,10 +752,15 @@ fn inventory_result_to_observations(
 
 fn observation_presence_rank(observation: &AgentDeviceObservation) -> u8 {
     match observation.last_action.as_str() {
-        "remove" => 0,
-        "add" | "old" | "update" => 2,
+        "remove" | "failed" => 0,
+        "permanent" | "reachable" => 3,
+        "stale" | "add" | "old" | "update" => 2,
         _ => 1,
     }
+}
+
+fn observation_is_offline(observation: &AgentDeviceObservation) -> bool {
+    matches!(observation.last_action.as_str(), "remove" | "failed")
 }
 
 fn rank_presence(rank: u8) -> &'static str {
@@ -928,6 +941,26 @@ mod tests {
 
         assert_eq!(devices.len(), 1);
         assert_eq!(devices[0].ips, vec!["192.168.1.2"]);
+        assert!(devices[0].recommended_route.is_none());
+        assert!(!devices[0].route_candidates[0].wakeable);
+    }
+
+    #[test]
+    fn offline_observation_does_not_advertise_current_ip_or_wake_route() {
+        let mut offline = observation(
+            "agent-a",
+            Some("aa:bb:cc:dd:ee:ff"),
+            Some("192.168.1.2"),
+            20,
+        );
+        offline.kind = "neigh".into();
+        offline.last_action = "remove".into();
+
+        let devices = build_fleet_devices(Vec::new(), vec![offline], &context(&["agent-a"]));
+
+        assert_eq!(devices.len(), 1);
+        assert!(devices[0].ips.is_empty());
+        assert_eq!(devices[0].presence, "offline");
         assert!(devices[0].recommended_route.is_none());
         assert!(!devices[0].route_candidates[0].wakeable);
     }

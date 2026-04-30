@@ -136,4 +136,47 @@ mod tests {
         let _ = tokio::fs::remove_file(observation_path).await;
         let _ = tokio::fs::remove_file(cache_path).await;
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn neighbor_observations_are_keyed_by_mac_ip_pair() {
+        let observation_path = temp_file("neighbor-observations");
+        let _observation_guard = EnvGuard::set(OBSERVATION_STORE_ENV, &observation_path);
+        let mac = "aa:bb:cc:dd:ee:ff".parse().expect("mac should parse");
+
+        observe_neighbor_event(
+            "stale",
+            Some(mac),
+            Some("192.168.1.2".parse().expect("ip should parse")),
+        )
+        .await
+        .expect("first observation should write");
+        observe_neighbor_event(
+            "reachable",
+            Some(mac),
+            Some("192.168.1.3".parse().expect("ip should parse")),
+        )
+        .await
+        .expect("second observation should write");
+
+        let store = load_observation_store()
+            .await
+            .expect("observation store should read");
+        assert!(
+            store
+                .neighbors
+                .contains_key("mac:aa:bb:cc:dd:ee:ff:ip:192.168.1.2")
+        );
+        assert!(
+            store
+                .neighbors
+                .contains_key("mac:aa:bb:cc:dd:ee:ff:ip:192.168.1.3")
+        );
+        assert_eq!(
+            store.neighbors["mac:aa:bb:cc:dd:ee:ff:ip:192.168.1.2"].last_action,
+            "remove"
+        );
+
+        let _ = tokio::fs::remove_file(observation_path).await;
+    }
 }

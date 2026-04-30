@@ -25,3 +25,11 @@ $remote = $files.ForEach({ "/etc/init.d/$_" })
 $remote | ForEach-Object {
     pscp.exe -l root -scp -pw $PASSWD "192.168.100.1:$_" "$initDir\"
 }
+
+$files = "dhcp/95-wakey", "neigh/95-wakey"
+$remote =  $files.ForEach({ "/etc/hotplug.d/$_" })
+$hotplugDir = Join-Path $PSScriptRoot 'hotplug.d'
+
+$remote | ForEach-Object {
+    pscp.exe -l root -scp -pw $PASSWD "192.168.100.1:$_" "$hotplugDir\"
+}
