@@ -46,7 +46,7 @@ pub struct LeasesArgs {
     )]
     pub include_state: bool,
     /// Print machine-readable JSON instead of a table.
-    #[arg(long)]
+    #[arg(long, short)]
     pub json: bool,
 }
 
@@ -70,7 +70,7 @@ pub struct WakeArgs {
     #[arg(long)]
     pub ip: Option<IpAddr>,
     /// Print machine-readable JSON instead of a table.
-    #[arg(long)]
+    #[arg(short, long)]
     pub json: bool,
 }
 
@@ -100,7 +100,7 @@ pub struct InventoryArgs {
     #[arg(long = "mac")]
     pub macs: Vec<macaddr::MacAddr>,
     /// Print machine-readable JSON instead of a table.
-    #[arg(long)]
+    #[arg(short, long)]
     pub json: bool,
 }
 
@@ -114,10 +114,10 @@ pub struct DevsArgs {
     /// Optional interface name to show.
     pub dev: Option<String>,
     /// Show only interfaces whose operstate is `up`.
-    #[arg(long)]
+    #[arg(short, long)]
     pub up: bool,
     /// Print machine-readable JSON instead of a table.
-    #[arg(long)]
+    #[arg(short, long)]
     pub json: bool,
 }
 

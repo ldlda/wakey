@@ -5,12 +5,27 @@ BIN="/root/.bin/wakey-agent"
 [ -n "$BIN" ] || exit 0
 [ -n "$ACTION" ] || exit 0
 
+run_wakey_agent() {
+    if [ -n "$WAKEY_AGENT_CONFIG" ]; then
+        set -- --config "$WAKEY_AGENT_CONFIG" "$@"
+    fi
+    if [ "$WAKEY_HOTPLUG_VERBOSE" = "1" ]; then
+        set -- -v "$@"
+    fi
+    # [ "$WAKEY_HOTPLUG_LOG" = "1" ] &&
+    if command -v logger >/dev/null 2>&1; then
+        "$BIN" "$@" 2>&1 | logger -t wakey-hotplug
+    else
+        "$BIN" "$@" >/dev/null 2>&1
+    fi
+}
+
 if [ -n "$MACADDR" ] && [ -n "$IPADDR" ]; then
-    "$BIN" observe neigh --action "$ACTION" --mac "$MACADDR" --ip "$IPADDR" >/dev/null 2>&1 || true
+    run_wakey_agent observe neigh --action "$ACTION" --mac "$MACADDR" --ip "$IPADDR" || true
 elif [ -n "$MACADDR" ]; then
-    "$BIN" observe neigh --action "$ACTION" --mac "$MACADDR" >/dev/null 2>&1 || true
+    run_wakey_agent observe neigh --action "$ACTION" --mac "$MACADDR" || true
 elif [ -n "$IPADDR" ]; then
-    "$BIN" observe neigh --action "$ACTION" --ip "$IPADDR" >/dev/null 2>&1 || true
+    run_wakey_agent observe neigh --action "$ACTION" --ip "$IPADDR" || true
 else
-    "$BIN" observe neigh --action "$ACTION" >/dev/null 2>&1 || true
+    run_wakey_agent observe neigh --action "$ACTION" || true
 fi

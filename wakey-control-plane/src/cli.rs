@@ -87,10 +87,16 @@ pub struct ServeArgs {
 
 #[derive(Args, Clone)]
 pub struct InitConfigArgs {
-    #[arg(long = "config-file", alias = "config")]
+    #[arg(
+        long = "config-file",
+        short,
+        visible_alias = "config",
+        visible_alias = "to",
+        visible_short_alias = 't'
+    )]
     pub config_file: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long, short, visible_alias = "from")]
     pub from_config: Option<PathBuf>,
 
     #[arg(long, conflicts_with = "config_file")]
@@ -138,7 +144,7 @@ pub struct InitConfigArgs {
 
 #[derive(Args)]
 pub struct IssueEnrollTokenArgs {
-    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    #[arg(long, visible_alias = "config", default_value = DEFAULT_CONFIG_FILE)]
     pub config_file: PathBuf,
 
     #[arg(long)]
@@ -159,7 +165,7 @@ pub struct IssueEnrollTokenArgs {
 
 #[derive(Args)]
 pub struct ListEnrollTokensArgs {
-    #[arg(long, default_value = DEFAULT_CONFIG_FILE)]
+    #[arg(long, visible_alias = "config", default_value = DEFAULT_CONFIG_FILE)]
     pub config_file: PathBuf,
 
     #[arg(long)]

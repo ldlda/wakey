@@ -6,12 +6,27 @@ BIN="/root/.bin/wakey-agent"
 [ -n "$ACTION" ] || exit 0
 [ -n "$MACADDR" ] || exit 0
 
+run_wakey_agent() {
+    if [ -n "$WAKEY_AGENT_CONFIG" ]; then
+        set -- --config "$WAKEY_AGENT_CONFIG" "$@"
+    fi
+    if [ "$WAKEY_HOTPLUG_VERBOSE" = "1" ]; then
+        set -- -v "$@"
+    fi
+    # [ "$WAKEY_HOTPLUG_LOG" = "1" ] &&
+    if  command -v logger >/dev/null 2>&1; then
+        "$BIN" "$@" 2>&1 | logger -t wakey-hotplug
+    else
+        "$BIN" "$@" >/dev/null 2>&1
+    fi
+}
+
 if [ -n "$IPADDR" ] && [ -n "$HOSTNAME" ]; then
-    "$BIN" observe dhcp --action "$ACTION" --mac "$MACADDR" --ip "$IPADDR" --hostname "$HOSTNAME" >/dev/null 2>&1 || true
+    run_wakey_agent observe dhcp --action "$ACTION" --mac "$MACADDR" --ip "$IPADDR" --hostname "$HOSTNAME" || true
 elif [ -n "$IPADDR" ]; then
-    "$BIN" observe dhcp --action "$ACTION" --mac "$MACADDR" --ip "$IPADDR" >/dev/null 2>&1 || true
+    run_wakey_agent observe dhcp --action "$ACTION" --mac "$MACADDR" --ip "$IPADDR" || true
 elif [ -n "$HOSTNAME" ]; then
-    "$BIN" observe dhcp --action "$ACTION" --mac "$MACADDR" --hostname "$HOSTNAME" >/dev/null 2>&1 || true
+    run_wakey_agent observe dhcp --action "$ACTION" --mac "$MACADDR" --hostname "$HOSTNAME" || true
 else
-    "$BIN" observe dhcp --action "$ACTION" --mac "$MACADDR" >/dev/null 2>&1 || true
+    run_wakey_agent observe dhcp --action "$ACTION" --mac "$MACADDR" || true
 fi

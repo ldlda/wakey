@@ -42,7 +42,7 @@ pub enum Command {
 #[derive(Args)]
 pub struct ServeArgs {
     /// Path to the agent config file.
-    #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
+    #[arg(long, short = 'c', default_value = config::DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
 
     /// Path to pid file for reload signaling.
@@ -80,11 +80,11 @@ pub struct EnrollArgs {
 #[derive(Args)]
 pub struct InitConfigArgs {
     /// Path to the agent config file to write. If omitted, config is printed to stdout.
-    #[arg(long)]
+    #[arg(long, short, visible_alias = "to", visible_short_alias = 't')]
     pub config: Option<PathBuf>,
 
     /// Existing agent config to use as a base before applying explicit overrides.
-    #[arg(long)]
+    #[arg(long, short = 'f', visible_alias = "from")]
     pub from_config: Option<PathBuf>,
 
     /// Print config to stdout.
@@ -118,14 +118,14 @@ pub struct ReloadArgs {
 #[derive(Args)]
 pub struct SyncObservationsArgs {
     /// Path to the agent config file.
-    #[arg(long, default_value = config::DEFAULT_CONFIG_PATH)]
+    #[arg(long, short, default_value = config::DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
 }
 
 #[derive(Args)]
 pub struct ObserveArgs {
     /// Path to the agent config file. If present, local path settings are passed through.
-    #[arg(long, global = true, default_value = config::DEFAULT_CONFIG_PATH)]
+    #[arg(long, short, global = true, default_value = config::DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
 
     #[command(subcommand)]
