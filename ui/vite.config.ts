@@ -6,15 +6,15 @@ import tailwindcss from "@tailwindcss/vite";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function sourcemapEnabled(): boolean {
-  const explicit = process.env.UI_SOURCEMAP?.toLowerCase();
+const debugEnabled = (): boolean => {
+  const explicit = process.env.DEBUG?.toLowerCase();
   if (explicit) {
     return explicit === "1" || explicit === "true" || explicit === "yes";
   }
 
   const rustLog = (process.env.RUST_LOG || "").toLowerCase();
   return rustLog.includes("debug") || rustLog.includes("trace");
-}
+};
 
 const ReactCompilerConfig = {
   target: "18",
@@ -37,6 +37,6 @@ export default defineConfig({
     },
   },
   build: {
-    sourcemap: sourcemapEnabled(),
+    sourcemap: debugEnabled(),
   },
 });
