@@ -196,6 +196,51 @@ impl Store {
         self.attach_device_identifier(device_id, input).await
     }
 
+    pub async fn detach_device_identifier(
+        &self,
+        device_id: &str,
+        identifier_key: &str,
+    ) -> Result<Option<KnownDevice>> {
+        let now = now_unix();
+        let now_i64 = i64::try_from(now).context("known device timestamp overflow")?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting device identifier detach transaction")?;
+        let exists = sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM known_devices WHERE device_id = ?1"#,
+            device_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .context("failed checking known device existence")?;
+        if exists == 0 {
+            return Ok(None);
+        }
+
+        sqlx::query!(
+            "DELETE FROM device_identifiers WHERE device_id = ?1 AND identifier_key = ?2",
+            device_id,
+            identifier_key
+        )
+        .execute(&mut *tx)
+        .await
+        .context("failed detaching device identifier")?;
+        sqlx::query!(
+            "UPDATE known_devices SET updated_at_unix = ?1 WHERE device_id = ?2",
+            now_i64,
+            device_id
+        )
+        .execute(&mut *tx)
+        .await
+        .context("failed updating known device timestamp")?;
+        tx.commit()
+            .await
+            .context("failed committing device identifier detach transaction")?;
+        self.get_known_device(device_id).await
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub async fn lookup_known_device_by_identifier(
         &self,

@@ -12,11 +12,11 @@ pub use commands::{list_agents, run_command};
 pub use control::{
     EnrollTokenStatus, IssueEnrollTokenResponse, RevokeAgentResponse, RevokeEnrollTokenResponse,
     StateStatsResponse, attach_device_identifier, attach_observation_identifier,
-    create_known_device, enroll, forget_known_device, healthz, issue_enroll_token,
-    list_agent_observation_history, list_agent_observations, list_enroll_tokens,
-    list_fleet_devices, list_known_devices, merge_known_device, refresh_fleet_devices,
-    request_agent_observation_sync, revoke_agent, revoke_enroll_token, set_agent_nickname,
-    state_stats, upload_agent_observations, wake_fleet_device,
+    create_known_device, detach_device_identifier, enroll, forget_known_device, healthz,
+    issue_enroll_token, list_agent_observation_history, list_agent_observations,
+    list_enroll_tokens, list_fleet_devices, list_known_devices, merge_known_device,
+    refresh_fleet_devices, request_agent_observation_sync, revoke_agent, revoke_enroll_token,
+    set_agent_nickname, state_stats, upload_agent_observations, wake_fleet_device,
 };
 
 pub fn json_error(

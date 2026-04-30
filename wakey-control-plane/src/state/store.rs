@@ -338,6 +338,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn device_identifier_can_be_detached_manually() {
+        let (store, dir) = make_store().await;
+        let created = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "lda".into(),
+                pinned: true,
+                notes: None,
+                identifiers: vec![
+                    DeviceIdentifierInput {
+                        kind: "mac".into(),
+                        value: "aa:bb:cc:dd:ee:ff".into(),
+                    },
+                    DeviceIdentifierInput {
+                        kind: "ip".into(),
+                        value: "192.168.1.2".into(),
+                    },
+                ],
+            })
+            .await
+            .expect("known device should create");
+
+        let updated = store
+            .detach_device_identifier(&created.device_id, "ip:192.168.1.2")
+            .await
+            .expect("identifier detach should succeed")
+            .expect("device should exist");
+
+        assert_eq!(updated.identifiers.len(), 1);
+        assert_eq!(
+            updated.identifiers[0].identifier_key,
+            "mac:aa:bb:cc:dd:ee:ff"
+        );
+
+        let unmatched = store
+            .lookup_known_device_by_identifier(DeviceIdentifierInput {
+                kind: "ip".into(),
+                value: "192.168.1.2".into(),
+            })
+            .await
+            .expect("lookup should succeed");
+        assert!(unmatched.is_none());
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
     async fn merge_known_devices_moves_identifiers_and_deletes_source() {
         let (store, dir) = make_store().await;
         let target = store

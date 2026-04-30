@@ -198,6 +198,32 @@ pub async fn attach_observation_identifier(
     }
 }
 
+pub async fn detach_device_identifier(
+    State(state): State<AppState>,
+    AxumPath((device_id, identifier_key)): AxumPath<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    match state
+        .store
+        .detach_device_identifier(&device_id, &identifier_key)
+        .await
+    {
+        Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
+        Ok(None) => Err(json_error(
+            StatusCode::NOT_FOUND,
+            "known_device_not_found",
+            "known device not found",
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to detach device identifier");
+            Err(json_error(
+                StatusCode::BAD_REQUEST,
+                "detach_device_identifier_failed",
+                &err.to_string(),
+            ))
+        }
+    }
+}
+
 pub async fn merge_known_device(
     State(state): State<AppState>,
     AxumPath(device_id): AxumPath<String>,

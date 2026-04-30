@@ -131,6 +131,10 @@ fn control_api_routes() -> Router<AppState> {
             post(api::attach_device_identifier),
         )
         .route(
+            "/api/v1/control/devices/{device_id}/identifiers/{identifier_key}",
+            axum::routing::delete(api::detach_device_identifier),
+        )
+        .route(
             "/api/v1/control/devices/{device_id}/identifiers/from-observation",
             post(api::attach_observation_identifier),
         )
