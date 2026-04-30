@@ -145,14 +145,14 @@ mod tests {
         let mac = "aa:bb:cc:dd:ee:ff".parse().expect("mac should parse");
 
         observe_neighbor_event(
-            "stale",
+            "add",
             Some(mac),
             Some("192.168.1.2".parse().expect("ip should parse")),
         )
         .await
         .expect("first observation should write");
         observe_neighbor_event(
-            "reachable",
+            "update",
             Some(mac),
             Some("192.168.1.3".parse().expect("ip should parse")),
         )

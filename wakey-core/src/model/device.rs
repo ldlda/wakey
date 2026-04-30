@@ -174,9 +174,7 @@ impl Device {
 
 fn observation_presence(observation: &DeviceObservationFact) -> Presence {
     match (observation.kind.as_str(), observation.action.as_str()) {
-        (_, "remove" | "failed") => Presence::Offline,
-        (_, "permanent" | "reachable") => Presence::Online,
-        (_, "stale") => Presence::LikelyOnline,
+        (_, "remove") => Presence::Offline,
         ("neigh", "add" | "update" | "old") => Presence::LikelyOnline,
         _ => Presence::Unknown,
     }

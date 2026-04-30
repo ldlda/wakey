@@ -1,10 +1,8 @@
 use std::io::{self, ErrorKind};
 use std::net::IpAddr;
-use std::str::FromStr;
 
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
-use wakey_core::NeighborState;
 
 use super::{mac_name_cache_path, now_unix, observation_store_path};
 
@@ -220,7 +218,7 @@ pub async fn observe_neighbor_event(
     mac: Option<MacAddr>,
     ip: Option<IpAddr>,
 ) -> io::Result<bool> {
-    let action = normalize_neighbor_action(action, mac, ip).await;
+    let action = normalize_neighbor_action(action);
     if !is_neighbor_observation_action(&action) {
         return Ok(false);
     }
@@ -270,47 +268,20 @@ pub async fn observe_neighbor_event(
     Ok(changed)
 }
 
-async fn normalize_neighbor_action(
-    action: &str,
-    mac: Option<MacAddr>,
-    ip: Option<IpAddr>,
-) -> String {
-    let action = action.trim().to_ascii_lowercase();
-    if action == "remove" || action == "del" {
-        return "remove".into();
+fn normalize_neighbor_action(action: &str) -> String {
+    match action.trim().to_ascii_lowercase().as_str() {
+        "del" => "remove".into(),
+        "old" => "update".into(),
+        other => other.to_string(),
     }
-    if NeighborState::from_str(&action).is_ok() {
-        return action;
-    }
-    if matches!(action.as_str(), "add" | "update" | "old") {
-        if let Some(state) = current_neighbor_state(mac, ip).await {
-            return state.as_ip_neigh_arg().into();
-        }
-        return action;
-    }
-    action
-}
-
-async fn current_neighbor_state(mac: Option<MacAddr>, ip: Option<IpAddr>) -> Option<NeighborState> {
-    let ips = ip.into_iter().collect::<Vec<_>>();
-    let macs = mac.into_iter().collect::<Vec<_>>();
-    let rows = crate::devices::get_neighbors(&[] as &[&str], &ips, &[] as &[&str], &[], &macs)
-        .await
-        .ok()?;
-    rows.into_iter()
-        .filter(|row| ip.is_none_or(|expected| row.ip == expected))
-        .filter(|row| mac.is_none_or(|expected| row.mac == Some(expected)))
-        .map(|row| row.state)
-        .max()
 }
 
 fn is_neighbor_observation_action(action: &str) -> bool {
-    matches!(action, "add" | "update" | "old" | "remove" | "del")
-        || NeighborState::from_str(action).is_ok()
+    matches!(action, "add" | "update" | "remove")
 }
 
 fn is_offline_neighbor_action(action: &str) -> bool {
-    matches!(action, "remove" | "failed")
+    action == "remove"
 }
 
 fn neighbor_observation_key(mac: Option<MacAddr>, ip: Option<IpAddr>) -> Option<String> {

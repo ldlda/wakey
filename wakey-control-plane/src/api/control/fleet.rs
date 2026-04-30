@@ -144,7 +144,42 @@ struct InventoryDevice {
     #[serde(default)]
     macs: Vec<String>,
     #[serde(default)]
+    neighbors: Vec<InventoryNeighbor>,
+    #[serde(default)]
+    leases: Vec<InventoryLease>,
+    #[serde(default)]
+    observations: Vec<InventoryObservationFact>,
+    #[serde(default)]
     presence: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InventoryNeighbor {
+    ip: IpAddr,
+    #[serde(default)]
+    mac: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InventoryLease {
+    ip: IpAddr,
+    mac: String,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InventoryObservationFact {
+    kind: String,
+    action: String,
+    #[serde(default)]
+    mac: Option<String>,
+    #[serde(default)]
+    ip: Option<IpAddr>,
+    #[serde(default)]
+    hostname: Option<String>,
 }
 
 pub async fn list_fleet_devices(
@@ -716,6 +751,63 @@ fn inventory_result_to_observations(
             .iter()
             .find(|name| !name.trim().is_empty())
             .cloned();
+        let mut wrote_source_observation = false;
+        for neighbor in &device.neighbors {
+            if neighbor.mac.is_none() && device.macs.is_empty() {
+                out.push(inventory_observation(
+                    inventory_action_for_neighbor(neighbor),
+                    None,
+                    Some(neighbor.ip.to_string()),
+                    hostname.clone(),
+                    now,
+                ));
+                wrote_source_observation = true;
+                continue;
+            }
+
+            let macs = neighbor
+                .mac
+                .iter()
+                .chain(device.macs.iter())
+                .collect::<BTreeSet<_>>();
+            for mac in macs {
+                out.push(inventory_observation(
+                    inventory_action_for_neighbor(neighbor),
+                    Some(mac.clone()),
+                    Some(neighbor.ip.to_string()),
+                    hostname.clone(),
+                    now,
+                ));
+                wrote_source_observation = true;
+            }
+        }
+        for observation in &device.observations {
+            if observation.mac.is_none() && observation.ip.is_none() {
+                continue;
+            }
+            out.push(inventory_observation(
+                inventory_action_for_observation(observation),
+                observation.mac.clone(),
+                observation.ip.map(|ip| ip.to_string()),
+                observation.hostname.clone().or_else(|| hostname.clone()),
+                now,
+            ));
+            wrote_source_observation = true;
+        }
+        for lease in &device.leases {
+            out.push(inventory_observation(
+                "update",
+                Some(lease.mac.clone()),
+                Some(lease.ip.to_string()),
+                lease.name.clone().or_else(|| hostname.clone()),
+                now,
+            ));
+            wrote_source_observation = true;
+        }
+        if wrote_source_observation {
+            continue;
+        }
+
         let action = if device.presence == "offline" {
             "remove"
         } else {
@@ -723,44 +815,78 @@ fn inventory_result_to_observations(
         };
         if !device.macs.is_empty() {
             for mac in device.macs {
-                out.push(AgentDeviceObservationInput {
-                    kind: "inventory".into(),
-                    action: action.into(),
-                    mac: Some(mac),
-                    ip: device.ips.first().map(ToString::to_string),
-                    hostname: hostname.clone(),
-                    first_seen_unix: now,
-                    last_seen_unix: now,
-                });
+                out.push(inventory_observation(
+                    action,
+                    Some(mac),
+                    device.ips.first().map(ToString::to_string),
+                    hostname.clone(),
+                    now,
+                ));
             }
         } else {
             for ip in &device.ips {
-                out.push(AgentDeviceObservationInput {
-                    kind: "inventory".into(),
-                    action: action.into(),
-                    mac: None,
-                    ip: Some(ip.to_string()),
-                    hostname: hostname.clone(),
-                    first_seen_unix: now,
-                    last_seen_unix: now,
-                });
+                out.push(inventory_observation(
+                    action,
+                    None,
+                    Some(ip.to_string()),
+                    hostname.clone(),
+                    now,
+                ));
             }
         }
     }
     Ok(out)
 }
 
+fn inventory_observation(
+    action: &str,
+    mac: Option<String>,
+    ip: Option<String>,
+    hostname: Option<String>,
+    now: u64,
+) -> AgentDeviceObservationInput {
+    AgentDeviceObservationInput {
+        kind: "inventory".into(),
+        action: action.into(),
+        mac,
+        ip,
+        hostname,
+        first_seen_unix: now,
+        last_seen_unix: now,
+    }
+}
+
+fn inventory_action_for_neighbor(neighbor: &InventoryNeighbor) -> &'static str {
+    if neighbor
+        .state
+        .as_deref()
+        .is_some_and(|state| state.eq_ignore_ascii_case("FAILED"))
+    {
+        "remove"
+    } else {
+        "update"
+    }
+}
+
+fn inventory_action_for_observation(observation: &InventoryObservationFact) -> &str {
+    match observation.action.as_str() {
+        "add" | "old" | "update" => "update",
+        "remove" | "del" => "remove",
+        _ if observation.kind == "neigh" => "update",
+        _ => "update",
+    }
+}
+
 fn observation_presence_rank(observation: &AgentDeviceObservation) -> u8 {
     match observation.last_action.as_str() {
-        "remove" | "failed" => 0,
-        "permanent" | "reachable" => 3,
-        "stale" | "add" | "old" | "update" => 2,
+        "remove" => 0,
+        "add" | "old" | "update" => 2,
         _ => 1,
     }
 }
 
 fn observation_is_offline(observation: &AgentDeviceObservation) -> bool {
-    matches!(observation.last_action.as_str(), "remove" | "failed")
+    observation.last_action == "remove"
 }
 
 fn rank_presence(rank: u8) -> &'static str {
@@ -982,5 +1108,85 @@ mod tests {
         assert_eq!(observations[0].kind, "inventory");
         assert_eq!(observations[0].action, "update");
         assert_eq!(observations[0].mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+    }
+
+    #[test]
+    fn inventory_result_preserves_neighbor_failed_ip_as_remove() {
+        let observations = inventory_result_to_observations(serde_json::json!({
+            "kind": "inventory",
+            "devices": [{
+                "names": ["lda"],
+                "ips": ["192.168.1.2", "192.168.1.3"],
+                "macs": ["aa:bb:cc:dd:ee:ff"],
+                "neighbors": [
+                    {
+                        "ip": "192.168.1.2",
+                        "mac": "aa:bb:cc:dd:ee:ff",
+                        "state": "FAILED"
+                    },
+                    {
+                        "ip": "192.168.1.3",
+                        "mac": "aa:bb:cc:dd:ee:ff",
+                        "state": "REACHABLE"
+                    }
+                ],
+                "presence": "online"
+            }]
+        }))
+        .expect("inventory should map");
+
+        assert_eq!(observations.len(), 2);
+        let removed = observations
+            .iter()
+            .find(|observation| observation.ip.as_deref() == Some("192.168.1.2"))
+            .expect("failed neighbor observation should exist");
+        assert_eq!(removed.action, "remove");
+        assert_eq!(removed.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+
+        let current = observations
+            .iter()
+            .find(|observation| observation.ip.as_deref() == Some("192.168.1.3"))
+            .expect("reachable neighbor observation should exist");
+        assert_eq!(current.action, "update");
+        assert_eq!(current.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
+    }
+
+    #[test]
+    fn inventory_result_preserves_hook_observations_and_leases() {
+        let observations = inventory_result_to_observations(serde_json::json!({
+            "kind": "inventory",
+            "devices": [{
+                "names": ["lda"],
+                "ips": ["192.168.1.2", "192.168.1.3"],
+                "macs": ["aa:bb:cc:dd:ee:ff"],
+                "observations": [{
+                    "kind": "neigh",
+                    "action": "remove",
+                    "mac": "aa:bb:cc:dd:ee:ff",
+                    "ip": "192.168.1.2"
+                }],
+                "leases": [{
+                    "expires_epoch": 1893456000_u64,
+                    "ip": "192.168.1.3",
+                    "mac": "aa:bb:cc:dd:ee:ff",
+                    "name": "lda"
+                }],
+                "presence": "likely_online"
+            }]
+        }))
+        .expect("inventory should map");
+
+        assert_eq!(observations.len(), 2);
+        assert!(observations.iter().any(|observation| {
+            observation.action == "remove"
+                && observation.mac.as_deref() == Some("aa:bb:cc:dd:ee:ff")
+                && observation.ip.as_deref() == Some("192.168.1.2")
+        }));
+        assert!(observations.iter().any(|observation| {
+            observation.action == "update"
+                && observation.mac.as_deref() == Some("aa:bb:cc:dd:ee:ff")
+                && observation.ip.as_deref() == Some("192.168.1.3")
+                && observation.hostname.as_deref() == Some("lda")
+        }));
     }
 }

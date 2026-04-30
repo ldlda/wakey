@@ -277,7 +277,7 @@ pub(in crate::state::store) fn normalize_agent_observation(
 
 fn observation_identifier(kind: &str, mac: Option<&str>, ip: Option<&str>) -> Option<String> {
     match (kind, mac, ip) {
-        ("neigh", Some(mac), Some(ip)) => Some(format!("mac:{mac}:ip:{ip}")),
+        ("neigh" | "inventory", Some(mac), Some(ip)) => Some(format!("mac:{mac}:ip:{ip}")),
         (_, Some(mac), _) => Some(format!("mac:{mac}")),
         (_, None, Some(ip)) => Some(format!("ip:{ip}")),
         (_, None, None) => None,

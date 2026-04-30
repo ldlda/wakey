@@ -211,7 +211,7 @@ impl Store {
             r#"SELECT events.event_id as "event_id!",
                     ('agent:' || events.agent_id || ':' || events.kind || ':' ||
                         CASE
-                            WHEN events.kind = 'neigh' AND events.mac IS NOT NULL AND events.ip IS NOT NULL
+                            WHEN events.kind IN ('neigh', 'inventory') AND events.mac IS NOT NULL AND events.ip IS NOT NULL
                                 THEN 'mac:' || events.mac || ':ip:' || events.ip
                             WHEN events.mac IS NOT NULL THEN 'mac:' || events.mac
                             WHEN events.ip IS NOT NULL THEN 'ip:' || events.ip
@@ -241,7 +241,7 @@ impl Store {
                AND (?4 IS NULL OR events.ip = ?4)
                AND (?5 IS NULL OR ('agent:' || events.agent_id || ':' || events.kind || ':' ||
                     CASE
-                        WHEN events.kind = 'neigh' AND events.mac IS NOT NULL AND events.ip IS NOT NULL
+                        WHEN events.kind IN ('neigh', 'inventory') AND events.mac IS NOT NULL AND events.ip IS NOT NULL
                             THEN 'mac:' || events.mac || ':ip:' || events.ip
                         WHEN events.mac IS NOT NULL THEN 'mac:' || events.mac
                         WHEN events.ip IS NOT NULL THEN 'ip:' || events.ip
