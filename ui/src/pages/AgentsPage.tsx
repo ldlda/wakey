@@ -2,7 +2,11 @@ import type { Agent } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { toast } from "sonner";
+import { Bot, Inbox } from "lucide-react";
+import { displayAgentLabel } from "@/components/AgentSelector";
 
 type Props = {
   agents: Agent[];
@@ -23,29 +27,17 @@ export function AgentsPage({
   onSetAgentNickname,
 }: Props) {
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-
-  function displayLabel(agent: Agent): string {
-    const nickname = agent.nickname?.trim();
-    return nickname ? nickname : agent.agent_id;
-  }
 
   async function onRevoke(agentId: string) {
     if (!window.confirm(`Revoke agent credentials for ${agentId}?`)) {
       return;
     }
     setBusy(true);
-    setStatus("");
-    setError("");
     try {
-      const revoked = await onRevokeAgent(agentId);
-      setStatus(
-        revoked ? `Revoked ${agentId}` : `${agentId} was already absent`,
-      );
+      await onRevokeAgent(agentId);
     } catch (err) {
-      setError(String(err));
+      toast.error("Revoke failed", { description: String(err) });
     } finally {
       setBusy(false);
     }
@@ -54,17 +46,10 @@ export function AgentsPage({
   async function onSaveNickname(agent: Agent) {
     const draft = drafts[agent.agent_id] ?? agent.nickname ?? "";
     setBusy(true);
-    setStatus("");
-    setError("");
     try {
-      const updated = await onSetAgentNickname(agent.agent_id, draft);
-      setStatus(
-        updated
-          ? `Updated nickname for ${agent.agent_id}`
-          : `${agent.agent_id} not found`,
-      );
+      await onSetAgentNickname(agent.agent_id, draft);
     } catch (err) {
-      setError(String(err));
+      toast.error("Failed to update nickname", { description: String(err) });
     } finally {
       setBusy(false);
     }
@@ -73,29 +58,61 @@ export function AgentsPage({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Agents</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Bot className="size-5 text-primary" />
+          Agents
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid gap-2">
           {agents.map((agent) => (
             <div
-              className="flex items-start justify-between gap-3 rounded-md border bg-card px-3 py-2"
+              className={`rounded-lg border px-4 py-3 transition-colors ${
+                selectedAgentId === agent.agent_id
+                  ? "border-primary/40 bg-primary/5"
+                  : "bg-card"
+              }`}
               key={agent.agent_id}
             >
-              <Button
-                variant={
-                  selectedAgentId === agent.agent_id ? "secondary" : "outline"
-                }
-                className="flex h-auto flex-1 items-center justify-between gap-3 px-3 py-2 text-left"
-                onClick={() => onSelectAgent(agent.agent_id)}
-                disabled={busy}
-              >
-                <span className="min-w-0 truncate">{displayLabel(agent)}</span>
-                <span className="text-xs text-muted-foreground">
-                  {agent.connected ? "connected" : "offline"}
-                </span>
-              </Button>
-              <div className="grid min-w-52 gap-2">
+              <div className="flex items-start justify-between gap-3">
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 flex-col items-start gap-1 text-left"
+                  onClick={() => onSelectAgent(agent.agent_id)}
+                  disabled={busy}
+                >
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={`size-2 shrink-0 rounded-full ${agent.connected ? "bg-emerald-500" : "bg-zinc-400"}`}
+                      aria-hidden
+                    />
+                    <span className="text-sm font-medium">
+                      {displayAgentLabel(agent)}
+                    </span>
+                    <Badge
+                      variant={agent.connected ? "secondary" : "outline"}
+                      className="text-[0.6rem] px-1.5 py-0"
+                    >
+                      {agent.connected ? "connected" : "offline"}
+                    </Badge>
+                  </span>
+                  <code className="text-[0.65rem] text-muted-foreground/70 font-mono truncate max-w-full">
+                    {agent.agent_id}
+                  </code>
+                </button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 border-destructive/50 text-destructive hover:bg-destructive/10"
+                  onClick={() => void onRevoke(agent.agent_id)}
+                  disabled={busy}
+                >
+                  Revoke
+                </Button>
+              </div>
+
+              <div className="mt-2 flex items-center gap-2">
                 <Input
                   value={drafts[agent.agent_id] ?? agent.nickname ?? ""}
                   onChange={(e) =>
@@ -106,45 +123,31 @@ export function AgentsPage({
                   }
                   placeholder="nickname (optional)"
                   disabled={busy}
+                  className="flex-1"
                 />
-                <div className="flex items-center justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void onSaveNickname(agent)}
-                    disabled={busy}
-                  >
-                    Save Name
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0 border-destructive/50 text-destructive hover:bg-destructive/10"
-                    onClick={() => void onRevoke(agent.agent_id)}
-                    disabled={busy}
-                  >
-                    Revoke
-                  </Button>
-                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void onSaveNickname(agent)}
+                  disabled={busy}
+                >
+                  Save
+                </Button>
               </div>
             </div>
           ))}
           {!agents.length && (
-            <div className="px-1 py-2 text-sm text-muted-foreground">
-              No agents enrolled
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Inbox className="size-10 text-muted-foreground/30" />
+              <p className="mt-3 text-sm text-muted-foreground">
+                No agents enrolled
+              </p>
+              <p className="text-xs text-muted-foreground/70">
+                Issue a token and enroll an agent to get started
+              </p>
             </div>
           )}
         </div>
-        {status && (
-          <pre className="max-h-80 overflow-auto rounded-md border bg-muted/40 p-3 text-xs">
-            {status}
-          </pre>
-        )}
-        {error && (
-          <pre className="max-h-80 overflow-auto rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive">
-            {error}
-          </pre>
-        )}
       </CardContent>
     </Card>
   );

@@ -1,28 +1,66 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
-import { ChevronDown, Moon, Sun } from "lucide-react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import {
+  Moon,
+  Sun,
+  Monitor,
+  Zap,
+  BarChart3,
+  Bell,
+  Bot,
+  FileText,
+  Key,
+  Eye,
+  Terminal,
+  PanelLeftClose,
+  PanelLeft,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
-const navItems = [
-  ["/", "Devices"],
-  ["/dashboard", "Fleet Health"],
-] as const;
+const SIDEBAR_KEY = "wakey-sidebar-collapsed";
 
-const adminItems = [
-  ["/agents", "Agents"],
-  ["/tokens", "Tokens"],
-  ["/alerts", "Alerts"],
-  ["/observations", "Raw Observations"],
-  ["/commands", "Command Runner"],
-  ["/audit", "Audit"],
-] as const;
+type NavSection = {
+  label: string;
+  items: readonly {
+    to: string;
+    label: string;
+    icon: React.ElementType;
+    end?: boolean;
+  }[];
+};
+
+const navSections: NavSection[] = [
+  {
+    label: "Operations",
+    items: [
+      { to: "/", label: "Devices", icon: Monitor, end: true },
+      { to: "/wake", label: "Wake Tools", icon: Zap },
+    ],
+  },
+  {
+    label: "Monitoring",
+    items: [
+      { to: "/dashboard", label: "Fleet Health", icon: BarChart3 },
+      { to: "/alerts", label: "Alerts", icon: Bell },
+      { to: "/observations", label: "Observations", icon: Eye },
+    ],
+  },
+  {
+    label: "Admin",
+    items: [
+      { to: "/agents", label: "Agents", icon: Bot },
+      { to: "/audit", label: "Audit", icon: FileText },
+      { to: "/tokens", label: "Tokens", icon: Key },
+      { to: "/commands", label: "Commands", icon: Terminal },
+    ],
+  },
+];
 
 type Theme = "light" | "dark";
 
@@ -37,8 +75,26 @@ function resolveInitialTheme(): Theme {
     : "light";
 }
 
+function usePageTitle() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const flat = navSections.flatMap((s) => s.items);
+    const match = flat.find((item) =>
+      item.end
+        ? pathname === "/ui" || pathname === "/ui/" || pathname === "/"
+        : pathname.startsWith(item.to) && item.to !== "/",
+    );
+    document.title = match ? `${match.label} — Wakey` : "Wakey Operator UI";
+  }, [pathname]);
+}
+
 export function AppLayout() {
   const [theme, setTheme] = useState<Theme>(() => resolveInitialTheme());
+  const [collapsed, setCollapsed] = useState(() => {
+    return window.localStorage.getItem(SIDEBAR_KEY) === "true";
+  });
+
+  usePageTitle();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -46,73 +102,136 @@ export function AppLayout() {
     window.localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_KEY, String(collapsed));
+  }, [collapsed]);
+
   return (
-    <div className="mx-auto max-w-7xl p-4">
-      <header className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Wakey</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Fleet devices, presence, and wake controls
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="fixed right-3 top-3 z-50 size-9 rounded-full p-0 sm:static sm:size-auto sm:rounded-md sm:px-3 sm:py-2"
-          aria-label={theme === "dark" ? "Switch to light" : "Switch to dark"}
-          title={theme === "dark" ? "Switch to light" : "Switch to dark"}
-          onClick={() =>
-            setTheme((current) => (current === "dark" ? "light" : "dark"))
-          }
-        >
-          {theme === "dark" ? (
-            <Sun className="size-4" aria-hidden />
-          ) : (
-            <Moon className="size-4" aria-hidden />
+    <div className="app-shell">
+      <aside
+        className={`sidebar ${collapsed ? "sidebar--collapsed" : ""}`}
+        data-collapsed={collapsed}
+      >
+        <div className="sidebar-brand">
+          <div className="sidebar-logo">
+            <Zap className="size-5 text-primary" />
+          </div>
+          {!collapsed && (
+            <div className="sidebar-brand-text">
+              <span className="text-sm font-semibold tracking-tight">
+                Wakey
+              </span>
+              <span className="text-[0.65rem] leading-none text-muted-foreground">
+                Operator UI
+              </span>
+            </div>
           )}
-          <span className="hidden sm:inline">
-            {theme === "dark" ? "Switch to light" : "Switch to dark"}
-          </span>
-        </Button>
-      </header>
+        </div>
 
-      <nav className="mb-3 flex flex-wrap items-center gap-2">
-        {navItems.map(([to, label]) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/"}
-            className={({ isActive }) =>
-              [
-                "rounded-md border px-3 py-1.5 text-sm transition-colors",
-                isActive
-                  ? "border-primary/60 bg-primary/10 text-foreground"
-                  : "border-border bg-card text-muted-foreground hover:text-foreground",
-              ].join(" ")
-            }
-          >
-            {label}
-          </NavLink>
-        ))}
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground">
-            Admin / Debug
-            <ChevronDown className="size-4" aria-hidden />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-48">
-            {adminItems.map(([to, label]) => (
-              <DropdownMenuItem key={to}>
-                <NavLink className="w-full" to={to}>
-                  {label}
-                </NavLink>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </nav>
+        <nav className="sidebar-nav">
+          {navSections.map((section) => (
+            <div key={section.label} className="sidebar-section">
+              {!collapsed && (
+                <div className="sidebar-section-label">{section.label}</div>
+              )}
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const link = (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    className={({ isActive }) =>
+                      [
+                        "sidebar-link",
+                        isActive ? "sidebar-link--active" : "",
+                        collapsed ? "sidebar-link--collapsed" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")
+                    }
+                  >
+                    <Icon className="sidebar-link-icon" />
+                    {!collapsed && (
+                      <span className="sidebar-link-label">{item.label}</span>
+                    )}
+                  </NavLink>
+                );
 
-      <main>
+                if (collapsed) {
+                  return (
+                    <Tooltip key={item.to}>
+                      <TooltipTrigger>{link}</TooltipTrigger>
+                      <TooltipContent side="right">{item.label}</TooltipContent>
+                    </Tooltip>
+                  );
+                }
+                return link;
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <div className="sidebar-footer">
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="sidebar-footer-btn"
+                aria-label={
+                  theme === "dark" ? "Switch to light" : "Switch to dark"
+                }
+                onClick={() =>
+                  setTheme((c) => (c === "dark" ? "light" : "dark"))
+                }
+              >
+                {theme === "dark" ? (
+                  <Sun className="size-4" aria-hidden />
+                ) : (
+                  <Moon className="size-4" aria-hidden />
+                )}
+                {!collapsed && (
+                  <span className="sidebar-link-label">
+                    {theme === "dark" ? "Light mode" : "Dark mode"}
+                  </span>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {theme === "dark" ? "Switch to light" : "Switch to dark"}
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="sidebar-footer-btn"
+                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                onClick={() => setCollapsed((c) => !c)}
+              >
+                {collapsed ? (
+                  <PanelLeft className="size-4" aria-hidden />
+                ) : (
+                  <PanelLeftClose className="size-4" aria-hidden />
+                )}
+                {!collapsed && (
+                  <span className="sidebar-link-label">Collapse</span>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {collapsed ? "Expand" : "Collapse"}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      </aside>
+
+      <main className="app-main">
         <Outlet />
       </main>
     </div>

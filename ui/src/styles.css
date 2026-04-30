@@ -8,36 +8,42 @@
 :root {
   --card: oklch(1 0 0);
   --muted: oklch(0.96 0.004 145);
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.23 0.02 155);
-  --card-foreground: oklch(0.23 0.02 155);
+  --background: oklch(0.985 0.002 200);
+  --foreground: oklch(0.18 0.02 240);
+  --card-foreground: oklch(0.18 0.02 240);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.23 0.02 155);
-  --primary: oklch(0.56 0.12 156);
-  --primary-foreground: oklch(0.985 0.003 95);
-  --secondary: oklch(0.965 0.01 155);
+  --popover-foreground: oklch(0.18 0.02 240);
+  --primary: oklch(0.55 0.14 155);
+  --primary-foreground: oklch(0.985 0.005 155);
+  --secondary: oklch(0.96 0.01 155);
   --secondary-foreground: oklch(0.3 0.035 156);
-  --muted-foreground: oklch(0.5 0.02 155);
-  --accent: oklch(0.945 0.015 156);
+  --muted-foreground: oklch(0.48 0.02 240);
+  --accent: oklch(0.945 0.018 155);
   --accent-foreground: oklch(0.3 0.035 156);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.9 0.01 155);
-  --input: oklch(0.9 0.01 155);
-  --ring: oklch(0.62 0.08 156);
-  --chart-1: oklch(0.62 0.12 156);
+  --border: oklch(0.91 0.008 240);
+  --input: oklch(0.91 0.008 240);
+  --ring: oklch(0.55 0.14 155);
+  --chart-1: oklch(0.55 0.14 155);
   --chart-2: oklch(0.56 0.11 188);
   --chart-3: oklch(0.67 0.12 120);
   --chart-4: oklch(0.72 0.15 85);
   --chart-5: oklch(0.58 0.18 35);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.23 0.02 155);
-  --sidebar-primary: oklch(0.56 0.12 156);
-  --sidebar-primary-foreground: oklch(0.985 0.003 95);
-  --sidebar-accent: oklch(0.945 0.015 156);
-  --sidebar-accent-foreground: oklch(0.3 0.035 156);
-  --sidebar-border: oklch(0.9 0.01 155);
-  --sidebar-ring: oklch(0.62 0.08 156);
+  --sidebar: oklch(0.975 0.005 155);
+  --sidebar-foreground: oklch(0.18 0.02 240);
+  --sidebar-primary: oklch(0.55 0.14 155);
+  --sidebar-primary-foreground: oklch(0.985 0.005 155);
+  --sidebar-accent: oklch(0.94 0.02 155);
+  --sidebar-accent-foreground: oklch(0.25 0.03 155);
+  --sidebar-border: oklch(0.92 0.008 240);
+  --sidebar-ring: oklch(0.55 0.14 155);
+
+  /* Semantic presence colors */
+  --presence-online: oklch(0.62 0.17 145);
+  --presence-likely: oklch(0.75 0.15 75);
+  --presence-unknown: oklch(0.65 0.02 240);
+  --presence-offline: oklch(0.62 0.2 25);
 }
 
 @theme inline {
@@ -84,38 +90,45 @@
 }
 
 .dark {
-  --muted: oklch(0.25 0.01 156);
-  --background: oklch(0.19 0.02 156);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.24 0.015 156);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.24 0.015 156);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.68 0.11 156);
-  --primary-foreground: oklch(0.17 0.02 156);
-  --secondary: oklch(0.28 0.02 156);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted-foreground: oklch(0.75 0.02 156);
-  --accent: oklch(0.3 0.02 156);
-  --accent-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.22 0.015 240);
+  --background: oklch(0.14 0.02 250);
+  --foreground: oklch(0.93 0.005 240);
+  --card: oklch(0.18 0.018 245);
+  --card-foreground: oklch(0.93 0.005 240);
+  --popover: oklch(0.18 0.018 245);
+  --popover-foreground: oklch(0.93 0.005 240);
+  --primary: oklch(0.7 0.14 155);
+  --primary-foreground: oklch(0.14 0.02 155);
+  --secondary: oklch(0.24 0.02 240);
+  --secondary-foreground: oklch(0.93 0.005 240);
+  --muted-foreground: oklch(0.65 0.015 240);
+  --accent: oklch(0.24 0.025 245);
+  --accent-foreground: oklch(0.93 0.005 240);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.65 0.08 156);
-  --chart-1: oklch(0.68 0.11 156);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.7 0.14 155);
+  --chart-1: oklch(0.7 0.14 155);
   --chart-2: oklch(0.63 0.11 188);
   --chart-3: oklch(0.73 0.12 120);
   --chart-4: oklch(0.78 0.14 85);
   --chart-5: oklch(0.67 0.16 35);
-  --sidebar: oklch(0.24 0.015 156);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.68 0.11 156);
-  --sidebar-primary-foreground: oklch(0.17 0.02 156);
-  --sidebar-accent: oklch(0.3 0.02 156);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.65 0.08 156);
+  --sidebar: oklch(0.16 0.02 248);
+  --sidebar-foreground: oklch(0.93 0.005 240);
+  --sidebar-primary: oklch(0.7 0.14 155);
+  --sidebar-primary-foreground: oklch(0.14 0.02 155);
+  --sidebar-accent: oklch(0.22 0.025 245);
+  --sidebar-accent-foreground: oklch(0.93 0.005 240);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.7 0.14 155);
+
+  --presence-online: oklch(0.72 0.18 145);
+  --presence-likely: oklch(0.8 0.14 75);
+  --presence-unknown: oklch(0.6 0.015 240);
+  --presence-offline: oklch(0.7 0.2 25);
 }
+
+/* ── Base ─────────────────────────────────────────────────────────────── */
 
 @layer base {
   * {
@@ -123,28 +136,251 @@
   }
   body {
     @apply bg-background text-foreground;
-    background-color: var(--background);
-    background-image:
-      radial-gradient(
-        1200px 700px at 15% -10%,
-        color-mix(in oklab, var(--primary) 15%, var(--background)) 0%,
-        transparent 60%
-      ),
-      radial-gradient(
-        900px 600px at 85% 0%,
-        color-mix(in oklab, var(--accent) 12%, var(--background)) 0%,
-        transparent 58%
-      ),
-      linear-gradient(
-        180deg,
-        color-mix(in oklab, var(--background) 85%, var(--foreground) 15%) 0%,
-        var(--background) 45%
-      );
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
     margin: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* ── Sidebar shell ────────────────────────────────────────────────────── */
+
+.app-shell {
+  display: flex;
+  min-height: 100dvh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 15rem;
+  height: 100dvh;
+  padding: 0.75rem;
+  background: var(--sidebar);
+  border-right: 1px solid var(--sidebar-border);
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sidebar--collapsed {
+  width: 3.5rem;
+  padding: 0.75rem 0.45rem;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  padding: 1.25rem 1.5rem;
+  background:
+    radial-gradient(
+      1200px 700px at 15% -10%,
+      color-mix(in oklab, var(--primary) 8%, var(--background)) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 600px at 85% 0%,
+      color-mix(in oklab, var(--accent) 6%, var(--background)) 0%,
+      transparent 58%
+    ),
+    var(--background);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  overflow-y: auto;
+  max-width: 100%;
+}
+
+/* ── Sidebar internals ────────────────────────────────────────────────── */
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.35rem 0.75rem;
+  min-height: 2.5rem;
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+}
+
+.sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.sidebar-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sidebar-section {
+  margin-bottom: 0.35rem;
+}
+
+.sidebar-section-label {
+  padding: 0.5rem 0.55rem 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  user-select: none;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+  font-weight: 450;
+  color: var(--sidebar-foreground);
+  text-decoration: none;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+  white-space: nowrap;
+}
+
+.sidebar-link:hover {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+
+.sidebar-link--active {
+  background: color-mix(in oklab, var(--sidebar-primary) 14%, transparent);
+  color: var(--sidebar-primary);
+  font-weight: 550;
+}
+
+.sidebar-link--collapsed {
+  justify-content: center;
+  padding: 0.5rem;
+}
+
+.sidebar-link-icon {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.sidebar-link--active .sidebar-link-icon {
+  opacity: 1;
+}
+
+.sidebar-link-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--sidebar-border);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.sidebar-footer-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.8125rem;
+  font-weight: 450;
+  color: var(--sidebar-foreground);
+}
+
+.sidebar--collapsed .sidebar-footer-btn {
+  justify-content: center;
+  padding: 0.5rem;
+}
+
+/* ── Presence badges ──────────────────────────────────────────────────── */
+
+.presence-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.presence-dot--online {
+  background: var(--presence-online);
+}
+.presence-dot--likely_online {
+  background: var(--presence-likely);
+}
+.presence-dot--unknown {
+  background: var(--presence-unknown);
+}
+.presence-dot--offline {
+  background: var(--presence-offline);
+}
+
+.presence-badge--online {
+  border-color: color-mix(in oklab, var(--presence-online) 40%, transparent);
+  color: var(--presence-online);
+}
+.presence-badge--likely_online {
+  border-color: color-mix(in oklab, var(--presence-likely) 40%, transparent);
+  color: var(--presence-likely);
+}
+.presence-badge--unknown {
+  border-color: var(--border);
+  color: var(--muted-foreground);
+}
+.presence-badge--offline {
+  border-color: color-mix(in oklab, var(--presence-offline) 40%, transparent);
+  color: var(--presence-offline);
+}
+
+/* ── Mobile ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 50;
+    box-shadow: 0 4px 24px oklch(0 0 0 / 12%);
+  }
+
+  .sidebar--collapsed {
+    width: 0;
+    padding: 0;
+    border-right: none;
+  }
+
+  .sidebar--collapsed * {
+    visibility: hidden;
+  }
+
+  .app-main {
+    padding: 1rem;
   }
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { toast } from "sonner";
 
 import {
   type Agent,
@@ -13,6 +14,7 @@ import {
   revokeAgent,
   setAgentNickname,
 } from "@/api";
+import { Toaster } from "@/components/ui/sonner";
 import { AppLayout } from "@/layout/AppLayout";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -20,8 +22,9 @@ import { AuditPage } from "@/pages/AuditPage";
 import { CommandsPage } from "@/pages/CommandsPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { DevicesPage } from "@/pages/DevicesPage";
-import { ObservationsPage } from "@/pages/ObservationsPage";
 import { TokensPage } from "@/pages/TokensPage";
+import { WakeToolsPage } from "@/pages/WakeToolsPage";
+import { ObservationsPage } from "@/pages/ObservationsPage";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -33,11 +36,9 @@ export function App() {
   const [selectedAgentId, setSelectedAgentId] = useState("");
 
   const [state, setState] = useState<LoadState>("idle");
-  const [error, setError] = useState("");
 
   async function loadAll() {
     setState("loading");
-    setError("");
     try {
       const [nextAgents, nextAlerts, nextHistory, nextAudit] =
         await Promise.all([
@@ -65,13 +66,16 @@ export function App() {
       setState("ready");
     } catch (err) {
       setState("error");
-      setError(String(err));
+      toast.error("Failed to load data", { description: String(err) });
     }
   }
 
   async function onRevokeAgent(agentId: string): Promise<boolean> {
     const result = await revokeAgent(agentId);
     await loadAll();
+    if (result.revoked) {
+      toast.success(`Revoked ${agentId}`);
+    }
     return result.revoked;
   }
 
@@ -81,6 +85,11 @@ export function App() {
   ): Promise<boolean> {
     const result = await setAgentNickname(agentId, nickname);
     await loadAll();
+    if (result.updated) {
+      toast.success(`Nickname updated for ${agentId}`, {
+        description: nickname || "(cleared)",
+      });
+    }
     return result.updated;
   }
 
@@ -126,7 +135,6 @@ export function App() {
 
   return (
     <>
-      {error && <pre className="error">{error}</pre>}
       <Routes>
         <Route path="/" element={<AppLayout />}>
           <Route
@@ -141,18 +149,29 @@ export function App() {
             }
           />
           <Route
+            path="wake"
+            element={
+              <WakeToolsPage
+                agents={agents}
+                selectedAgentId={selectedAgentId}
+                onSelectAgent={setSelectedAgentId}
+                onAfterWake={loadAll}
+              />
+            }
+          />
+          <Route
             path="dashboard"
             element={
               <DashboardPage
                 agents={agents}
                 alerts={alerts}
                 transitions={history}
+                audit={audit}
                 loading={state === "loading"}
                 onRefresh={loadAll}
               />
             }
           />
-          <Route path="observations" element={<ObservationsPage />} />
           <Route
             path="agents"
             element={
@@ -196,9 +215,11 @@ export function App() {
             }
           />
           <Route path="tokens" element={<TokensPage />} />
+          <Route path="observations" element={<ObservationsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
+      <Toaster richColors position="bottom-right" />
     </>
   );
 }

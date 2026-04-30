@@ -139,7 +139,16 @@ export function DeviceInventoryTable({
             {summarize(row.macs)}
           </span>
           <span className="device-cell" data-label="Presence">
-            <Badge variant="outline">{row.presence}</Badge>
+            <Badge
+              variant="outline"
+              className={`presence-badge--${row.presence}`}
+            >
+              <span
+                className={`presence-dot presence-dot--${row.presence}`}
+                aria-hidden
+              />
+              {row.presence.replace("_", " ")}
+            </Badge>
           </span>
           <span className="device-cell device-action" data-label="">
             <Button

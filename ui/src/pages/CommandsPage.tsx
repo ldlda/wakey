@@ -1,7 +1,15 @@
 import { useState } from "react";
+import { Terminal } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -11,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { AgentSelector } from "@/components/AgentSelector";
 import { runCommand, type Agent, type CommandKind } from "@/api";
 
 type Props = {
@@ -26,11 +35,6 @@ export function CommandsPage({
   onSelectAgent,
   onAfterCommand,
 }: Props) {
-  function displayAgentLabel(agent: Agent): string {
-    const nickname = agent.nickname?.trim();
-    return nickname ? nickname : agent.agent_id;
-  }
-
   const [kind, setKind] = useState<CommandKind>("devs");
   const [query, setQuery] = useState("");
   const [output, setOutput] = useState("Select agent and run a command");
@@ -44,9 +48,11 @@ export function CommandsPage({
     try {
       const out = await runCommand(selectedAgentId, kind, query.trim());
       setOutput(JSON.stringify(out, null, 2));
+      toast.success(`Command "${kind}" completed`);
       if (onAfterCommand) await onAfterCommand();
     } catch (err) {
       setOutput(String(err));
+      toast.error("Command failed", { description: String(err) });
     } finally {
       setRunning(false);
     }
@@ -55,44 +61,23 @@ export function CommandsPage({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Command Runner</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <Terminal className="size-5 text-primary" />
+          Command Runner
+        </CardTitle>
+        <CardDescription>
+          Debug tool — send raw commands to agents and inspect JSON responses
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="grid gap-3" onSubmit={submit}>
           <label className="grid gap-1 text-sm text-muted-foreground">
             <span>Agent</span>
-            <Select
+            <AgentSelector
+              agents={agents}
               value={selectedAgentId}
-              onValueChange={(value) => {
-                if (value) onSelectAgent(value);
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select agent" />
-              </SelectTrigger>
-              <SelectContent>
-                {agents.map((agent) => (
-                  <SelectItem
-                    key={agent.agent_id}
-                    value={agent.agent_id}
-                    disabled={!agent.connected}
-                  >
-                    <span className="flex min-w-0 flex-1 items-center gap-2">
-                      <span
-                        className={`size-2 shrink-0 rounded-full ${agent.connected ? "bg-emerald-500" : "bg-zinc-400"}`}
-                        aria-hidden
-                      />
-                      <span className="min-w-0 truncate">
-                        {displayAgentLabel(agent)}
-                      </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {agent.connected ? "connected" : "offline"}
-                      </span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={onSelectAgent}
+            />
           </label>
 
           <label className="grid gap-1 text-sm text-muted-foreground">
