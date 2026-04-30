@@ -17,12 +17,13 @@ use crate::state::{
     KnownDeviceSummary,
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct ListFleetDevicesQuery {
     pub query: Option<String>,
     pub presence: Option<String>,
     pub known: Option<String>,
     pub agent_id: Option<String>,
+    pub visibility: Option<String>,
     pub limit: Option<usize>,
 }
 
@@ -307,6 +308,7 @@ pub async fn wake_fleet_device(
         presence: None,
         known: None,
         agent_id: None,
+        visibility: Some("all".into()),
         limit: Some(1000),
     };
     let devices = load_fleet_devices(&state, &query).await.map_err(|err| {
@@ -506,8 +508,14 @@ fn filter_fleet_devices(devices: &mut Vec<FleetDevice>, query: &ListFleetDevices
     let presence = normalize_filter(query.presence.as_deref());
     let known = normalize_filter(query.known.as_deref());
     let agent_id = normalize_filter(query.agent_id.as_deref());
+    let visibility = normalize_filter(query.visibility.as_deref());
 
     devices.retain(|device| {
+        if visibility.as_deref().unwrap_or("operator") != "all"
+            && fleet_device_is_operator_noise(device)
+        {
+            return false;
+        }
         if let Some(presence) = presence.as_deref()
             && presence != "all"
             && device.presence != presence
@@ -549,6 +557,15 @@ fn filter_fleet_devices(devices: &mut Vec<FleetDevice>, query: &ListFleetDevices
         }
         true
     });
+}
+
+fn fleet_device_is_operator_noise(device: &FleetDevice) -> bool {
+    device.known_device.is_none()
+        && device.macs.is_empty()
+        && device.hostnames.is_empty()
+        && device.recommended_route.is_none()
+        && device.ips.is_empty()
+        && device.presence == "offline"
 }
 
 fn observation_group_key(
@@ -1089,6 +1106,74 @@ mod tests {
         assert_eq!(devices[0].presence, "offline");
         assert!(devices[0].recommended_route.is_none());
         assert!(!devices[0].route_candidates[0].wakeable);
+    }
+
+    #[test]
+    fn unknown_ip_only_remove_observation_is_hidden() {
+        let mut offline = observation("agent-a", None, Some("192.168.1.2"), 20);
+        offline.kind = "neigh".into();
+        offline.hostname = None;
+        offline.last_action = "remove".into();
+
+        let mut devices = build_fleet_devices(Vec::new(), vec![offline], &context(&["agent-a"]));
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].display_name, "(unknown device)");
+        filter_fleet_devices(&mut devices, &ListFleetDevicesQuery::default());
+        assert!(devices.is_empty());
+    }
+
+    #[test]
+    fn visibility_all_keeps_unknown_ip_only_remove_observation() {
+        let mut offline = observation("agent-a", None, Some("192.168.1.2"), 20);
+        offline.kind = "neigh".into();
+        offline.hostname = None;
+        offline.last_action = "remove".into();
+
+        let mut devices = build_fleet_devices(Vec::new(), vec![offline], &context(&["agent-a"]));
+
+        filter_fleet_devices(
+            &mut devices,
+            &ListFleetDevicesQuery {
+                visibility: Some("all".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].display_name, "(unknown device)");
+    }
+
+    #[test]
+    fn known_ip_only_remove_observation_is_kept() {
+        let known = KnownDevice {
+            device_id: "dev-1".into(),
+            display_name: "lda".into(),
+            pinned: true,
+            created_at_unix: 1,
+            updated_at_unix: 1,
+            notes: None,
+            identifiers: vec![DeviceIdentifier {
+                identifier_key: "ip:192.168.1.2".into(),
+                device_id: "dev-1".into(),
+                kind: "ip".into(),
+                value: "192.168.1.2".into(),
+                created_at_unix: 1,
+            }],
+        };
+        let mut ctx = context(&["agent-a"]);
+        ctx.identifier_map
+            .insert("ip:192.168.1.2".into(), known_device_summary(&known));
+        let mut offline = observation("agent-a", None, Some("192.168.1.2"), 20);
+        offline.kind = "neigh".into();
+        offline.hostname = None;
+        offline.last_action = "remove".into();
+
+        let devices = build_fleet_devices(vec![known], vec![offline], &ctx);
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].device_key, "known:dev-1");
+        assert_eq!(devices[0].display_name, "lda");
+        assert!(devices[0].ips.contains(&"192.168.1.2".to_string()));
     }
 
     #[test]

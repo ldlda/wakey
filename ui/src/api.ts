@@ -270,6 +270,7 @@ export function fetchFleetDevices(opts?: {
   presence?: string;
   known?: string;
   agentId?: string;
+  visibility?: "operator" | "all";
   limit?: number;
 }): Promise<FleetDevice[]> {
   const params = new URLSearchParams();
@@ -279,6 +280,7 @@ export function fetchFleetDevices(opts?: {
   }
   if (opts?.known && opts.known !== "all") params.set("known", opts.known);
   if (opts?.agentId) params.set("agent_id", opts.agentId);
+  if (opts?.visibility) params.set("visibility", opts.visibility);
   params.set("limit", String(opts?.limit ?? 500));
   return request<FleetDevice[]>(
     `/api/v1/control/fleet/devices?${params.toString()}`,
