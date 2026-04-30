@@ -92,7 +92,15 @@ export function AppLayout() {
   return (
     <div className="app-shell">
       <aside
-        className={`sidebar ${collapsed ? "sidebar--collapsed" : ""}`}
+        className={[
+          "sidebar",
+          collapsed ? "sidebar--collapsed" : "",
+          "fixed inset-y-0 left-0 z-50 shadow-xl transition-all duration-300 ease-in-out",
+          "md:sticky md:top-0 md:z-30 md:shadow-none",
+          collapsed ? "-translate-x-full md:translate-x-0" : "translate-x-0",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         data-collapsed={collapsed}
       >
         <div className="sidebar-brand">
@@ -210,7 +218,29 @@ export function AppLayout() {
         </div>
       </aside>
 
-      <main className="app-main">
+      {/* Mobile backdrop */}
+      {!collapsed && (
+        <div
+          className="fixed inset-0 z-40 bg-black/20 md:hidden animate-in fade-in duration-200"
+          onClick={() => setCollapsed(true)}
+        />
+      )}
+
+      {/* Mobile floating button when sidebar is collapsed/hidden */}
+      {collapsed && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="fixed bottom-3 left-3 z-40 md:hidden"
+          aria-label="Open menu"
+          onClick={() => setCollapsed(false)}
+        >
+          <PanelLeft className="size-4" aria-hidden />
+        </Button>
+      )}
+
+      <main className="app-main @container">
         <Outlet />
       </main>
     </div>
