@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Check,
-  Inbox,
-  MoreHorizontal,
-  RefreshCw,
-  Search,
-  Zap,
-} from "lucide-react";
+import { Inbox, MoreHorizontal, RefreshCw, Search, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -74,14 +67,10 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [wakeBusyKey, setWakeBusyKey] = useState("");
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState("");
-  const [copied, setCopied] = useState("");
   const [details, setDetails] = useState<FleetDevice | null>(null);
 
   async function loadFleet() {
     setLoading(true);
-    setError("");
     try {
       const [nextDevices, nextKnownDevices] = await Promise.all([
         fetchFleetDevices({
@@ -96,7 +85,7 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
       setDevices(nextDevices);
       setKnownDevices(nextKnownDevices);
     } catch (err) {
-      setError(String(err));
+      toast.error("Failed to load fleet", { description: String(err) });
     } finally {
       setLoading(false);
     }
@@ -104,19 +93,15 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
 
   async function refreshAllConnected() {
     setRefreshing(true);
-    setStatus("");
-    setError("");
     try {
       const result = await refreshFleetDevices();
       const failed = result.agents.filter((agent) => agent.status !== "ok");
       const msg = failed.length
         ? `Stored ${result.total_accepted} observations; ${failed.length} agent refresh failed`
         : `Stored ${result.total_accepted} observations from ${result.agents.length} connected agents`;
-      setStatus(msg);
       toast.success(msg);
       await loadFleet();
     } catch (err) {
-      setError(String(err));
       toast.error("Fleet refresh failed", { description: String(err) });
     } finally {
       setRefreshing(false);
@@ -126,8 +111,6 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
   async function wakeDevice(device: FleetDevice, routeId?: string | null) {
     if (!device.recommended_route && !routeId) return;
     setWakeBusyKey(device.device_key);
-    setStatus("");
-    setError("");
     try {
       const result = await wakeFleetDevice({
         deviceKey: device.device_key,
@@ -135,11 +118,9 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
       });
       const msg = `Wake sent via ${agentLabel(result.route.agent_id, result.route.nickname)} (${result.route.mac ?? "no mac"})`;
       toast.success(msg);
-      setStatus(msg);
       if (onAfterWake) await onAfterWake();
       await loadFleet();
     } catch (err) {
-      setError(String(err));
       toast.error("Wake failed", { description: String(err) });
     } finally {
       setWakeBusyKey("");
@@ -151,7 +132,6 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(label);
       toast.success(`Copied ${label}`);
     } catch {
       const area = document.createElement("textarea");
@@ -162,7 +142,6 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
       area.select();
       document.execCommand("copy");
       document.body.removeChild(area);
-      setCopied(label);
       toast.success(`Copied ${label}`);
     }
   }
@@ -177,12 +156,6 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(""), 1400);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
 
   const sortedDevices = useMemo(() => {
     const rows = [...devices];
@@ -315,23 +288,6 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
               }}
             />
           </div>
-
-          {status && (
-            <div className="rounded-md border bg-muted/50 px-3 py-2 text-sm">
-              {status}
-            </div>
-          )}
-          {error && (
-            <pre className="max-h-80 overflow-auto rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive">
-              {error}
-            </pre>
-          )}
-          {copied && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Check className="size-4" aria-hidden />
-              Copied {copied}
-            </div>
-          )}
 
           {/* Skeleton loading */}
           {loading && !devices.length ? (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useTheme } from "next-themes";
 import {
   Moon,
   Sun,
@@ -62,19 +63,6 @@ const navSections: NavSection[] = [
   },
 ];
 
-type Theme = "light" | "dark";
-
-const THEME_KEY = "wakey-ui-theme";
-
-function resolveInitialTheme(): Theme {
-  const stored = window.localStorage.getItem(THEME_KEY);
-  if (stored === "light" || stored === "dark") return stored;
-
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-}
-
 function usePageTitle() {
   const { pathname } = useLocation();
   useEffect(() => {
@@ -89,18 +77,13 @@ function usePageTitle() {
 }
 
 export function AppLayout() {
-  const [theme, setTheme] = useState<Theme>(() => resolveInitialTheme());
+  const { resolvedTheme, setTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
   const [collapsed, setCollapsed] = useState(() => {
     return window.localStorage.getItem(SIDEBAR_KEY) === "true";
   });
 
   usePageTitle();
-
-  useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle("dark", theme === "dark");
-    window.localStorage.setItem(THEME_KEY, theme);
-  }, [theme]);
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_KEY, String(collapsed));
@@ -180,27 +163,23 @@ export function AppLayout() {
                 variant="ghost"
                 size="sm"
                 className="sidebar-footer-btn"
-                aria-label={
-                  theme === "dark" ? "Switch to light" : "Switch to dark"
-                }
-                onClick={() =>
-                  setTheme((c) => (c === "dark" ? "light" : "dark"))
-                }
+                aria-label={isDark ? "Switch to light" : "Switch to dark"}
+                onClick={() => setTheme(isDark ? "light" : "dark")}
               >
-                {theme === "dark" ? (
+                {isDark ? (
                   <Sun className="size-4" aria-hidden />
                 ) : (
                   <Moon className="size-4" aria-hidden />
                 )}
                 {!collapsed && (
                   <span className="sidebar-link-label">
-                    {theme === "dark" ? "Light mode" : "Dark mode"}
+                    {isDark ? "Light mode" : "Dark mode"}
                   </span>
                 )}
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              {theme === "dark" ? "Switch to light" : "Switch to dark"}
+              {isDark ? "Switch to light" : "Switch to dark"}
             </TooltipContent>
           </Tooltip>
 
