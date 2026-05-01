@@ -73,6 +73,9 @@ pub struct ServeArgs {
     pub enroll_token_ttl_seconds: Option<u64>,
 
     #[arg(long)]
+    pub observation_retention_seconds: Option<u64>,
+
+    #[arg(long)]
     pub pid_file: Option<PathBuf>,
 
     #[arg(long)]
@@ -125,6 +128,9 @@ pub struct InitConfigArgs {
 
     #[arg(long)]
     pub enroll_token_ttl_seconds: Option<u64>,
+
+    #[arg(long)]
+    pub observation_retention_seconds: Option<u64>,
 
     #[arg(long = "bootstrap-enroll-token", visible_alias = "enroll-token")]
     pub bootstrap_enroll_tokens: Vec<String>,

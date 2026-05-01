@@ -534,6 +534,117 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn observation_snapshot_prunes_missing_keys() {
+        let (store, dir) = make_store().await;
+
+        store
+            .upsert_agent_observations(
+                "agent-a",
+                vec![
+                    crate::state::AgentDeviceObservationInput {
+                        kind: "dhcp".into(),
+                        action: "update".into(),
+                        mac: Some("AA:BB:CC:DD:EE:01".into()),
+                        ip: Some("192.168.1.10".into()),
+                        hostname: Some("first".into()),
+                        first_seen_unix: 10,
+                        last_seen_unix: 20,
+                    },
+                    crate::state::AgentDeviceObservationInput {
+                        kind: "dhcp".into(),
+                        action: "update".into(),
+                        mac: Some("AA:BB:CC:DD:EE:02".into()),
+                        ip: Some("192.168.1.11".into()),
+                        hostname: Some("second".into()),
+                        first_seen_unix: 10,
+                        last_seen_unix: 20,
+                    },
+                ],
+            )
+            .await
+            .expect("initial observations should upsert");
+
+        store
+            .upsert_agent_observations_snapshot(
+                "agent-a",
+                "dhcp",
+                vec![crate::state::AgentDeviceObservationInput {
+                    kind: "dhcp".into(),
+                    action: "update".into(),
+                    mac: Some("AA:BB:CC:DD:EE:01".into()),
+                    ip: Some("192.168.1.10".into()),
+                    hostname: Some("first".into()),
+                    first_seen_unix: 10,
+                    last_seen_unix: 30,
+                }],
+            )
+            .await
+            .expect("snapshot upsert should succeed");
+
+        let rows = store
+            .list_agent_observations(Some("agent-a"), 10)
+            .await
+            .expect("observations should list");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].mac.as_deref(), Some("aa:bb:cc:dd:ee:01"));
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn observation_gc_removes_stale_rows() {
+        let (store, dir) = make_store().await;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_secs();
+        let old = now.saturating_sub(10);
+
+        store
+            .upsert_agent_observations(
+                "agent-a",
+                vec![
+                    crate::state::AgentDeviceObservationInput {
+                        kind: "dhcp".into(),
+                        action: "update".into(),
+                        mac: Some("AA:BB:CC:DD:EE:10".into()),
+                        ip: Some("192.168.1.20".into()),
+                        hostname: Some("old".into()),
+                        first_seen_unix: old,
+                        last_seen_unix: old,
+                    },
+                    crate::state::AgentDeviceObservationInput {
+                        kind: "dhcp".into(),
+                        action: "update".into(),
+                        mac: Some("AA:BB:CC:DD:EE:11".into()),
+                        ip: Some("192.168.1.21".into()),
+                        hostname: Some("fresh".into()),
+                        first_seen_unix: now,
+                        last_seen_unix: now,
+                    },
+                ],
+            )
+            .await
+            .expect("observations should upsert");
+
+        let removed = store
+            .gc_stale_observations(Duration::from_secs(5))
+            .await
+            .expect("gc should succeed");
+        assert!(removed >= 1);
+
+        let rows = store
+            .list_agent_observations(Some("agent-a"), 10)
+            .await
+            .expect("observations should list");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].hostname.as_deref(), Some("fresh"));
+
+        cleanup_dir(&dir);
+    }
+
+    #[tokio::test]
     async fn agent_observation_views_include_matching_known_device() {
         let (store, dir) = make_store().await;
 

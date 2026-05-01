@@ -226,6 +226,18 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
                         }
                         Err(err) => warn!(error = %err, "periodic gc failed"),
                     }
+                    match app_state
+                        .store
+                        .gc_stale_observations(daemon.observation_retention)
+                        .await
+                    {
+                        Ok(removed) => {
+                            if removed > 0 {
+                                info!(removed, "periodic gc removed stale observations");
+                            }
+                        }
+                        Err(err) => warn!(error = %err, "periodic observation gc failed"),
+                    }
                 }
                 join = &mut server => {
                     let _ = remove_pid_file(&daemon.pid_file);

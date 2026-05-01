@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO agent_observation_snapshots\n         (agent_id, kind, last_dump_unix)\n         VALUES (?1, ?2, ?3)\n         ON CONFLICT(agent_id, kind) DO UPDATE SET\n           last_dump_unix = excluded.last_dump_unix",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "8e7964dee0a2c21d377923d83df23454a104b68fc08f334c6e576bee273bc73b"
+}

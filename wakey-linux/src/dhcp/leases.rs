@@ -3,9 +3,10 @@ use std::net::IpAddr;
 
 use wakey_core::{DhcpLease, DhcpLeaseWithState};
 
-use super::{dhcp_leases_path, mac_name_cache_path, observation_store_path};
-use crate::dhcp::observations::{
-    load_mac_name_cache_from_path, load_observation_store_from_path, save_mac_name_cache_to_path,
+use super::dhcp_leases_path;
+use crate::observations::{
+    load_mac_name_cache_from_path, load_observation_store_from_path, mac_name_cache_path,
+    observation_store_path, save_mac_name_cache_to_path,
 };
 
 /// Parse one `dnsmasq`-style DHCP lease line.

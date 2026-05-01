@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM agent_device_observations\n         WHERE agent_id = ?1\n           AND kind = ?2\n           AND observation_key NOT IN (\n             SELECT observation_key\n             FROM agent_observation_snapshot_keys\n             WHERE agent_id = ?1 AND kind = ?2\n           )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "273bcf6b604fbb48cad93630a1485590b1039149d1dd856db674dcc5584947d0"
+}

@@ -102,6 +102,10 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
             .or(base.enroll_token_ttl_seconds)
             .unwrap_or(86_400)
             .max(1),
+        observation_retention_seconds: args
+            .observation_retention_seconds
+            .or(base.observation_retention_seconds)
+            .unwrap_or(2_592_000),
         pid_file,
         ui_dist_dir,
         bootstrap_enroll_tokens,
@@ -155,6 +159,7 @@ pub fn bootstrap_config_if_missing(args: &ServeArgs) -> Result<bool> {
         ui_dist_dir: args.ui_dist_dir.clone(),
         command_timeout_ms: args.command_timeout_ms,
         enroll_token_ttl_seconds: args.enroll_token_ttl_seconds,
+        observation_retention_seconds: args.observation_retention_seconds,
         bootstrap_enroll_tokens: args.bootstrap_enroll_tokens.clone(),
         from_config: None,
         telemetry_otlp_endpoint: None,
@@ -219,6 +224,7 @@ json_logs = true
             ui_dist_dir: None,
             command_timeout_ms: Some(999),
             enroll_token_ttl_seconds: None,
+            observation_retention_seconds: None,
             bootstrap_enroll_tokens: Vec::new(),
             telemetry_otlp_endpoint: None,
             telemetry_service_name: None,

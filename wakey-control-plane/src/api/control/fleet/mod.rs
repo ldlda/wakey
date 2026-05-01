@@ -90,7 +90,7 @@ pub async fn refresh_fleet_devices(
                 match inventory_result_to_observations(result) {
                     Ok(observations) => match state
                         .store
-                        .upsert_agent_observations(&agent_id, observations)
+                        .upsert_agent_observations_snapshot(&agent_id, "inventory", observations)
                         .await
                     {
                         Ok(accepted) => {

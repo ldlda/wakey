@@ -1,4 +1,133 @@
+use std::{collections::BTreeSet, ops::DerefMut};
+
 use super::*;
+
+async fn upsert_observation_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    observation: &AgentDeviceObservation,
+) -> Result<()> {
+    let first_seen_unix = i64::try_from(observation.first_seen_unix)
+        .context("observation first_seen overflow")?;
+    let last_seen_unix = i64::try_from(observation.last_seen_unix)
+        .context("observation last_seen overflow")?;
+    let current = get_observation_current_row(tx, &observation.observation_key)
+        .await
+        .context("failed checking existing observation")?;
+    let append_event = observation_current_changed(
+        current.as_ref(),
+        observation,
+        first_seen_unix,
+        last_seen_unix,
+    );
+    sqlx::query!(
+        "INSERT INTO agent_device_observations
+         (observation_key, agent_id, kind, mac, ip, hostname,
+          first_seen_unix, last_seen_unix, last_action)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(observation_key) DO UPDATE SET
+           mac = excluded.mac,
+           ip = excluded.ip,
+           hostname = excluded.hostname,
+           first_seen_unix = MIN(agent_device_observations.first_seen_unix, excluded.first_seen_unix),
+           last_seen_unix = MAX(agent_device_observations.last_seen_unix, excluded.last_seen_unix),
+           last_action = excluded.last_action",
+        observation.observation_key,
+        observation.agent_id,
+        observation.kind,
+        observation.mac,
+        observation.ip,
+        observation.hostname,
+        first_seen_unix,
+        last_seen_unix,
+        observation.last_action
+    )
+    .execute(tx.deref_mut())
+    .await
+    .context("failed upserting agent device observation")?;
+
+    if append_event {
+        let event_id = format!("ode-{}", Uuid::new_v4());
+        sqlx::query!(
+            "INSERT INTO agent_device_observation_events
+             (event_id, agent_id, kind, action, mac, ip, hostname, ts_unix)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            event_id,
+            observation.agent_id,
+            observation.kind,
+            observation.last_action,
+            observation.mac,
+            observation.ip,
+            observation.hostname,
+            last_seen_unix
+        )
+        .execute(tx.deref_mut())
+        .await
+        .context("failed appending agent device observation event")?;
+    }
+    Ok(())
+}
+
+async fn store_observation_snapshot(
+    tx: &mut Transaction<'_, Sqlite>,
+    agent_id: &str,
+    kind: &str,
+    snapshot_unix: u64,
+    keys: &BTreeSet<String>,
+) -> Result<()> {
+    let snapshot_unix = i64::try_from(snapshot_unix).context("snapshot timestamp overflow")?;
+    sqlx::query!(
+        "INSERT INTO agent_observation_snapshots
+         (agent_id, kind, last_dump_unix)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(agent_id, kind) DO UPDATE SET
+           last_dump_unix = excluded.last_dump_unix",
+        agent_id,
+        kind,
+        snapshot_unix
+    )
+    .execute(tx.deref_mut())
+    .await
+    .context("failed upserting observation snapshot")?;
+
+    sqlx::query!(
+        "DELETE FROM agent_observation_snapshot_keys WHERE agent_id = ?1 AND kind = ?2",
+        agent_id,
+        kind
+    )
+    .execute(tx.deref_mut())
+    .await
+    .context("failed clearing observation snapshot keys")?;
+
+    for key in keys {
+        sqlx::query!(
+            "INSERT INTO agent_observation_snapshot_keys (agent_id, kind, observation_key)
+             VALUES (?1, ?2, ?3)",
+            agent_id,
+            kind,
+            key
+        )
+        .execute(tx.deref_mut())
+        .await
+        .context("failed inserting observation snapshot key")?;
+    }
+
+    sqlx::query!(
+        "DELETE FROM agent_device_observations
+         WHERE agent_id = ?1
+           AND kind = ?2
+           AND observation_key NOT IN (
+             SELECT observation_key
+             FROM agent_observation_snapshot_keys
+             WHERE agent_id = ?1 AND kind = ?2
+           )",
+        agent_id,
+        kind
+    )
+    .execute(tx.deref_mut())
+    .await
+    .context("failed removing stale observation keys")?;
+    Ok(())
+}
 
 impl Store {
     pub async fn upsert_agent_observations(
@@ -14,64 +143,7 @@ impl Store {
         let mut written = 0usize;
         for observation in observations {
             let observation = normalize_agent_observation(agent_id, observation)?;
-            let first_seen_unix = i64::try_from(observation.first_seen_unix)
-                .context("observation first_seen overflow")?;
-            let last_seen_unix = i64::try_from(observation.last_seen_unix)
-                .context("observation last_seen overflow")?;
-            let current = get_observation_current_row(&mut tx, &observation.observation_key)
-                .await
-                .context("failed checking existing observation")?;
-            let append_event = observation_current_changed(
-                current.as_ref(),
-                &observation,
-                first_seen_unix,
-                last_seen_unix,
-            );
-            sqlx::query!(
-                "INSERT INTO agent_device_observations
-                 (observation_key, agent_id, kind, mac, ip, hostname,
-                  first_seen_unix, last_seen_unix, last_action)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                 ON CONFLICT(observation_key) DO UPDATE SET
-                   mac = excluded.mac,
-                   ip = excluded.ip,
-                   hostname = excluded.hostname,
-                   first_seen_unix = MIN(agent_device_observations.first_seen_unix, excluded.first_seen_unix),
-                   last_seen_unix = MAX(agent_device_observations.last_seen_unix, excluded.last_seen_unix),
-                   last_action = excluded.last_action",
-                observation.observation_key,
-                observation.agent_id,
-                observation.kind,
-                observation.mac,
-                observation.ip,
-                observation.hostname,
-                first_seen_unix,
-                last_seen_unix,
-                observation.last_action
-            )
-            .execute(&mut *tx)
-            .await
-            .context("failed upserting agent device observation")?;
-
-            if append_event {
-                let event_id = format!("ode-{}", Uuid::new_v4());
-                sqlx::query!(
-                    "INSERT INTO agent_device_observation_events
-                     (event_id, agent_id, kind, action, mac, ip, hostname, ts_unix)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    event_id,
-                    observation.agent_id,
-                    observation.kind,
-                    observation.last_action,
-                    observation.mac,
-                    observation.ip,
-                    observation.hostname,
-                    last_seen_unix
-                )
-                .execute(&mut *tx)
-                .await
-                .context("failed appending agent device observation event")?;
-            }
+            upsert_observation_tx(&mut tx, &observation).await?;
             written = written.saturating_add(1);
         }
         tx.commit()
@@ -80,7 +152,68 @@ impl Store {
         Ok(written)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    pub async fn upsert_agent_observations_snapshot(
+        &self,
+        agent_id: &str,
+        kind: &str,
+        observations: Vec<AgentDeviceObservationInput>,
+    ) -> Result<usize> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed starting observation snapshot transaction")?;
+        let mut written = 0usize;
+        let mut snapshot_keys = BTreeSet::new();
+        let kind = normalize_required_text(kind, "observation kind")?.to_ascii_lowercase();
+        for observation in observations {
+            let observation = normalize_agent_observation(agent_id, observation)?;
+            if observation.kind != kind {
+                anyhow::bail!(
+                    "observation kind mismatch: expected {kind} got {}",
+                    observation.kind
+                );
+            }
+            snapshot_keys.insert(observation.observation_key.clone());
+            upsert_observation_tx(&mut tx, &observation).await?;
+            written = written.saturating_add(1);
+        }
+
+        let snapshot_unix = now_unix();
+        store_observation_snapshot(&mut tx, agent_id, &kind, snapshot_unix, &snapshot_keys)
+            .await?;
+
+        tx.commit()
+            .await
+            .context("failed committing observation snapshot transaction")?;
+        Ok(written)
+    }
+
+    pub async fn gc_stale_observations(&self, retention: Duration) -> Result<u64> {
+        if retention.as_secs() == 0 {
+            return Ok(0);
+        }
+        let cutoff = now_unix().saturating_sub(retention.as_secs());
+        let cutoff = i64::try_from(cutoff).context("observation retention overflow")?;
+        let removed_observations = sqlx::query!(
+            "DELETE FROM agent_device_observations WHERE last_seen_unix < ?1",
+            cutoff
+        )
+        .execute(&self.pool)
+        .await
+        .context("failed removing stale observations")?
+        .rows_affected();
+        let removed_events = sqlx::query!(
+            "DELETE FROM agent_device_observation_events WHERE ts_unix < ?1",
+            cutoff
+        )
+        .execute(&self.pool)
+        .await
+        .context("failed removing stale observation events")?
+        .rows_affected();
+        Ok(removed_observations.saturating_add(removed_events))
+    }
+
     pub async fn list_agent_observations(
         &self,
         agent_id: Option<&str>,

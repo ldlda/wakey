@@ -70,7 +70,7 @@ async fn dispatch_inventory(req: InventoryRequest, config: &AgentConfig) -> Resu
         &config.mac_name_cache_path,
     )
     .await?;
-    let observations = match wakey::wakey_linux::dhcp::list_local_observations_from_path(
+    let observations = match wakey::wakey_linux::observations::list_local_observations_from_path(
         &config.observation_store_path,
     )
     .await

@@ -11,7 +11,9 @@ pub use service::{
     merge_devices, merge_devices_with_observations, resolve_devices, resolve_query,
     resolve_selector, resolve_wake_targets, wake_explicit, wake_from_query, wake_targets,
 };
-pub use wakey_linux::dhcp::{list_local_observations, observe_dhcp_event, observe_neighbor_event};
+pub use wakey_linux::observations::{
+    list_local_observations, observe_dhcp_event, observe_neighbor_event,
+};
 
 #[cfg(test)]
 mod tests {

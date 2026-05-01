@@ -185,6 +185,13 @@ async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig)
             .unwrap_or_else(|_| "<unreadable error body>".to_string());
         anyhow::bail!("observation upload failed with {status}: {body}");
     }
+    if let Err(err) = wakey::wakey_linux::observations::prune_removed_observations_from_path(
+        &config.observation_store_path,
+    )
+    .await
+    {
+        warn!(agent_id = %config.agent_id, error = %err, "failed to prune removed observations after upload");
+    }
     debug!(
         agent_id = %config.agent_id,
         observations = payload.observations.len(),
@@ -211,15 +218,23 @@ where
         },
     )
     .await?;
+    if let Err(err) = wakey::wakey_linux::observations::prune_removed_observations_from_path(
+        &config.observation_store_path,
+    )
+    .await
+    {
+        warn!(agent_id = %config.agent_id, error = %err, "failed to prune removed observations after websocket send");
+    }
     debug!(agent_id = %config.agent_id, observations = count, "sent observations over websocket");
     Ok(count)
 }
 
 async fn load_agent_observations(config: &AgentConfig) -> Result<Vec<AgentObservation>> {
-    let observations =
-        wakey::wakey_linux::dhcp::list_local_observations_from_path(&config.observation_store_path)
-            .await
-            .context("failed to read local observations")?;
+    let observations = wakey::wakey_linux::observations::list_local_observations_from_path(
+        &config.observation_store_path,
+    )
+    .await
+    .context("failed to read local observations")?;
     Ok(observations
         .into_iter()
         .map(|observation| AgentObservation {

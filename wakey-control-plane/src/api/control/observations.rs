@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
@@ -74,38 +76,46 @@ pub async fn upload_agent_observations(
         ));
     }
 
-    let observations = req
-        .observations
-        .into_iter()
-        .map(|observation| AgentDeviceObservationInput {
-            kind: observation.kind,
+    let mut by_kind: BTreeMap<String, Vec<AgentDeviceObservationInput>> = BTreeMap::new();
+    for observation in req.observations {
+        let kind = observation.kind.trim().to_ascii_lowercase();
+        let entry = by_kind.entry(kind.clone()).or_default();
+        entry.push(AgentDeviceObservationInput {
+            kind,
             action: observation.action,
             mac: observation.mac,
             ip: observation.ip,
             hostname: observation.hostname,
             first_seen_unix: observation.first_seen_unix,
             last_seen_unix: observation.last_seen_unix,
-        })
-        .collect();
+        });
+    }
 
-    match state
-        .store
-        .upsert_agent_observations(&req.agent_id, observations)
-        .await
-    {
-        Ok(accepted) => Ok((
-            StatusCode::OK,
-            Json(UploadAgentObservationsResponse { accepted }),
-        )),
-        Err(err) => {
-            warn!(error = %err, agent_id = %req.agent_id, "failed to upload agent observations");
-            Err(json_error(
-                StatusCode::BAD_REQUEST,
-                "upload_observations_failed",
-                &err.to_string(),
-            ))
+    let mut accepted = 0usize;
+    for (kind, observations) in by_kind {
+        match state
+            .store
+            .upsert_agent_observations_snapshot(&req.agent_id, &kind, observations)
+            .await
+        {
+            Ok(written) => {
+                accepted = accepted.saturating_add(written);
+            }
+            Err(err) => {
+                warn!(error = %err, agent_id = %req.agent_id, kind = %kind, "failed to upload agent observations");
+                return Err(json_error(
+                    StatusCode::BAD_REQUEST,
+                    "upload_observations_failed",
+                    &err.to_string(),
+                ));
+            }
         }
     }
+
+    Ok((
+        StatusCode::OK,
+        Json(UploadAgentObservationsResponse { accepted }),
+    ))
 }
 
 pub async fn list_agent_observations(

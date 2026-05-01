@@ -12,6 +12,7 @@ pub struct DaemonConfig {
     pub state_file: PathBuf,
     pub command_timeout: Duration,
     pub enroll_token_ttl: Duration,
+    pub observation_retention: Duration,
     pub pid_file: PathBuf,
     pub ui_dist_dir: PathBuf,
     pub bootstrap_enroll_tokens: Vec<String>,
@@ -43,6 +44,7 @@ pub(crate) struct FileConfig {
     pub(crate) state_file: Option<PathBuf>,
     pub(crate) command_timeout_ms: Option<u64>,
     pub(crate) enroll_token_ttl_seconds: Option<u64>,
+    pub(crate) observation_retention_seconds: Option<u64>,
     pub(crate) pid_file: Option<PathBuf>,
     pub(crate) ui_dist_dir: Option<PathBuf>,
     #[serde(alias = "enroll_tokens")]
@@ -65,6 +67,7 @@ pub(crate) struct WritableConfig {
     pub(crate) state_file: PathBuf,
     pub(crate) command_timeout_ms: u64,
     pub(crate) enroll_token_ttl_seconds: u64,
+    pub(crate) observation_retention_seconds: u64,
     pub(crate) pid_file: PathBuf,
     pub(crate) ui_dist_dir: PathBuf,
     #[serde(skip_serializing_if = "Vec::is_empty")]

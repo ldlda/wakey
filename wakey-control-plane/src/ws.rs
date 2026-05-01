@@ -4,6 +4,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
@@ -259,31 +260,40 @@ async fn process_agent_text(
                 anyhow::bail!("observations for unauthenticated or mismatched agent");
             }
             ensure_current_session(state, &agent_id, connection_id).await?;
-            let inputs = observations
-                .into_iter()
-                .map(|observation| crate::state::AgentDeviceObservationInput {
-                    kind: observation.kind,
-                    action: observation.action,
-                    mac: observation.mac,
-                    ip: observation.ip.map(|ip| ip.to_string()),
-                    hostname: observation.hostname,
-                    first_seen_unix: observation.first_seen_unix,
-                    last_seen_unix: observation.last_seen_unix,
-                })
-                .collect();
-            match state
-                .store
-                .upsert_agent_observations(&agent_id, inputs)
-                .await
-            {
-                Ok(accepted) => {
-                    debug!(agent_id = %agent_id, accepted, "agent websocket observations accepted");
-                }
-                Err(err) => {
-                    warn!(agent_id = %agent_id, error = %err, "failed to store websocket observations");
-                    anyhow::bail!("failed to store observations: {err}");
+            let mut by_kind: BTreeMap<String, Vec<crate::state::AgentDeviceObservationInput>> =
+                BTreeMap::new();
+            for observation in observations {
+                let kind = observation.kind.trim().to_ascii_lowercase();
+                by_kind
+                    .entry(kind.clone())
+                    .or_default()
+                    .push(crate::state::AgentDeviceObservationInput {
+                        kind,
+                        action: observation.action,
+                        mac: observation.mac,
+                        ip: observation.ip.map(|ip| ip.to_string()),
+                        hostname: observation.hostname,
+                        first_seen_unix: observation.first_seen_unix,
+                        last_seen_unix: observation.last_seen_unix,
+                    });
+            }
+            let mut accepted = 0usize;
+            for (kind, inputs) in by_kind {
+                match state
+                    .store
+                    .upsert_agent_observations_snapshot(&agent_id, &kind, inputs)
+                    .await
+                {
+                    Ok(written) => {
+                        accepted = accepted.saturating_add(written);
+                    }
+                    Err(err) => {
+                        warn!(agent_id = %agent_id, error = %err, kind = %kind, "failed to store websocket observations");
+                        anyhow::bail!("failed to store observations: {err}");
+                    }
                 }
             }
+            debug!(agent_id = %agent_id, accepted, "agent websocket observations accepted");
         }
         IncomingClientMessage::Result { request_id, result } => {
             let agent_id = authed_agent_id

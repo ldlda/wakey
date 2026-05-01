@@ -22,7 +22,7 @@ pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
 pub async fn inventory(query: InventoryQuery) -> Result<DeviceInventory> {
     let neighbors = wakey_linux::devices::query_neighbors(&query).await?;
     let leases = get_leases().await?;
-    let observations = match wakey_linux::dhcp::list_local_observations().await {
+    let observations = match wakey_linux::observations::list_local_observations().await {
         Ok(observations) => observations
             .into_iter()
             .filter_map(local_observation_to_fact)
@@ -132,7 +132,7 @@ pub fn merge_devices_with_observations(
 }
 
 pub fn local_observation_to_fact(
-    observation: wakey_linux::dhcp::LocalDeviceObservation,
+    observation: wakey_linux::observations::LocalDeviceObservation,
 ) -> Option<DeviceObservationFact> {
     let mac = match observation.mac.as_deref() {
         Some(raw) => match raw.parse() {

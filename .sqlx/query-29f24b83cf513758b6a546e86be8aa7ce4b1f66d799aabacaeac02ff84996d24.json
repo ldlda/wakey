@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM agent_observation_snapshot_keys WHERE agent_id = ?1 AND kind = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "29f24b83cf513758b6a546e86be8aa7ce4b1f66d799aabacaeac02ff84996d24"
+}

@@ -66,6 +66,12 @@ impl DaemonConfig {
                 .max(1),
         );
 
+        let observation_retention = Duration::from_secs(
+            args.observation_retention_seconds
+                .or(file.observation_retention_seconds)
+                .unwrap_or(2_592_000),
+        );
+
         let pid_file_raw = args
             .pid_file
             .clone()
@@ -94,6 +100,7 @@ impl DaemonConfig {
             state_file,
             command_timeout,
             enroll_token_ttl,
+            observation_retention,
             pid_file,
             ui_dist_dir,
             bootstrap_enroll_tokens,
