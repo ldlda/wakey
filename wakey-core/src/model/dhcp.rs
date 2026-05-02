@@ -7,7 +7,7 @@ use crate::model::NeighborState;
 use crate::parse::mac;
 
 /// One parsed DHCP lease row.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DhcpLease {
     pub expires_epoch: u64,
     pub ip: IpAddr,
@@ -18,7 +18,7 @@ pub struct DhcpLease {
 
 /// DHCP lease row plus optional current neighbor-state enrichment.
 #[skip_serializing_none]
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DhcpLeaseWithState {
     #[serde(flatten)]
     pub lease_line: DhcpLease,

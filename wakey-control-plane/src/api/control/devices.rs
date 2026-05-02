@@ -25,11 +25,6 @@ pub struct DeviceIdentifierRequest {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AttachObservationIdentifierRequest {
-    pub observation_key: String,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KnownDeviceResponse {
     pub device_id: String,
@@ -165,33 +160,6 @@ pub async fn attach_device_identifier(
             Err(json_error(
                 StatusCode::BAD_REQUEST,
                 "attach_device_identifier_failed",
-                &err.to_string(),
-            ))
-        }
-    }
-}
-
-pub async fn attach_observation_identifier(
-    State(state): State<AppState>,
-    AxumPath(device_id): AxumPath<String>,
-    Json(req): Json<AttachObservationIdentifierRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    match state
-        .store
-        .attach_observation_identifier(&device_id, &req.observation_key)
-        .await
-    {
-        Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
-        Ok(None) => Err(json_error(
-            StatusCode::NOT_FOUND,
-            "known_device_not_found",
-            "known device not found",
-        )),
-        Err(err) => {
-            warn!(error = %err, "failed to attach observation identifier");
-            Err(json_error(
-                StatusCode::BAD_REQUEST,
-                "attach_observation_identifier_failed",
                 &err.to_string(),
             ))
         }

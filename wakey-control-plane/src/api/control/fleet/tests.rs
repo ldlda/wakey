@@ -1,12 +1,15 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
+
+use macaddr::MacAddr;
+use wakey_core::Presence;
 
 use super::build::{
     AgentRuntimeStatus, FleetBuildContext, build_fleet_devices, filter_fleet_devices,
     known_device_summary,
 };
-use super::inventory::inventory_result_to_observations;
 use super::types::ListFleetDevicesQuery;
-use crate::state::{AgentDeviceObservation, DeviceIdentifier, KnownDevice};
+use crate::state::{AgentDeviceRow, AgentDeviceWithChildren, DeviceIdentifier, KnownDevice};
 
 fn context(connected: &[&str]) -> FleetBuildContext {
     FleetBuildContext {
@@ -26,27 +29,83 @@ fn context(connected: &[&str]) -> FleetBuildContext {
     }
 }
 
-fn observation(
+fn agent_device(
     agent_id: &str,
+    device_key: &str,
     mac: Option<&str>,
     ip: Option<&str>,
-    last_seen_unix: u64,
-) -> AgentDeviceObservation {
-    AgentDeviceObservation {
-        observation_key: format!(
-            "agent:{agent_id}:dhcp:{}",
-            mac.map(|mac| format!("mac:{mac}"))
-                .or_else(|| ip.map(|ip| format!("ip:{ip}")))
-                .unwrap_or_default()
-        ),
-        agent_id: agent_id.into(),
-        kind: "dhcp".into(),
-        mac: mac.map(str::to_string),
-        ip: ip.map(str::to_string),
-        hostname: Some("lda".into()),
-        first_seen_unix: 1,
-        last_seen_unix,
-        last_action: "update".into(),
+    last_seen_unix: i64,
+) -> AgentDeviceWithChildren {
+    AgentDeviceWithChildren {
+        device: AgentDeviceRow {
+            agent_id: agent_id.into(),
+            device_key: device_key.into(),
+            presence: "likely_online".into(),
+            display_name: Some("lda".into()),
+            first_seen_unix: 1,
+            last_seen_unix,
+        },
+        macs: mac
+            .map(|m| m.parse::<MacAddr>().unwrap())
+            .into_iter()
+            .collect(),
+        ips: ip
+            .map(|i| i.parse::<IpAddr>().unwrap())
+            .into_iter()
+            .collect(),
+        hostnames: vec!["lda".to_string()],
+        facts: vec![],
+    }
+}
+
+fn offline_agent_device(
+    agent_id: &str,
+    device_key: &str,
+    mac: Option<&str>,
+    ip: Option<&str>,
+    last_seen_unix: i64,
+) -> AgentDeviceWithChildren {
+    AgentDeviceWithChildren {
+        device: AgentDeviceRow {
+            agent_id: agent_id.into(),
+            device_key: device_key.into(),
+            presence: "offline".into(),
+            display_name: Some("lda".into()),
+            first_seen_unix: 1,
+            last_seen_unix,
+        },
+        macs: mac
+            .map(|m| m.parse::<MacAddr>().unwrap())
+            .into_iter()
+            .collect(),
+        ips: ip
+            .map(|i| i.parse::<IpAddr>().unwrap())
+            .into_iter()
+            .collect(),
+        hostnames: vec!["lda".to_string()],
+        facts: vec![],
+    }
+}
+
+fn offline_ip_only_unknown(
+    agent_id: &str,
+    device_key: &str,
+    ip: &str,
+    last_seen_unix: i64,
+) -> AgentDeviceWithChildren {
+    AgentDeviceWithChildren {
+        device: AgentDeviceRow {
+            agent_id: agent_id.into(),
+            device_key: device_key.into(),
+            presence: "offline".into(),
+            display_name: None,
+            first_seen_unix: 1,
+            last_seen_unix,
+        },
+        macs: vec![],
+        ips: vec![ip.parse().unwrap()],
+        hostnames: vec![],
+        facts: vec![],
     }
 }
 
@@ -55,14 +114,16 @@ fn fleet_grouping_combines_same_mac_across_agents() {
     let devices = build_fleet_devices(
         Vec::new(),
         vec![
-            observation(
+            agent_device(
                 "agent-a",
+                "mac:aa:bb:cc:dd:ee:ff",
                 Some("aa:bb:cc:dd:ee:ff"),
                 Some("192.168.1.2"),
                 10,
             ),
-            observation(
+            agent_device(
                 "agent-b",
+                "mac:aa:bb:cc:dd:ee:ff",
                 Some("aa:bb:cc:dd:ee:ff"),
                 Some("192.168.2.2"),
                 20,
@@ -71,8 +132,9 @@ fn fleet_grouping_combines_same_mac_across_agents() {
         &context(&["agent-a", "agent-b"]),
     );
 
+    let expected_mac: MacAddr = "aa:bb:cc:dd:ee:ff".parse().unwrap();
     assert_eq!(devices.len(), 1);
-    assert_eq!(devices[0].macs, vec!["aa:bb:cc:dd:ee:ff"]);
+    assert_eq!(devices[0].macs, vec![expected_mac]);
     assert_eq!(devices[0].agents.len(), 2);
     assert_eq!(
         devices[0]
@@ -84,7 +146,7 @@ fn fleet_grouping_combines_same_mac_across_agents() {
 }
 
 #[test]
-fn known_device_with_two_macs_absorbs_both_observation_groups() {
+fn known_device_with_two_macs_absorbs_both_device_groups() {
     let known = KnownDevice {
         device_id: "dev-1".into(),
         display_name: "lda".into(),
@@ -120,8 +182,20 @@ fn known_device_with_two_macs_absorbs_both_observation_groups() {
     let devices = build_fleet_devices(
         vec![known],
         vec![
-            observation("agent-a", Some("aa:bb:cc:dd:ee:01"), None, 10),
-            observation("agent-a", Some("aa:bb:cc:dd:ee:02"), None, 20),
+            agent_device(
+                "agent-a",
+                "mac:aa:bb:cc:dd:ee:01",
+                Some("aa:bb:cc:dd:ee:01"),
+                None,
+                10,
+            ),
+            agent_device(
+                "agent-a",
+                "mac:aa:bb:cc:dd:ee:02",
+                Some("aa:bb:cc:dd:ee:02"),
+                None,
+                20,
+            ),
         ],
         &ctx,
     );
@@ -135,44 +209,54 @@ fn known_device_with_two_macs_absorbs_both_observation_groups() {
 fn ip_only_unknown_is_visible_but_not_wakeable() {
     let devices = build_fleet_devices(
         Vec::new(),
-        vec![observation("agent-a", None, Some("192.168.1.2"), 10)],
+        vec![agent_device(
+            "agent-a",
+            "ip:192.168.1.2",
+            None,
+            Some("192.168.1.2"),
+            10,
+        )],
+        &context(&["agent-a"]),
+    );
+
+    let expected_ip: IpAddr = "192.168.1.2".parse().unwrap();
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].ips, vec![expected_ip]);
+    assert!(devices[0].recommended_route.is_none());
+}
+
+#[test]
+fn offline_device_has_offline_presence() {
+    let devices = build_fleet_devices(
+        Vec::new(),
+        vec![offline_agent_device(
+            "agent-a",
+            "mac:aa:bb:cc:dd:ee:ff",
+            Some("aa:bb:cc:dd:ee:ff"),
+            Some("192.168.1.2"),
+            20,
+        )],
         &context(&["agent-a"]),
     );
 
     assert_eq!(devices.len(), 1);
-    assert_eq!(devices[0].ips, vec!["192.168.1.2"]);
-    assert!(devices[0].recommended_route.is_none());
-    assert!(!devices[0].route_candidates[0].wakeable);
-}
-
-#[test]
-fn offline_observation_does_not_advertise_current_ip_or_wake_route() {
-    let mut offline = observation(
-        "agent-a",
-        Some("aa:bb:cc:dd:ee:ff"),
-        Some("192.168.1.2"),
-        20,
-    );
-    offline.kind = "neigh".into();
-    offline.last_action = "remove".into();
-
-    let devices = build_fleet_devices(Vec::new(), vec![offline], &context(&["agent-a"]));
-
-    assert_eq!(devices.len(), 1);
     assert!(devices[0].ips.is_empty());
-    assert_eq!(devices[0].presence, "offline");
+    assert_eq!(devices[0].presence, Presence::Offline);
     assert!(devices[0].recommended_route.is_none());
-    assert!(!devices[0].route_candidates[0].wakeable);
 }
 
 #[test]
-fn unknown_ip_only_remove_observation_is_hidden() {
-    let mut offline = observation("agent-a", None, Some("192.168.1.2"), 20);
-    offline.kind = "neigh".into();
-    offline.hostname = None;
-    offline.last_action = "remove".into();
-
-    let mut devices = build_fleet_devices(Vec::new(), vec![offline], &context(&["agent-a"]));
+fn unknown_ip_only_offline_device_is_hidden_by_default() {
+    let mut devices = build_fleet_devices(
+        Vec::new(),
+        vec![offline_ip_only_unknown(
+            "agent-a",
+            "ip:192.168.1.2",
+            "192.168.1.2",
+            20,
+        )],
+        &context(&["agent-a"]),
+    );
 
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0].display_name, "(unknown device)");
@@ -181,13 +265,17 @@ fn unknown_ip_only_remove_observation_is_hidden() {
 }
 
 #[test]
-fn visibility_all_keeps_unknown_ip_only_remove_observation() {
-    let mut offline = observation("agent-a", None, Some("192.168.1.2"), 20);
-    offline.kind = "neigh".into();
-    offline.hostname = None;
-    offline.last_action = "remove".into();
-
-    let mut devices = build_fleet_devices(Vec::new(), vec![offline], &context(&["agent-a"]));
+fn visibility_all_keeps_unknown_ip_only_offline_device() {
+    let mut devices = build_fleet_devices(
+        Vec::new(),
+        vec![offline_ip_only_unknown(
+            "agent-a",
+            "ip:192.168.1.2",
+            "192.168.1.2",
+            20,
+        )],
+        &context(&["agent-a"]),
+    );
 
     filter_fleet_devices(
         &mut devices,
@@ -201,7 +289,7 @@ fn visibility_all_keeps_unknown_ip_only_remove_observation() {
 }
 
 #[test]
-fn known_ip_only_remove_observation_is_kept() {
+fn known_ip_only_offline_device_is_kept() {
     let known = KnownDevice {
         device_id: "dev-1".into(),
         display_name: "lda".into(),
@@ -220,114 +308,22 @@ fn known_ip_only_remove_observation_is_kept() {
     let mut ctx = context(&["agent-a"]);
     ctx.identifier_map
         .insert("ip:192.168.1.2".into(), known_device_summary(&known));
-    let mut offline = observation("agent-a", None, Some("192.168.1.2"), 20);
-    offline.kind = "neigh".into();
-    offline.hostname = None;
-    offline.last_action = "remove".into();
 
-    let devices = build_fleet_devices(vec![known], vec![offline], &ctx);
+    let devices = build_fleet_devices(
+        vec![known],
+        vec![offline_agent_device(
+            "agent-a",
+            "ip:192.168.1.2",
+            None,
+            Some("192.168.1.2"),
+            20,
+        )],
+        &ctx,
+    );
 
+    let expected_ip: IpAddr = "192.168.1.2".parse().unwrap();
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0].device_key, "known:dev-1");
     assert_eq!(devices[0].display_name, "lda");
-    assert!(devices[0].ips.contains(&"192.168.1.2".to_string()));
-}
-
-#[test]
-fn inventory_result_maps_to_stored_observations() {
-    let observations = inventory_result_to_observations(serde_json::json!({
-        "kind": "inventory",
-        "devices": [{
-            "names": ["lda"],
-            "ips": ["192.168.1.2"],
-            "macs": ["aa:bb:cc:dd:ee:ff"],
-            "presence": "likely_online"
-        }]
-    }))
-    .expect("inventory should map");
-
-    assert_eq!(observations.len(), 1);
-    assert_eq!(observations[0].kind, "inventory");
-    assert_eq!(observations[0].action, "update");
-    assert_eq!(observations[0].mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
-}
-
-#[test]
-fn inventory_result_preserves_neighbor_failed_ip_as_remove() {
-    let observations = inventory_result_to_observations(serde_json::json!({
-        "kind": "inventory",
-        "devices": [{
-            "names": ["lda"],
-            "ips": ["192.168.1.2", "192.168.1.3"],
-            "macs": ["aa:bb:cc:dd:ee:ff"],
-            "neighbors": [
-                {
-                    "ip": "192.168.1.2",
-                    "mac": "aa:bb:cc:dd:ee:ff",
-                    "state": "FAILED"
-                },
-                {
-                    "ip": "192.168.1.3",
-                    "mac": "aa:bb:cc:dd:ee:ff",
-                    "state": "REACHABLE"
-                }
-            ],
-            "presence": "online"
-        }]
-    }))
-    .expect("inventory should map");
-
-    assert_eq!(observations.len(), 2);
-    let removed = observations
-        .iter()
-        .find(|observation| observation.ip.as_deref() == Some("192.168.1.2"))
-        .expect("failed neighbor observation should exist");
-    assert_eq!(removed.action, "remove");
-    assert_eq!(removed.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
-
-    let current = observations
-        .iter()
-        .find(|observation| observation.ip.as_deref() == Some("192.168.1.3"))
-        .expect("reachable neighbor observation should exist");
-    assert_eq!(current.action, "update");
-    assert_eq!(current.mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
-}
-
-#[test]
-fn inventory_result_preserves_hook_observations_and_leases() {
-    let observations = inventory_result_to_observations(serde_json::json!({
-        "kind": "inventory",
-        "devices": [{
-            "names": ["lda"],
-            "ips": ["192.168.1.2", "192.168.1.3"],
-            "macs": ["aa:bb:cc:dd:ee:ff"],
-            "observations": [{
-                "kind": "neigh",
-                "action": "remove",
-                "mac": "aa:bb:cc:dd:ee:ff",
-                "ip": "192.168.1.2"
-            }],
-            "leases": [{
-                "expires_epoch": 1893456000_u64,
-                "ip": "192.168.1.3",
-                "mac": "aa:bb:cc:dd:ee:ff",
-                "name": "lda"
-            }],
-            "presence": "likely_online"
-        }]
-    }))
-    .expect("inventory should map");
-
-    assert_eq!(observations.len(), 2);
-    assert!(observations.iter().any(|observation| {
-        observation.action == "remove"
-            && observation.mac.as_deref() == Some("aa:bb:cc:dd:ee:ff")
-            && observation.ip.as_deref() == Some("192.168.1.2")
-    }));
-    assert!(observations.iter().any(|observation| {
-        observation.action == "update"
-            && observation.mac.as_deref() == Some("aa:bb:cc:dd:ee:ff")
-            && observation.ip.as_deref() == Some("192.168.1.3")
-            && observation.hostname.as_deref() == Some("lda")
-    }));
+    assert!(devices[0].ips.contains(&expected_ip));
 }

@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT agent_id as \"agent_id!\", device_key as \"device_key!\", hostname as \"hostname!\"\n             FROM agent_device_hostnames",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "device_key!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "hostname!",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dba637bf03d53bf3394ead0f01466f9a72fafc54f9ce239d2e5ac7f76b63b168"
+}

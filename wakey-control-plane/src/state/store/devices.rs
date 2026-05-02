@@ -181,21 +181,6 @@ impl Store {
         self.get_known_device(device_id).await
     }
 
-    pub async fn attach_observation_identifier(
-        &self,
-        device_id: &str,
-        observation_key: &str,
-    ) -> Result<Option<KnownDevice>> {
-        let observation = get_observation_identifier_row(&self.pool, observation_key).await?;
-
-        let Some(observation) = observation else {
-            anyhow::bail!("observation not found");
-        };
-        let input = observation_identifier_to_input(observation)?;
-
-        self.attach_device_identifier(device_id, input).await
-    }
-
     pub async fn detach_device_identifier(
         &self,
         device_id: &str,

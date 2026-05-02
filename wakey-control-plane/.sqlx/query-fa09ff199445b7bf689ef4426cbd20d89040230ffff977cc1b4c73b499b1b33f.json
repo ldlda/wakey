@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO active_alerts\n         (alert_id, kind, severity, status, agent_id, message, value, threshold,\n          last_seen_unix, metadata_json)\n         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "fa09ff199445b7bf689ef4426cbd20d89040230ffff977cc1b4c73b499b1b33f"
+}

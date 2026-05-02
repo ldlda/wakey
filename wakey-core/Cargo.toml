@@ -1,12 +1,12 @@
 [package]
 name = "wakey-core"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 publish = ["gitea"]
 
 [dependencies]
-macaddr = { version = "1", features = ["serde", "serde_std"] }
-serde = { version = "1", features = ["derive"] }
+macaddr = { workspace = true }
+serde = { workspace = true }
 serde_with = { version = "3", features = ["json"] }
 strum = { version = "0", features = ["derive", "strum_macros"] }
 thiserror = "2"

@@ -1,7 +1,12 @@
+use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
+
+use wakey_core::Presence;
 
 use crate::api::commands::RelayCommandResponse;
 use crate::state::KnownDeviceSummary;
+use wakey_core::parse::mac;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ListFleetDevicesQuery {
@@ -53,14 +58,15 @@ pub struct FleetDevice {
     pub display_name: String,
     pub known_device: Option<KnownDeviceSummary>,
     pub pinned: bool,
-    pub ips: Vec<String>,
-    pub macs: Vec<String>,
+    pub ips: Vec<IpAddr>,
+    #[serde(with = "mac::vec_mac")]
+    pub macs: Vec<MacAddr>,
     pub hostnames: Vec<String>,
     pub agents: Vec<FleetDeviceAgent>,
     pub sources: Vec<String>,
     pub first_seen_unix: Option<u64>,
     pub last_seen_unix: Option<u64>,
-    pub presence: String,
+    pub presence: Presence,
     pub route_candidates: Vec<FleetWakeRoute>,
     pub recommended_route: Option<FleetWakeRoute>,
 }
@@ -79,8 +85,9 @@ pub struct FleetWakeRoute {
     pub agent_id: String,
     pub nickname: Option<String>,
     pub connected: bool,
-    pub mac: Option<String>,
-    pub ip: Option<String>,
+    #[serde(with = "mac::option_mac")]
+    pub mac: Option<MacAddr>,
+    pub ip: Option<IpAddr>,
     pub hostname: Option<String>,
     pub source: String,
     pub last_seen_unix: u64,

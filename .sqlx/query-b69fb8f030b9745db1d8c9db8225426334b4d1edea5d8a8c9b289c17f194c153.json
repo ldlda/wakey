@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO agent_meta (agent_id, nickname) VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b69fb8f030b9745db1d8c9db8225426334b4d1edea5d8a8c9b289c17f194c153"
+}

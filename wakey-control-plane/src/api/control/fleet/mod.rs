@@ -12,7 +12,6 @@ use crate::api::json_error;
 use crate::runtime::AppState;
 
 mod build;
-mod inventory;
 mod types;
 
 #[cfg(test)]
@@ -22,7 +21,6 @@ use build::{
     AgentRuntimeStatus, FleetBuildContext, build_fleet_devices, filter_fleet_devices,
     known_device_summary,
 };
-use inventory::inventory_result_to_observations;
 use types::{
     FleetDevice, ListFleetDevicesQuery, RefreshFleetAgentResult, RefreshFleetDevicesRequest,
     RefreshFleetDevicesResponse, WakeFleetDeviceRequest, WakeFleetDeviceResponse,
@@ -87,28 +85,35 @@ pub async fn refresh_fleet_devices(
                     });
                     continue;
                 };
-                match inventory_result_to_observations(result) {
-                    Ok(observations) => match state
-                        .store
-                        .upsert_agent_observations_snapshot(&agent_id, "inventory", observations)
-                        .await
-                    {
-                        Ok(accepted) => {
-                            total_accepted = total_accepted.saturating_add(accepted);
-                            results.push(RefreshFleetAgentResult {
+                match serde_json::from_value::<Vec<wakey_core::Device>>(
+                    result
+                        .get("devices")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Array(vec![])),
+                ) {
+                    Ok(devices) => {
+                        match state
+                            .store
+                            .replace_agent_device_snapshot(&agent_id, &devices)
+                            .await
+                        {
+                            Ok(accepted) => {
+                                total_accepted = total_accepted.saturating_add(accepted);
+                                results.push(RefreshFleetAgentResult {
+                                    agent_id,
+                                    status: "ok".into(),
+                                    accepted,
+                                    error: None,
+                                });
+                            }
+                            Err(err) => results.push(RefreshFleetAgentResult {
                                 agent_id,
-                                status: "ok".into(),
-                                accepted,
-                                error: None,
-                            });
+                                status: "error".into(),
+                                accepted: 0,
+                                error: Some(err.to_string()),
+                            }),
                         }
-                        Err(err) => results.push(RefreshFleetAgentResult {
-                            agent_id,
-                            status: "error".into(),
-                            accepted: 0,
-                            error: Some(err.to_string()),
-                        }),
-                    },
+                    }
                     Err(err) => results.push(RefreshFleetAgentResult {
                         agent_id,
                         status: "error".into(),
@@ -191,7 +196,7 @@ pub async fn wake_fleet_device(
         )
     })?;
 
-    let Some(mac) = route.mac.as_deref() else {
+    let Some(mac) = route.mac else {
         return Err(json_error(
             StatusCode::BAD_REQUEST,
             "wake_route_unavailable",
@@ -213,33 +218,13 @@ pub async fn wake_fleet_device(
         ));
     }
 
-    let mac = mac.parse().map_err(|err| {
-        json_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_wake_route",
-            &format!("invalid route MAC: {err}"),
-        )
-    })?;
-    let ip = route
-        .ip
-        .as_deref()
-        .map(str::parse)
-        .transpose()
-        .map_err(|err| {
-            json_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_wake_route",
-                &format!("invalid route IP: {err}"),
-            )
-        })?;
-
     let command = relay_agent_command(
         &state,
         &route.agent_id,
         AgentCommand::Wake(WakeRequest {
             query: None,
             mac: Some(mac),
-            ip,
+            ip: route.ip,
         }),
         req.timeout_ms,
     )
@@ -256,10 +241,7 @@ async fn load_fleet_devices(
     query: &ListFleetDevicesQuery,
 ) -> anyhow::Result<Vec<FleetDevice>> {
     let known_devices = state.store.list_known_devices().await?;
-    let observations = state
-        .store
-        .list_agent_observations(None, query.limit.unwrap_or(1000).max(1))
-        .await?;
+    let agent_devices = state.store.list_agent_device_rows().await?;
     let connected = {
         let sessions = state.sessions.read().await;
         sessions.keys().cloned().collect::<BTreeSet<_>>()
@@ -291,7 +273,7 @@ async fn load_fleet_devices(
         agent_status,
         identifier_map,
     };
-    let mut devices = build_fleet_devices(known_devices, observations, &context);
+    let mut devices = build_fleet_devices(known_devices, agent_devices, &context);
     filter_fleet_devices(&mut devices, query);
     let limit = query.limit.unwrap_or(500).clamp(1, 1000);
     devices.truncate(limit);

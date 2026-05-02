@@ -12,6 +12,7 @@ pub struct DaemonConfig {
     pub state_file: PathBuf,
     pub command_timeout: Duration,
     pub enroll_token_ttl: Duration,
+    #[allow(dead_code)]
     pub observation_retention: Duration,
     pub pid_file: PathBuf,
     pub ui_dist_dir: PathBuf,

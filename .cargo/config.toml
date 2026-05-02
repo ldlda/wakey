@@ -18,7 +18,7 @@ tw = "t --target=x86_64-pc-windows-msvc"
 
 
 check-all = "check --workspace --all-features --all-targets"
-clippy-all = "clippy --workspace --all-features --all-targets"
+clippy-all = "clippy --workspace --all-targets --all-features" # -- -D warnings
 test-all = "test --workspace --all-features --all-targets"
 fmt-all = "fmt --all"
 

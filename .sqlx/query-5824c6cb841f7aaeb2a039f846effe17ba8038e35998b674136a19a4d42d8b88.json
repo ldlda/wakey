@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT agent_id as \"agent_id!\", device_key as \"device_key!\", mac as \"mac!\"\n             FROM agent_device_macs",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "device_key!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "mac!",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5824c6cb841f7aaeb2a039f846effe17ba8038e35998b674136a19a4d42d8b88"
+}

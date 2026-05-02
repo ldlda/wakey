@@ -71,10 +71,6 @@ fn public_api_routes(ui_dist_dir: std::path::PathBuf) -> Router<AppState> {
         )
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
-        .route(
-            "/api/v1/agents/observations",
-            post(api::upload_agent_observations),
-        )
         .route("/api/v1/agent/ws", get(ws::agent_ws))
 }
 
@@ -103,18 +99,6 @@ fn control_api_routes() -> Router<AppState> {
         )
         .route("/api/v1/control/fleet/wake", post(api::wake_fleet_device))
         .route(
-            "/api/v1/control/observations",
-            get(api::list_agent_observations),
-        )
-        .route(
-            "/api/v1/control/observations/history",
-            get(api::list_agent_observation_history),
-        )
-        .route(
-            "/api/v1/control/agents/{agent_id}/observations/sync",
-            post(api::request_agent_observation_sync),
-        )
-        .route(
             "/api/v1/control/devices",
             get(api::list_known_devices).post(api::create_known_device),
         )
@@ -133,10 +117,6 @@ fn control_api_routes() -> Router<AppState> {
         .route(
             "/api/v1/control/devices/{device_id}/identifiers/{identifier_key}",
             axum::routing::delete(api::detach_device_identifier),
-        )
-        .route(
-            "/api/v1/control/devices/{device_id}/identifiers/from-observation",
-            post(api::attach_observation_identifier),
         )
         .route("/api/v1/control/audit/events", get(api::list_audit_events))
         .route("/api/v1/control/alerts", get(api::active_alerts))
@@ -225,18 +205,6 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
                             }
                         }
                         Err(err) => warn!(error = %err, "periodic gc failed"),
-                    }
-                    match app_state
-                        .store
-                        .gc_stale_observations(daemon.observation_retention)
-                        .await
-                    {
-                        Ok(removed) => {
-                            if removed > 0 {
-                                info!(removed, "periodic gc removed stale observations");
-                            }
-                        }
-                        Err(err) => warn!(error = %err, "periodic observation gc failed"),
                     }
                 }
                 join = &mut server => {

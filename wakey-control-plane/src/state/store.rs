@@ -8,10 +8,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::state::types::{
-    AgentDeviceObservation, AgentDeviceObservationEvent, AgentDeviceObservationInput,
-    AgentDeviceObservationView, AlertState, AlertTransition, AuditEvent, AuditEventFilter,
-    AuditEventInput, DeviceIdentifier, DeviceIdentifierInput, EnrollTokenInfo, IssuedAgent,
-    IssuedEnrollToken, KnownDevice, KnownDeviceInput, KnownDeviceSummary, StateStats,
+    AlertState, AlertTransition, AuditEvent, AuditEventFilter, AuditEventInput, DeviceIdentifier,
+    DeviceIdentifierInput, EnrollTokenInfo, IssuedAgent, IssuedEnrollToken, KnownDevice,
+    KnownDeviceInput, StateStats,
 };
 
 pub struct Store {
@@ -21,8 +20,9 @@ pub struct Store {
 
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 const SEEDED_ENROLL_TOKEN_PREFIX: &str = "seeded_enroll_token:";
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
+pub(crate) mod agent_devices;
 mod alerts;
 mod audit;
 mod db;
@@ -30,7 +30,6 @@ mod devices;
 mod enrollment;
 mod helpers;
 mod import_sled;
-mod observations;
 
 use helpers::alerts_audit::*;
 use helpers::core::*;
@@ -45,20 +44,7 @@ mod tests {
     use crate::state::{DeviceIdentifierInput, KnownDeviceInput};
 
     use super::Store;
-
-    async fn make_store() -> (Store, std::path::PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
-        let db_path = dir.join("state.sqlite3");
-        let store = Store::load_or_init(&db_path, Vec::new(), Duration::from_secs(60))
-            .await
-            .expect("store should initialize");
-        (store, dir)
-    }
-
-    fn cleanup_dir(path: &std::path::Path) {
-        let _ = fs::remove_dir_all(path);
-    }
+    use super::helpers::test_helpers::TestStore;
 
     async fn insert_token(store: &Store, token: &str, expires_at_unix: u64) {
         sqlx::query(
@@ -81,15 +67,16 @@ mod tests {
             Err(err) => err,
         };
         assert!(err.to_string().contains("legacy sled store"));
-        cleanup_dir(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
     async fn gc_removes_expired_tokens() {
-        let (store, dir) = make_store().await;
-        insert_token(&store, "enr-expired-gc-test", 1).await;
+        let ts = TestStore::new().await;
+        insert_token(ts.store(), "enr-expired-gc-test", 1).await;
 
-        let removed = store
+        let removed = ts
+            .store()
             .gc_expired_enroll_tokens()
             .await
             .expect("gc should succeed");
@@ -98,19 +85,19 @@ mod tests {
         let exists =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1")
                 .bind("enr-expired-gc-test")
-                .fetch_one(&store.pool)
+                .fetch_one(&ts.store().pool)
                 .await
                 .expect("read should succeed");
         assert_eq!(exists, 0);
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn enroll_rejects_expired_token() {
-        let (store, dir) = make_store().await;
-        insert_token(&store, "enr-expired-enroll-test", 1).await;
+        let ts = TestStore::new().await;
+        insert_token(ts.store(), "enr-expired-enroll-test", 1).await;
 
-        let err = store
+        let err = ts
+            .store()
             .enroll("enr-expired-enroll-test")
             .await
             .expect_err("expired token should be rejected");
@@ -119,119 +106,122 @@ mod tests {
         let exists =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1")
                 .bind("enr-expired-enroll-test")
-                .fetch_one(&store.pool)
+                .fetch_one(&ts.store().pool)
                 .await
                 .expect("read should succeed");
         assert_eq!(exists, 0);
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn stats_counts_agents_and_expired_tokens() {
-        let (store, dir) = make_store().await;
-        insert_token(&store, "enr-valid-test", i64::MAX as u64).await;
+        let ts = TestStore::new().await;
+        insert_token(ts.store(), "enr-valid-test", i64::MAX as u64).await;
 
-        let _issued = store
+        let _issued = ts
+            .store()
             .issue_enroll_token(Duration::from_secs(60))
             .await
             .expect("issue should succeed");
 
-        insert_token(&store, "enr-expired-stats-test", 1).await;
+        insert_token(ts.store(), "enr-expired-stats-test", 1).await;
 
-        let issued_agent = store
+        let issued_agent = ts
+            .store()
             .enroll("enr-valid-test")
             .await
             .expect("enroll should succeed for valid token");
         assert!(!issued_agent.agent_id.is_empty());
 
-        let stats = store.stats().await.expect("stats should succeed");
+        let stats = ts.store().stats().await.expect("stats should succeed");
 
         assert_eq!(stats.agent_count, 1);
         assert_eq!(stats.enroll_token_count, 2);
         assert_eq!(stats.expired_enroll_token_count, 1);
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn revoke_agent_removes_credentials() {
-        let (store, dir) = make_store().await;
+        let ts = TestStore::new().await;
 
-        insert_token(&store, "enr-revoke-agent-test", i64::MAX as u64).await;
+        insert_token(ts.store(), "enr-revoke-agent-test", i64::MAX as u64).await;
 
-        let issued = store
+        let issued = ts
+            .store()
             .enroll("enr-revoke-agent-test")
             .await
             .expect("enroll should succeed");
 
         assert!(
-            store
+            ts.store()
                 .verify_agent_token(&issued.agent_id, &issued.agent_token)
                 .await
         );
 
-        let removed = store
+        let removed = ts
+            .store()
             .revoke_agent(&issued.agent_id)
             .await
             .expect("revoke should succeed");
         assert!(removed);
         assert!(
-            !store
+            !ts.store()
                 .verify_agent_token(&issued.agent_id, &issued.agent_token)
                 .await
         );
 
-        let removed_again = store
+        let removed_again = ts
+            .store()
             .revoke_agent(&issued.agent_id)
             .await
             .expect("second revoke should succeed");
         assert!(!removed_again);
-
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn nickname_set_and_clear_roundtrip() {
-        let (store, dir) = make_store().await;
+        let ts = TestStore::new().await;
 
-        insert_token(&store, "enr-nickname-test", i64::MAX as u64).await;
+        insert_token(ts.store(), "enr-nickname-test", i64::MAX as u64).await;
 
-        let issued = store
+        let issued = ts
+            .store()
             .enroll("enr-nickname-test")
             .await
             .expect("enroll should succeed");
 
-        let updated = store
+        let updated = ts
+            .store()
             .set_agent_nickname(&issued.agent_id, Some("kitchen-router"))
             .await
             .expect("nickname set should succeed");
         assert!(updated);
 
-        let listed = store.list_agents_with_nicknames().await;
+        let listed = ts.store().list_agents_with_nicknames().await;
         assert!(listed.iter().any(|(id, name)| {
             id == &issued.agent_id && name.as_deref() == Some("kitchen-router")
         }));
 
-        let cleared = store
+        let cleared = ts
+            .store()
             .set_agent_nickname(&issued.agent_id, None)
             .await
             .expect("nickname clear should succeed");
         assert!(cleared);
 
-        let listed = store.list_agents_with_nicknames().await;
+        let listed = ts.store().list_agents_with_nicknames().await;
         assert!(
             listed
                 .iter()
                 .any(|(id, name)| id == &issued.agent_id && name.is_none())
         );
-
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn known_device_can_hold_multiple_manual_mac_identifiers() {
-        let (store, dir) = make_store().await;
+        let ts = TestStore::new().await;
 
-        let created = store
+        let created = ts
+            .store()
             .create_known_device(KnownDeviceInput {
                 display_name: "lda".into(),
                 pinned: true,
@@ -249,7 +239,8 @@ mod tests {
         assert_eq!(created.identifiers.len(), 1);
         assert_eq!(created.identifiers[0].value, "aa:bb:cc:dd:ee:01");
 
-        let updated = store
+        let updated = ts
+            .store()
             .attach_device_identifier(
                 &created.device_id,
                 DeviceIdentifierInput {
@@ -269,7 +260,8 @@ mod tests {
                 .any(|identifier| identifier.value == "aa:bb:cc:dd:ee:02")
         );
 
-        let matched = store
+        let matched = ts
+            .store()
             .lookup_known_device_by_identifier(DeviceIdentifierInput {
                 kind: "mac".into(),
                 value: "aa:bb:cc:dd:ee:02".into(),
@@ -278,14 +270,13 @@ mod tests {
             .expect("lookup should succeed")
             .expect("identifier should match");
         assert_eq!(matched.device_id, created.device_id);
-
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn known_device_identifier_is_unique_across_devices() {
-        let (store, dir) = make_store().await;
-        let first = store
+        let ts = TestStore::new().await;
+        let first = ts
+            .store()
             .create_known_device(KnownDeviceInput {
                 display_name: "lda".into(),
                 pinned: true,
@@ -297,7 +288,8 @@ mod tests {
             })
             .await
             .expect("first device should create");
-        let second = store
+        let second = ts
+            .store()
             .create_known_device(KnownDeviceInput {
                 display_name: "other".into(),
                 pinned: false,
@@ -307,7 +299,8 @@ mod tests {
             .await
             .expect("second device should create");
 
-        let err = store
+        let err = ts
+            .store()
             .attach_device_identifier(
                 &second.device_id,
                 DeviceIdentifierInput {
@@ -322,7 +315,11 @@ mod tests {
                 .contains("failed attaching device identifier")
         );
 
-        let listed = store.list_known_devices().await.expect("list should work");
+        let listed = ts
+            .store()
+            .list_known_devices()
+            .await
+            .expect("list should work");
         assert_eq!(listed.len(), 2);
         assert!(
             listed
@@ -333,14 +330,13 @@ mod tests {
                 .len()
                 == 1
         );
-
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn device_identifier_can_be_detached_manually() {
-        let (store, dir) = make_store().await;
-        let created = store
+        let ts = TestStore::new().await;
+        let created = ts
+            .store()
             .create_known_device(KnownDeviceInput {
                 display_name: "lda".into(),
                 pinned: true,
@@ -359,7 +355,8 @@ mod tests {
             .await
             .expect("known device should create");
 
-        let updated = store
+        let updated = ts
+            .store()
             .detach_device_identifier(&created.device_id, "ip:192.168.1.2")
             .await
             .expect("identifier detach should succeed")
@@ -371,7 +368,8 @@ mod tests {
             "mac:aa:bb:cc:dd:ee:ff"
         );
 
-        let unmatched = store
+        let unmatched = ts
+            .store()
             .lookup_known_device_by_identifier(DeviceIdentifierInput {
                 kind: "ip".into(),
                 value: "192.168.1.2".into(),
@@ -379,14 +377,13 @@ mod tests {
             .await
             .expect("lookup should succeed");
         assert!(unmatched.is_none());
-
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn merge_known_devices_moves_identifiers_and_deletes_source() {
-        let (store, dir) = make_store().await;
-        let target = store
+        let ts = TestStore::new().await;
+        let target = ts
+            .store()
             .create_known_device(KnownDeviceInput {
                 display_name: "lda".into(),
                 pinned: true,
@@ -398,7 +395,8 @@ mod tests {
             })
             .await
             .expect("target should create");
-        let source = store
+        let source = ts
+            .store()
             .create_known_device(KnownDeviceInput {
                 display_name: "lda duplicate".into(),
                 pinned: false,
@@ -411,7 +409,8 @@ mod tests {
             .await
             .expect("source should create");
 
-        let merged = store
+        let merged = ts
+            .store()
             .merge_known_devices(&target.device_id, &source.device_id)
             .await
             .expect("merge should succeed")
@@ -426,362 +425,19 @@ mod tests {
                 .any(|identifier| identifier.value == "aa:bb:cc:dd:ee:02")
         );
         assert!(
-            store
+            ts.store()
                 .get_known_device(&source.device_id)
                 .await
                 .expect("source lookup should work")
                 .is_none()
         );
-
-        cleanup_dir(&dir);
-    }
-
-    #[tokio::test]
-    async fn agent_observations_upsert_current_state_and_events() {
-        let (store, dir) = make_store().await;
-
-        let accepted = store
-            .upsert_agent_observations(
-                "agent-a",
-                vec![crate::state::AgentDeviceObservationInput {
-                    kind: "dhcp".into(),
-                    action: "update".into(),
-                    mac: Some("AA:BB:CC:DD:EE:FF".into()),
-                    ip: Some("192.168.1.10".into()),
-                    hostname: Some("lda".into()),
-                    first_seen_unix: 10,
-                    last_seen_unix: 20,
-                }],
-            )
-            .await
-            .expect("observation upsert should succeed");
-        assert_eq!(accepted, 1);
-
-        let rows = store
-            .list_agent_observations(Some("agent-a"), 10)
-            .await
-            .expect("observations should list");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].mac.as_deref(), Some("aa:bb:cc:dd:ee:ff"));
-        assert_eq!(rows[0].hostname.as_deref(), Some("lda"));
-
-        let event_count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agent_device_observation_events")
-                .fetch_one(&store.pool)
-                .await
-                .expect("event count should read");
-        assert_eq!(event_count, 1);
-
-        let accepted = store
-            .upsert_agent_observations(
-                "agent-a",
-                vec![crate::state::AgentDeviceObservationInput {
-                    kind: "dhcp".into(),
-                    action: "update".into(),
-                    mac: Some("AA:BB:CC:DD:EE:FF".into()),
-                    ip: Some("192.168.1.10".into()),
-                    hostname: Some("lda".into()),
-                    first_seen_unix: 10,
-                    last_seen_unix: 20,
-                }],
-            )
-            .await
-            .expect("duplicate observation upsert should succeed");
-        assert_eq!(accepted, 1);
-
-        let event_count =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agent_device_observation_events")
-                .fetch_one(&store.pool)
-                .await
-                .expect("event count should read");
-        assert_eq!(event_count, 1);
-
-        store
-            .upsert_agent_observations(
-                "agent-a",
-                vec![crate::state::AgentDeviceObservationInput {
-                    kind: "dhcp".into(),
-                    action: "remove".into(),
-                    mac: Some("AA:BB:CC:DD:EE:FF".into()),
-                    ip: Some("192.168.1.10".into()),
-                    hostname: Some("lda".into()),
-                    first_seen_unix: 10,
-                    last_seen_unix: 30,
-                }],
-            )
-            .await
-            .expect("changed observation upsert should succeed");
-
-        let events = store
-            .list_agent_observation_events(
-                Some("agent-a"),
-                None,
-                Some("aa:bb:cc:dd:ee:ff"),
-                None,
-                None,
-                10,
-            )
-            .await
-            .expect("observation events should list");
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].action, "remove");
-        assert_eq!(
-            events[0].observation_key,
-            "agent:agent-a:dhcp:mac:aa:bb:cc:dd:ee:ff"
-        );
-
-        cleanup_dir(&dir);
-    }
-
-    #[tokio::test]
-    async fn observation_snapshot_prunes_missing_keys() {
-        let (store, dir) = make_store().await;
-
-        store
-            .upsert_agent_observations(
-                "agent-a",
-                vec![
-                    crate::state::AgentDeviceObservationInput {
-                        kind: "dhcp".into(),
-                        action: "update".into(),
-                        mac: Some("AA:BB:CC:DD:EE:01".into()),
-                        ip: Some("192.168.1.10".into()),
-                        hostname: Some("first".into()),
-                        first_seen_unix: 10,
-                        last_seen_unix: 20,
-                    },
-                    crate::state::AgentDeviceObservationInput {
-                        kind: "dhcp".into(),
-                        action: "update".into(),
-                        mac: Some("AA:BB:CC:DD:EE:02".into()),
-                        ip: Some("192.168.1.11".into()),
-                        hostname: Some("second".into()),
-                        first_seen_unix: 10,
-                        last_seen_unix: 20,
-                    },
-                ],
-            )
-            .await
-            .expect("initial observations should upsert");
-
-        store
-            .upsert_agent_observations_snapshot(
-                "agent-a",
-                "dhcp",
-                vec![crate::state::AgentDeviceObservationInput {
-                    kind: "dhcp".into(),
-                    action: "update".into(),
-                    mac: Some("AA:BB:CC:DD:EE:01".into()),
-                    ip: Some("192.168.1.10".into()),
-                    hostname: Some("first".into()),
-                    first_seen_unix: 10,
-                    last_seen_unix: 30,
-                }],
-            )
-            .await
-            .expect("snapshot upsert should succeed");
-
-        let rows = store
-            .list_agent_observations(Some("agent-a"), 10)
-            .await
-            .expect("observations should list");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].mac.as_deref(), Some("aa:bb:cc:dd:ee:01"));
-
-        cleanup_dir(&dir);
-    }
-
-    #[tokio::test]
-    async fn observation_gc_removes_stale_rows() {
-        let (store, dir) = make_store().await;
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("time should be monotonic")
-            .as_secs();
-        let old = now.saturating_sub(10);
-
-        store
-            .upsert_agent_observations(
-                "agent-a",
-                vec![
-                    crate::state::AgentDeviceObservationInput {
-                        kind: "dhcp".into(),
-                        action: "update".into(),
-                        mac: Some("AA:BB:CC:DD:EE:10".into()),
-                        ip: Some("192.168.1.20".into()),
-                        hostname: Some("old".into()),
-                        first_seen_unix: old,
-                        last_seen_unix: old,
-                    },
-                    crate::state::AgentDeviceObservationInput {
-                        kind: "dhcp".into(),
-                        action: "update".into(),
-                        mac: Some("AA:BB:CC:DD:EE:11".into()),
-                        ip: Some("192.168.1.21".into()),
-                        hostname: Some("fresh".into()),
-                        first_seen_unix: now,
-                        last_seen_unix: now,
-                    },
-                ],
-            )
-            .await
-            .expect("observations should upsert");
-
-        let removed = store
-            .gc_stale_observations(Duration::from_secs(5))
-            .await
-            .expect("gc should succeed");
-        assert!(removed >= 1);
-
-        let rows = store
-            .list_agent_observations(Some("agent-a"), 10)
-            .await
-            .expect("observations should list");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].hostname.as_deref(), Some("fresh"));
-
-        cleanup_dir(&dir);
-    }
-
-    #[tokio::test]
-    async fn agent_observation_views_include_matching_known_device() {
-        let (store, dir) = make_store().await;
-
-        let device = store
-            .create_known_device(KnownDeviceInput {
-                display_name: "lda".into(),
-                pinned: true,
-                notes: None,
-                identifiers: vec![DeviceIdentifierInput {
-                    kind: "mac".into(),
-                    value: "aa:bb:cc:dd:ee:ff".into(),
-                }],
-            })
-            .await
-            .expect("known device should create");
-
-        store
-            .upsert_agent_observations(
-                "agent-a",
-                vec![
-                    crate::state::AgentDeviceObservationInput {
-                        kind: "dhcp".into(),
-                        action: "update".into(),
-                        mac: Some("AA:BB:CC:DD:EE:FF".into()),
-                        ip: Some("192.168.1.10".into()),
-                        hostname: Some("lda".into()),
-                        first_seen_unix: 10,
-                        last_seen_unix: 20,
-                    },
-                    crate::state::AgentDeviceObservationInput {
-                        kind: "dhcp".into(),
-                        action: "update".into(),
-                        mac: Some("00:11:22:33:44:55".into()),
-                        ip: Some("192.168.1.11".into()),
-                        hostname: Some("guest".into()),
-                        first_seen_unix: 11,
-                        last_seen_unix: 21,
-                    },
-                ],
-            )
-            .await
-            .expect("observation upsert should succeed");
-
-        let rows = store
-            .list_agent_observation_views(Some("agent-a"), 10)
-            .await
-            .expect("observation views should list");
-        assert_eq!(rows.len(), 2);
-
-        let known = rows
-            .iter()
-            .find(|row| row.mac.as_deref() == Some("aa:bb:cc:dd:ee:ff"))
-            .expect("known observation should be present");
-        let known_device = known
-            .known_device
-            .as_ref()
-            .expect("known observation should join device");
-        assert_eq!(known_device.device_id, device.device_id);
-        assert_eq!(known_device.display_name, "lda");
-        assert!(known_device.pinned);
-
-        let unknown = rows
-            .iter()
-            .find(|row| row.mac.as_deref() == Some("00:11:22:33:44:55"))
-            .expect("unknown observation should be present");
-        assert!(unknown.known_device.is_none());
-
-        cleanup_dir(&dir);
-    }
-
-    #[tokio::test]
-    async fn observation_identifier_can_be_attached_to_known_device() {
-        let (store, dir) = make_store().await;
-
-        let device = store
-            .create_known_device(KnownDeviceInput {
-                display_name: "lda".into(),
-                pinned: true,
-                notes: None,
-                identifiers: Vec::new(),
-            })
-            .await
-            .expect("known device should create");
-
-        store
-            .upsert_agent_observations(
-                "agent-a",
-                vec![crate::state::AgentDeviceObservationInput {
-                    kind: "dhcp".into(),
-                    action: "update".into(),
-                    mac: Some("AA:BB:CC:DD:EE:FF".into()),
-                    ip: Some("192.168.1.10".into()),
-                    hostname: Some("lda".into()),
-                    first_seen_unix: 10,
-                    last_seen_unix: 20,
-                }],
-            )
-            .await
-            .expect("observation upsert should succeed");
-
-        let observation = store
-            .list_agent_observations(Some("agent-a"), 10)
-            .await
-            .expect("observations should list")
-            .pop()
-            .expect("observation should exist");
-
-        let updated = store
-            .attach_observation_identifier(&device.device_id, &observation.observation_key)
-            .await
-            .expect("observation identifier should attach")
-            .expect("device should exist");
-
-        assert_eq!(updated.identifiers.len(), 1);
-        assert_eq!(updated.identifiers[0].kind, "mac");
-        assert_eq!(updated.identifiers[0].value, "aa:bb:cc:dd:ee:ff");
-
-        let views = store
-            .list_agent_observation_views(Some("agent-a"), 10)
-            .await
-            .expect("observation views should list");
-        assert_eq!(
-            views[0]
-                .known_device
-                .as_ref()
-                .map(|device| device.device_id.as_str()),
-            Some(device.device_id.as_str())
-        );
-
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn audit_events_append_and_filter() {
-        let (store, dir) = make_store().await;
+        let ts = TestStore::new().await;
 
-        store
+        ts.store()
             .append_audit_event(crate::state::AuditEventInput {
                 actor_type: "admin_api".into(),
                 actor_id: None,
@@ -796,7 +452,7 @@ mod tests {
             .await
             .expect("append first event should succeed");
 
-        store
+        ts.store()
             .append_audit_event(crate::state::AuditEventInput {
                 actor_type: "agent".into(),
                 actor_id: Some("agent-2".into()),
@@ -811,7 +467,8 @@ mod tests {
             .await
             .expect("append second event should succeed");
 
-        let all = store
+        let all = ts
+            .store()
             .list_audit_events(crate::state::AuditEventFilter {
                 limit: 10,
                 ..Default::default()
@@ -820,7 +477,8 @@ mod tests {
             .expect("list all should succeed");
         assert_eq!(all.len(), 2);
 
-        let filtered = store
+        let filtered = ts
+            .store()
             .list_audit_events(crate::state::AuditEventFilter {
                 agent_id: Some("agent-1".into()),
                 event_type: Some("command_result".into()),
@@ -833,7 +491,8 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].request_id.as_deref(), Some("req-1"));
 
-        let rejected = store
+        let rejected = ts
+            .store()
             .list_audit_events(crate::state::AuditEventFilter {
                 outcome: Some("rejected".into()),
                 limit: 10,
@@ -843,12 +502,11 @@ mod tests {
             .expect("rejected list should succeed");
         assert_eq!(rejected.len(), 1);
         assert_eq!(rejected[0].latency_ms, None);
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
     async fn alert_transitions_track_open_and_resolve() {
-        let (store, dir) = make_store().await;
+        let ts = TestStore::new().await;
         let alert = crate::state::AlertState {
             alert_id: "agent_offline:agent-a".into(),
             kind: "agent_offline".into(),
@@ -862,26 +520,28 @@ mod tests {
             metadata: serde_json::json!({}),
         };
 
-        let opened = store
+        let opened = ts
+            .store()
             .sync_alert_transitions(std::slice::from_ref(&alert))
             .await
             .expect("open transition should succeed");
         assert_eq!(opened.len(), 1);
         assert_eq!(opened[0].to_status, "active");
 
-        let resolved = store
+        let resolved = ts
+            .store()
             .sync_alert_transitions(&[])
             .await
             .expect("resolve transition should succeed");
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].to_status, "resolved");
 
-        let history = store
+        let history = ts
+            .store()
             .list_alert_transitions(None, 10)
             .await
             .expect("history should load");
         assert!(history.len() >= 2);
-        cleanup_dir(&dir);
     }
 
     #[tokio::test]
@@ -923,7 +583,7 @@ mod tests {
                 .contains("invalid or already-used enroll token")
         );
 
-        cleanup_dir(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
@@ -984,6 +644,6 @@ mod tests {
                 .any(|token| token.enroll_token == "enr-import-test")
         );
 
-        cleanup_dir(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

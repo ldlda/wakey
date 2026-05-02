@@ -101,15 +101,6 @@ async fn main() -> Result<()> {
             ::tracing::info!(pid_file = %args.pid_file.display(), "wakey-agent command: reload");
             serve::reload_daemon(&args.pid_file)?
         }
-        Command::SyncObservations(mut args) => {
-            if let Some(config) = global_config {
-                args.config = config.to_path_buf();
-            }
-            ::tracing::info!(config = %args.config.display(), "wakey-agent command: sync-observations");
-            let cfg = config::load_config(&args.config)?;
-            let accepted = session::sync_observations_once(&cfg).await?;
-            println!("observations_synced={accepted}");
-        }
         Command::Observe(mut args) => {
             if let Some(config) = global_config {
                 args.config = config.to_path_buf();

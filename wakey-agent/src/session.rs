@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use serde::Serialize;
 use std::net::IpAddr;
 use std::time::Instant;
 use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
@@ -9,7 +8,7 @@ use tracing::{debug, error, info, info_span, warn};
 
 use crate::config::AgentConfig;
 use crate::dispatch::dispatch_command;
-use crate::protocol::{AgentCommand, AgentObservation, ClientMessage, ErrorPayload, ServerMessage};
+use crate::protocol::{AgentCommand, ClientMessage, ErrorPayload, ServerMessage};
 
 pub async fn run(config: AgentConfig) -> Result<()> {
     let mut backoff = config.reconnect_base_ms.max(100);
@@ -87,11 +86,11 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
 
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut observation_sync = interval(Duration::from_secs(
+    let mut snapshot_sync = interval(Duration::from_secs(
         config.observation_sync_interval_seconds.max(1),
     ));
-    observation_sync.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    observation_sync.reset();
+    snapshot_sync.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    snapshot_sync.reset();
 
     loop {
         tokio::select! {
@@ -101,9 +100,9 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                 }).await?;
                 debug!(agent_id = %config.agent_id, "heartbeat sent");
             }
-            _ = observation_sync.tick() => {
-                if let Err(err) = send_agent_observations_ws(&mut sink, config).await {
-                    warn!(agent_id = %config.agent_id, error = %err, "failed to sync local observations");
+            _ = snapshot_sync.tick() => {
+                if let Err(err) = send_device_snapshot_ws(&mut sink, config).await {
+                    warn!(agent_id = %config.agent_id, error = %err, "failed to sync device snapshot");
                 }
             }
             maybe_msg = source.next() => {
@@ -119,7 +118,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                     Message::Text(text) => {
                         match serde_json::from_str::<ServerMessage>(&text) {
                             Ok(message) => {
-                                handle_server_message(config, &mut sink, &mut observation_sync, message).await?;
+                                handle_server_message(config, &mut sink, &mut snapshot_sync, message).await?;
                             }
                             Err(err) => {
                                 // Allow the server to introduce extra frame types without
@@ -146,107 +145,26 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct UploadAgentObservationsRequest {
-    agent_id: String,
-    agent_token: String,
-    observations: Vec<AgentObservation>,
-}
-
-pub async fn sync_observations_once(config: &AgentConfig) -> Result<usize> {
-    let client = reqwest::Client::new();
-    send_agent_observations(&client, config).await
-}
-
-async fn send_agent_observations(client: &reqwest::Client, config: &AgentConfig) -> Result<usize> {
-    let observations = load_agent_observations(config).await?;
-    if observations.is_empty() {
-        return Ok(0);
-    }
-
-    let url = observations_url(&config.server_url)?;
-    let payload = UploadAgentObservationsRequest {
-        agent_id: config.agent_id.clone(),
-        agent_token: config.agent_token.clone(),
-        observations,
-    };
-
-    let response = client
-        .post(url.clone())
-        .json(&payload)
-        .send()
-        .await
-        .with_context(|| format!("failed to call observation endpoint {url}"))?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "<unreadable error body>".to_string());
-        anyhow::bail!("observation upload failed with {status}: {body}");
-    }
-    if let Err(err) = wakey::wakey_linux::observations::prune_removed_observations_from_path(
-        &config.observation_store_path,
-    )
-    .await
-    {
-        warn!(agent_id = %config.agent_id, error = %err, "failed to prune removed observations after upload");
-    }
-    debug!(
-        agent_id = %config.agent_id,
-        observations = payload.observations.len(),
-        "synced local observations"
-    );
-    Ok(payload.observations.len())
-}
-
-async fn send_agent_observations_ws<S>(sink: &mut S, config: &AgentConfig) -> Result<usize>
+async fn send_device_snapshot_ws<S>(sink: &mut S, config: &AgentConfig) -> Result<usize>
 where
     S: SinkExt<Message> + Unpin,
     <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
 {
-    let observations = load_agent_observations(config).await?;
-    if observations.is_empty() {
-        return Ok(0);
-    }
-    let count = observations.len();
+    let query = wakey_core::InventoryQueryBuilder::new().build();
+    let inventory = wakey::inventory(query)
+        .await
+        .context("failed to run inventory for device snapshot")?;
+    let count = inventory.devices.len();
     send_json(
         sink,
-        &ClientMessage::Observations {
+        &ClientMessage::DeviceSnapshot {
             agent_id: config.agent_id.clone(),
-            observations,
+            devices: inventory.devices,
         },
     )
     .await?;
-    if let Err(err) = wakey::wakey_linux::observations::prune_removed_observations_from_path(
-        &config.observation_store_path,
-    )
-    .await
-    {
-        warn!(agent_id = %config.agent_id, error = %err, "failed to prune removed observations after websocket send");
-    }
-    debug!(agent_id = %config.agent_id, observations = count, "sent observations over websocket");
+    debug!(agent_id = %config.agent_id, devices = count, "sent device snapshot over websocket");
     Ok(count)
-}
-
-async fn load_agent_observations(config: &AgentConfig) -> Result<Vec<AgentObservation>> {
-    let observations = wakey::wakey_linux::observations::list_local_observations_from_path(
-        &config.observation_store_path,
-    )
-    .await
-    .context("failed to read local observations")?;
-    Ok(observations
-        .into_iter()
-        .map(|observation| AgentObservation {
-            kind: observation.kind,
-            action: observation.action,
-            mac: observation.mac,
-            ip: observation.ip,
-            hostname: observation.hostname,
-            first_seen_unix: observation.first_seen_unix,
-            last_seen_unix: observation.last_seen_unix,
-        })
-        .collect())
 }
 
 pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
@@ -257,7 +175,7 @@ pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
 async fn handle_server_message<S>(
     config: &AgentConfig,
     sink: &mut S,
-    observation_sync: &mut tokio::time::Interval,
+    snapshot_sync: &mut tokio::time::Interval,
     message: ServerMessage,
 ) -> Result<()>
 where
@@ -293,10 +211,10 @@ where
                 }
             }
         }
-        ServerMessage::SyncObservations => {
-            info!("received observation sync request from control-plane");
-            send_agent_observations_ws(sink, config).await?;
-            observation_sync.reset();
+        ServerMessage::SyncDeviceSnapshot => {
+            info!("received device snapshot sync request from control-plane");
+            send_device_snapshot_ws(sink, config).await?;
+            snapshot_sync.reset();
         }
     }
     Ok(())
@@ -373,7 +291,7 @@ fn client_message_kind(message: &ClientMessage) -> &'static str {
         ClientMessage::Hello { .. } => "hello",
         ClientMessage::Auth { .. } => "auth",
         ClientMessage::Heartbeat { .. } => "heartbeat",
-        ClientMessage::Observations { .. } => "observations",
+        ClientMessage::DeviceSnapshot { .. } => "device_snapshot",
         ClientMessage::Result { .. } => "result",
         ClientMessage::Error { .. } => "error",
     }
@@ -393,14 +311,6 @@ pub fn websocket_url(server_url: &str) -> Result<url::Url> {
     url.set_scheme(scheme)
         .map_err(|_| anyhow::anyhow!("failed to convert server_url scheme"))?;
     url.set_path("/api/v1/agent/ws");
-    url.set_query(None);
-    url.set_fragment(None);
-    Ok(url)
-}
-
-pub fn observations_url(server_url: &str) -> Result<url::Url> {
-    let mut url = url::Url::parse(server_url).context("invalid server_url")?;
-    url.set_path("/api/v1/agents/observations");
     url.set_query(None);
     url.set_fragment(None);
     Ok(url)

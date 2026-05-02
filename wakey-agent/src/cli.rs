@@ -32,9 +32,6 @@ pub enum Command {
     InitConfig(InitConfigArgs),
     /// Reload a running agent daemon by sending SIGHUP.
     Reload(ReloadArgs),
-    /// Upload local observations to the control plane once and exit.
-    #[command(visible_alias = "sync")]
-    SyncObservations(SyncObservationsArgs),
     /// Pass local hotplug observations through to the wakey CLI.
     Observe(ObserveArgs),
 }
@@ -113,13 +110,6 @@ pub struct ReloadArgs {
     /// Path to pid file for reload signaling.
     #[arg(long, default_value = DEFAULT_PID_FILE)]
     pub pid_file: PathBuf,
-}
-
-#[derive(Args)]
-pub struct SyncObservationsArgs {
-    /// Path to the agent config file.
-    #[arg(long, short, default_value = config::DEFAULT_CONFIG_PATH)]
-    pub config: PathBuf,
 }
 
 #[derive(Args)]

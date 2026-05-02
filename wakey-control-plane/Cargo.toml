@@ -1,14 +1,15 @@
 [package]
 name = "wakey-control-plane"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 publish = ["gitea"]
 
 [dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 axum = { version = "0.8", features = ["ws", "json"] }
 clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
+macaddr = { workspace = true }
 nix = { version = "0.31", default-features = false, features = [
     "signal",
     "process",
@@ -17,8 +18,8 @@ reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "rustls",
 ] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 sled = "0.34"
 sqlx = { version = "0.8", features = [
     "runtime-tokio",
@@ -29,16 +30,9 @@ sqlx = { version = "0.8", features = [
     "json",
 ] }
 toml = "1.1"
-tokio = { version = "1", features = [
-    "macros",
-    "rt-multi-thread",
-    "fs",
-    "sync",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true }
 tower-http = { version = "0.6.8", features = ["fs"] }
-tracing = "0.1"
+tracing = { workspace = true }
 tracing-opentelemetry = "0.32"
 tracing-subscriber = { version = "0.3", features = [
     "env-filter",
@@ -50,5 +44,6 @@ time = { version = "0.3", features = ["formatting", "local-offset"] }
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic", "trace"] }
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { workspace = true }
 wakey-agent = { path = "../wakey-agent", registry = "gitea", version = "0" }
+wakey-core = { path = "../wakey-core", registry = "gitea", version = "0" }

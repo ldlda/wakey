@@ -7,7 +7,9 @@ use crate::model::{DhcpLease, NeighborEntry, NeighborState};
 use crate::parse::mac;
 
 /// Product-level presence derived from raw neighbor state.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, serde::Deserialize, Default)]
+#[derive(
+    Debug, PartialEq, Eq, Clone, Copy, Hash, Ord, PartialOrd, Serialize, serde::Deserialize, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Presence {
     Online,
@@ -15,6 +17,28 @@ pub enum Presence {
     #[default]
     Unknown,
     Offline,
+}
+
+impl Presence {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Presence::Online => "online",
+            Presence::LikelyOnline => "likely_online",
+            Presence::Unknown => "unknown",
+            Presence::Offline => "offline",
+        }
+    }
+}
+
+impl From<&str> for Presence {
+    fn from(s: &str) -> Self {
+        match s {
+            "online" => Presence::Online,
+            "likely_online" => Presence::LikelyOnline,
+            "offline" => Presence::Offline,
+            _ => Presence::Unknown,
+        }
+    }
 }
 
 impl From<NeighborState> for Presence {
@@ -50,7 +74,7 @@ pub enum DeviceId {
 /// from hooks and live inventory so higher layers can explain why a device looks
 /// online, stale, or unknown without reverse-engineering flattened fields.
 #[skip_serializing_none]
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct DeviceObservationFact {
     pub kind: String,
     pub action: String,
@@ -67,7 +91,7 @@ pub struct DeviceObservationFact {
 /// This aggregates facts from DHCP leases and neighbor-table rows into a more
 /// useful application-level shape.
 #[skip_serializing_none]
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
     pub id: Option<DeviceId>,
     pub names: Vec<String>,

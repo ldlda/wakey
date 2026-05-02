@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT agent_id as \"agent_id!\", device_key as \"device_key!\", ip as \"ip!\"\n             FROM agent_device_ips",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "device_key!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "ip!",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4dd5e580826b0f6980bb8c2adecdc81ff95992ec337f93263463c5a4e357dc72"
+}

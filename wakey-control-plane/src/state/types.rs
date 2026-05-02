@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
+use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
+use wakey_core::Presence;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssuedAgent {
@@ -65,47 +67,6 @@ pub struct DeviceIdentifierInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentDeviceObservation {
-    pub observation_key: String,
-    pub agent_id: String,
-    pub kind: String,
-    pub mac: Option<String>,
-    pub ip: Option<String>,
-    pub hostname: Option<String>,
-    pub first_seen_unix: u64,
-    pub last_seen_unix: u64,
-    pub last_action: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentDeviceObservationView {
-    pub observation_key: String,
-    pub agent_id: String,
-    pub kind: String,
-    pub mac: Option<String>,
-    pub ip: Option<String>,
-    pub hostname: Option<String>,
-    pub first_seen_unix: u64,
-    pub last_seen_unix: u64,
-    pub last_action: String,
-    pub known_device: Option<KnownDeviceSummary>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentDeviceObservationEvent {
-    pub event_id: String,
-    pub observation_key: String,
-    pub agent_id: String,
-    pub kind: String,
-    pub action: String,
-    pub mac: Option<String>,
-    pub ip: Option<String>,
-    pub hostname: Option<String>,
-    pub ts_unix: u64,
-    pub known_device: Option<KnownDeviceSummary>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnownDeviceSummary {
     pub device_id: String,
     pub display_name: String,
@@ -113,14 +74,81 @@ pub struct KnownDeviceSummary {
 }
 
 #[derive(Debug, Clone)]
-pub struct AgentDeviceObservationInput {
-    pub kind: String,
-    pub action: String,
-    pub mac: Option<String>,
-    pub ip: Option<String>,
-    pub hostname: Option<String>,
-    pub first_seen_unix: u64,
-    pub last_seen_unix: u64,
+pub struct AgentDeviceRow {
+    pub agent_id: String,
+    pub device_key: String,
+    pub presence: String,
+    pub display_name: Option<String>,
+    pub first_seen_unix: i64,
+    pub last_seen_unix: i64,
+}
+
+impl AgentDeviceRow {
+    pub fn presence(&self) -> Presence {
+        Presence::from(self.presence.as_str())
+    }
+
+    pub fn first_seen(&self) -> u64 {
+        self.first_seen_unix.max(0) as u64
+    }
+
+    pub fn last_seen(&self) -> u64 {
+        self.last_seen_unix.max(0) as u64
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentDeviceMacRow {
+    pub agent_id: String,
+    pub device_key: String,
+    pub mac: String,
+}
+
+impl TryFrom<&AgentDeviceMacRow> for MacAddr {
+    type Error = macaddr::ParseError;
+
+    fn try_from(row: &AgentDeviceMacRow) -> Result<Self, Self::Error> {
+        row.mac.parse()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentDeviceIpRow {
+    pub agent_id: String,
+    pub device_key: String,
+    pub ip: String,
+}
+
+impl TryFrom<&AgentDeviceIpRow> for std::net::IpAddr {
+    type Error = std::net::AddrParseError;
+
+    fn try_from(row: &AgentDeviceIpRow) -> Result<Self, Self::Error> {
+        row.ip.parse()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentDeviceHostnameRow {
+    pub agent_id: String,
+    pub device_key: String,
+    pub hostname: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentDeviceFactRow {
+    pub agent_id: String,
+    pub device_key: String,
+    pub fact_json: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentDeviceWithChildren {
+    pub device: AgentDeviceRow,
+    pub macs: Vec<macaddr::MacAddr>,
+    pub ips: Vec<std::net::IpAddr>,
+    pub hostnames: Vec<String>,
+    #[allow(dead_code)]
+    pub facts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

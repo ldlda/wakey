@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO audit_events\n         (event_key, event_id, ts_unix, actor_type, actor_id, agent_id, request_id,\n          event_type, outcome, latency_ms, message, metadata_json)\n         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "c496c7a8ada53d6d88ea1a29d9e7bf178fe5f3ee9067357dba05384fa1e2772c"
+}

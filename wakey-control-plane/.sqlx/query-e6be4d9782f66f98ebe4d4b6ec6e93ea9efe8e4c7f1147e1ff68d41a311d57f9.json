@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT agent_id as \"agent_id!\", device_key as \"device_key!\", fact_json as \"fact_json!\"\n             FROM agent_device_facts\n             WHERE agent_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "agent_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "device_key!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "fact_json!",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e6be4d9782f66f98ebe4d4b6ec6e93ea9efe8e4c7f1147e1ff68d41a311d57f9"
+}

@@ -8,7 +8,7 @@ use crate::parse::mac;
 
 /// One neighbor-table row, typically derived from `ip neigh` or netlink.
 #[skip_serializing_none]
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct NeighborEntry {
     pub ip: IpAddr,
     pub dev: Option<String>,

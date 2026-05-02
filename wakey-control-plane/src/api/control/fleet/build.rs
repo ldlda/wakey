@@ -1,6 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::net::IpAddr;
 
-use crate::state::{AgentDeviceObservation, DeviceIdentifier, KnownDevice, KnownDeviceSummary};
+use macaddr::MacAddr;
+use wakey_core::Presence;
+
+use crate::state::{AgentDeviceWithChildren, DeviceIdentifier, KnownDevice, KnownDeviceSummary};
 
 use super::types::{FleetDevice, FleetDeviceAgent, FleetWakeRoute, ListFleetDevicesQuery};
 
@@ -22,20 +26,20 @@ struct FleetAccumulator {
     display_name: Option<String>,
     known_device: Option<KnownDeviceSummary>,
     pinned: bool,
-    ips: BTreeSet<String>,
-    macs: BTreeSet<String>,
+    ips: BTreeSet<IpAddr>,
+    macs: BTreeSet<MacAddr>,
     hostnames: BTreeSet<String>,
     sources: BTreeSet<String>,
     agents: BTreeMap<String, FleetDeviceAgent>,
     first_seen_unix: Option<u64>,
     last_seen_unix: Option<u64>,
-    presence_rank: u8,
+    presence: Presence,
     routes: BTreeMap<String, FleetWakeRoute>,
 }
 
 pub(crate) fn build_fleet_devices(
     known_devices: Vec<KnownDevice>,
-    observations: Vec<AgentDeviceObservation>,
+    agent_devices: Vec<AgentDeviceWithChildren>,
     context: &FleetBuildContext,
 ) -> Vec<FleetDevice> {
     let mut by_key = BTreeMap::<String, FleetAccumulator>::new();
@@ -49,23 +53,22 @@ pub(crate) fn build_fleet_devices(
                 display_name: Some(device.display_name.clone()),
                 known_device: Some(known_device_summary(&device)),
                 pinned: device.pinned,
-                presence_rank: 1,
                 ..Default::default()
             });
-        for identifier in device.identifiers {
-            add_identifier_to_entry(entry, &identifier);
+        for identifier in &device.identifiers {
+            add_identifier_to_entry(entry, identifier);
         }
     }
 
-    for observation in observations {
-        let key = observation_group_key(&observation, context);
+    for agent_device in agent_devices {
+        let key = device_group_key(&agent_device, context);
         let entry = by_key
             .entry(key.clone())
             .or_insert_with(|| FleetAccumulator {
                 device_key: key,
                 ..Default::default()
             });
-        add_observation_to_entry(entry, observation, context);
+        add_agent_device_to_entry(entry, agent_device, context);
     }
 
     let mut devices = by_key
@@ -76,7 +79,7 @@ pub(crate) fn build_fleet_devices(
         b.pinned
             .cmp(&a.pinned)
             .then_with(|| b.known_device.is_some().cmp(&a.known_device.is_some()))
-            .then_with(|| presence_rank(&b.presence).cmp(&presence_rank(&a.presence)))
+            .then_with(|| b.presence.cmp(&a.presence))
             .then_with(|| b.last_seen_unix.cmp(&a.last_seen_unix))
             .then_with(|| a.display_name.cmp(&b.display_name))
     });
@@ -98,7 +101,7 @@ pub(crate) fn filter_fleet_devices(devices: &mut Vec<FleetDevice>, query: &ListF
         }
         if let Some(presence) = presence.as_deref()
             && presence != "all"
-            && device.presence != presence
+            && device.presence.as_str() != presence
         {
             return false;
         }
@@ -118,18 +121,18 @@ pub(crate) fn filter_fleet_devices(devices: &mut Vec<FleetDevice>, query: &ListF
             return false;
         }
         if let Some(search) = search.as_deref() {
-            let mut haystack = vec![
-                device.device_key.as_str(),
-                device.display_name.as_str(),
-                device.presence.as_str(),
+            let mut haystack: Vec<String> = vec![
+                device.device_key.clone(),
+                device.display_name.clone(),
+                device.presence.as_str().to_string(),
             ];
-            haystack.extend(device.ips.iter().map(String::as_str));
-            haystack.extend(device.macs.iter().map(String::as_str));
-            haystack.extend(device.hostnames.iter().map(String::as_str));
-            haystack.extend(device.sources.iter().map(String::as_str));
-            haystack.extend(device.agents.iter().map(|agent| agent.agent_id.as_str()));
+            haystack.extend(device.ips.iter().map(|ip| ip.to_string()));
+            haystack.extend(device.macs.iter().map(|mac| mac.to_string()));
+            haystack.extend(device.hostnames.clone());
+            haystack.extend(device.sources.clone());
+            haystack.extend(device.agents.iter().map(|a| a.agent_id.clone()));
             if !haystack
-                .into_iter()
+                .iter()
                 .any(|value| value.to_ascii_lowercase().contains(search))
             {
                 return false;
@@ -145,70 +148,73 @@ fn fleet_device_is_operator_noise(device: &FleetDevice) -> bool {
         && device.hostnames.is_empty()
         && device.recommended_route.is_none()
         && device.ips.is_empty()
-        && device.presence == "offline"
+        && device.presence == Presence::Offline
 }
 
-fn observation_group_key(
-    observation: &AgentDeviceObservation,
-    context: &FleetBuildContext,
-) -> String {
-    if let Some(summary) = observation_known_device(observation, context) {
+fn device_group_key(agent_device: &AgentDeviceWithChildren, context: &FleetBuildContext) -> String {
+    if let Some(summary) = device_known_device(agent_device, context) {
         return format!("known:{}", summary.device_id);
     }
-    if let Some(mac) = observation.mac.as_deref() {
+    if let Some(mac) = agent_device.macs.first() {
         return format!("mac:{mac}");
     }
-    if let Some(ip) = observation.ip.as_deref() {
+    if let Some(ip) = agent_device.ips.first() {
         return format!("ip:{ip}");
     }
-    observation.observation_key.clone()
+    agent_device.device.device_key.clone()
 }
 
-fn add_observation_to_entry(
+fn add_agent_device_to_entry(
     entry: &mut FleetAccumulator,
-    observation: AgentDeviceObservation,
+    agent_device: AgentDeviceWithChildren,
     context: &FleetBuildContext,
 ) {
-    let observation_offline = observation_is_offline(&observation);
-    if let Some(summary) = observation_known_device(&observation, context)
+    let device_offline = agent_device.device.presence() == Presence::Offline;
+    if let Some(summary) = device_known_device(&agent_device, context)
         && entry.known_device.is_none()
     {
-        entry.display_name = Some(summary.display_name.clone());
+        if let Some(ref name) = agent_device.device.display_name {
+            entry.display_name = Some(name.clone());
+        }
         entry.pinned = summary.pinned;
         entry.known_device = Some(summary);
     }
-    if let Some(mac) = observation.mac.as_deref() {
-        entry.macs.insert(mac.to_string());
+    for mac in &agent_device.macs {
+        entry.macs.insert(*mac);
     }
-    if !observation_offline && let Some(ip) = observation.ip.as_deref() {
-        entry.ips.insert(ip.to_string());
-    }
-    if let Some(hostname) = observation.hostname.as_deref() {
-        if entry.display_name.is_none() {
-            entry.display_name = Some(hostname.to_string());
+    if !device_offline {
+        for ip in &agent_device.ips {
+            entry.ips.insert(*ip);
         }
-        entry.hostnames.insert(hostname.to_string());
     }
-    entry.sources.insert(observation.kind.clone());
+    for hostname in &agent_device.hostnames {
+        if entry.display_name.is_none() {
+            entry.display_name = Some(hostname.clone());
+        }
+        entry.hostnames.insert(hostname.clone());
+    }
+    entry.sources.insert("device".to_string());
+    let first_seen = agent_device.device.first_seen();
+    let last_seen = agent_device.device.last_seen();
     entry.first_seen_unix = Some(
         entry
             .first_seen_unix
-            .map(|current| current.min(observation.first_seen_unix))
-            .unwrap_or(observation.first_seen_unix),
+            .map(|current| current.min(first_seen))
+            .unwrap_or(first_seen),
     );
     entry.last_seen_unix = Some(
         entry
             .last_seen_unix
-            .map(|current| current.max(observation.last_seen_unix))
-            .unwrap_or(observation.last_seen_unix),
+            .map(|current| current.max(last_seen))
+            .unwrap_or(last_seen),
     );
-    entry.presence_rank = entry
-        .presence_rank
-        .max(observation_presence_rank(&observation));
+    let device_presence = agent_device.device.presence();
+    entry.presence = std::cmp::max(entry.presence, device_presence);
 
+    let agent_id = agent_device.device.agent_id.clone();
     let status = context
         .agent_status
-        .get(&observation.agent_id)
+        .get(&agent_id)
         .cloned()
         .unwrap_or(AgentRuntimeStatus {
             nickname: None,
@@ -216,71 +222,95 @@ fn add_observation_to_entry(
         });
     entry
         .agents
-        .entry(observation.agent_id.clone())
+        .entry(agent_id.clone())
         .and_modify(|agent| {
-            agent.last_seen_unix = agent.last_seen_unix.max(observation.last_seen_unix);
+            agent.last_seen_unix = agent.last_seen_unix.max(last_seen);
             agent.connected = status.connected;
             agent.nickname = status.nickname.clone();
         })
         .or_insert(FleetDeviceAgent {
-            agent_id: observation.agent_id.clone(),
+            agent_id: agent_id.clone(),
             nickname: status.nickname.clone(),
             connected: status.connected,
-            last_seen_unix: observation.last_seen_unix,
+            last_seen_unix: last_seen,
         });
 
-    let route_id = route_id(
-        &observation.agent_id,
-        observation.mac.as_deref(),
-        observation.ip.as_deref(),
-        &observation.kind,
-    );
-    let wakeable = status.connected && observation.mac.is_some() && !observation_offline;
-    entry.routes.insert(
-        route_id.clone(),
-        FleetWakeRoute {
-            route_id: route_id.clone(),
-            agent_id: observation.agent_id,
-            nickname: status.nickname,
-            connected: status.connected,
-            mac: observation.mac,
-            ip: observation.ip,
-            hostname: observation.hostname,
-            source: observation.kind,
-            last_seen_unix: observation.last_seen_unix,
-            wakeable,
-        },
-    );
-    if let Some(route) = entry.routes.get_mut(&route_id) {
-        route.wakeable = route.connected && route.mac.is_some() && !observation_offline;
+    for mac in &agent_device.macs {
+        let ip_for_mac = agent_device.ips.first().copied();
+        let hostname_for_mac = agent_device.hostnames.first().cloned();
+        let rid = route_id(&agent_id, Some(mac), ip_for_mac.as_ref(), "device");
+        let wakeable = status.connected && !device_offline;
+        entry.routes.insert(
+            rid.clone(),
+            FleetWakeRoute {
+                route_id: rid,
+                agent_id: agent_id.clone(),
+                nickname: status.nickname.clone(),
+                connected: status.connected,
+                mac: Some(*mac),
+                ip: ip_for_mac,
+                hostname: hostname_for_mac,
+                source: "device".to_string(),
+                last_seen_unix: last_seen,
+                wakeable,
+            },
+        );
+    }
+
+    if agent_device.macs.is_empty()
+        && let Some(ip) = agent_device.ips.first()
+    {
+        let hostname = agent_device.hostnames.first().cloned();
+        let rid = route_id(&agent_id, None, Some(ip), "device");
+        entry.routes.insert(
+            rid.clone(),
+            FleetWakeRoute {
+                route_id: rid,
+                agent_id: agent_id.clone(),
+                nickname: status.nickname.clone(),
+                connected: status.connected,
+                mac: None,
+                ip: Some(*ip),
+                hostname,
+                source: "device".to_string(),
+                last_seen_unix: last_seen,
+                wakeable: false,
+            },
+        );
     }
 }
 
 fn add_identifier_to_entry(entry: &mut FleetAccumulator, identifier: &DeviceIdentifier) {
     match identifier.kind.as_str() {
         "mac" => {
-            entry.macs.insert(identifier.value.clone());
+            if let Ok(mac) = identifier.value.parse::<MacAddr>() {
+                entry.macs.insert(mac);
+            }
         }
         "ip" => {
-            entry.ips.insert(identifier.value.clone());
+            if let Ok(ip) = identifier.value.parse::<IpAddr>() {
+                entry.ips.insert(ip);
+            }
         }
         _ => {}
     }
 }
 
-fn observation_known_device(
-    observation: &AgentDeviceObservation,
+fn device_known_device(
+    agent_device: &AgentDeviceWithChildren,
     context: &FleetBuildContext,
 ) -> Option<KnownDeviceSummary> {
-    observation
-        .mac
-        .as_deref()
-        .and_then(|mac| context.identifier_map.get(&format!("mac:{mac}")).cloned())
+    agent_device
+        .macs
+        .first()
+        .map(|mac| format!("mac:{}", mac.to_string().to_ascii_lowercase()))
+        .and_then(|key| context.identifier_map.get(&key).cloned())
         .or_else(|| {
-            observation
-                .ip
-                .as_deref()
-                .and_then(|ip| context.identifier_map.get(&format!("ip:{ip}")).cloned())
+            agent_device
+                .ips
+                .first()
+                .map(|ip| format!("ip:{ip}"))
+                .and_then(|key| context.identifier_map.get(&key).cloned())
         })
 }
 
@@ -309,8 +339,8 @@ impl FleetAccumulator {
         let display_name = self
             .display_name
             .or_else(|| self.hostnames.iter().next().cloned())
-            .or_else(|| self.macs.iter().next().cloned())
-            .or_else(|| self.ips.iter().next().cloned())
+            .or_else(|| self.macs.iter().next().map(|mac| mac.to_string()))
+            .or_else(|| self.ips.iter().next().map(|ip| ip.to_string()))
             .unwrap_or_else(|| "(unknown device)".to_string());
 
         FleetDevice {
@@ -325,50 +355,20 @@ impl FleetAccumulator {
             sources: self.sources.into_iter().collect(),
             first_seen_unix: self.first_seen_unix,
             last_seen_unix: self.last_seen_unix,
-            presence: rank_presence(self.presence_rank).to_string(),
+            presence: self.presence,
             route_candidates,
             recommended_route,
         }
     }
 }
 
-fn observation_presence_rank(observation: &AgentDeviceObservation) -> u8 {
-    match observation.last_action.as_str() {
-        "remove" => 0,
-        "add" | "old" | "update" => 2,
-        _ => 1,
-    }
-}
-
-fn observation_is_offline(observation: &AgentDeviceObservation) -> bool {
-    observation.last_action == "remove"
-}
-
-fn rank_presence(rank: u8) -> &'static str {
-    match rank {
-        3 => "online",
-        2 => "likely_online",
-        0 => "offline",
-        _ => "unknown",
-    }
-}
-
-fn presence_rank(presence: &str) -> u8 {
-    match presence {
-        "online" => 3,
-        "likely_online" => 2,
-        "offline" => 0,
-        _ => 1,
-    }
-}
-
-fn route_id(agent_id: &str, mac: Option<&str>, ip: Option<&str>, source: &str) -> String {
+fn route_id(agent_id: &str, mac: Option<&MacAddr>, ip: Option<&IpAddr>, source: &str) -> String {
     format!(
         "{}|{}|{}|{}",
         agent_id,
         source,
-        mac.unwrap_or(""),
-        ip.unwrap_or("")
+        mac.map(|m| m.to_string()).unwrap_or_default(),
+        ip.map(|i| i.to_string()).unwrap_or_default()
     )
 }
 

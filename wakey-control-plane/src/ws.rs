@@ -4,12 +4,12 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
-use wakey_agent::protocol::{AgentObservation, ErrorPayload, RequestId, ServerMessage};
+use wakey_agent::protocol::{ErrorPayload, RequestId, ServerMessage};
+use wakey_core::Device;
 
 use crate::runtime::{AgentReply, AgentSession, AppState, SessionEvent};
 use crate::state::AuditEventInput;
@@ -27,9 +27,9 @@ enum IncomingClientMessage {
     Heartbeat {
         agent_id: String,
     },
-    Observations {
+    DeviceSnapshot {
         agent_id: String,
-        observations: Vec<AgentObservation>,
+        devices: Vec<Device>,
     },
     Result {
         request_id: RequestId,
@@ -243,7 +243,7 @@ async fn process_agent_text(
             {
                 warn!(error = %err, "failed to append audit event for auth success");
             }
-            let _ = tx.send(SessionEvent::Message(ServerMessage::SyncObservations));
+            let _ = tx.send(SessionEvent::Message(ServerMessage::SyncDeviceSnapshot));
         }
         IncomingClientMessage::Heartbeat { agent_id } => {
             if authed_agent_id.as_deref() != Some(agent_id.as_str()) {
@@ -252,48 +252,24 @@ async fn process_agent_text(
             ensure_current_session(state, &agent_id, connection_id).await?;
             debug!(agent_id = %agent_id, "heartbeat received");
         }
-        IncomingClientMessage::Observations {
-            agent_id,
-            observations,
-        } => {
+        IncomingClientMessage::DeviceSnapshot { agent_id, devices } => {
             if authed_agent_id.as_deref() != Some(agent_id.as_str()) {
-                anyhow::bail!("observations for unauthenticated or mismatched agent");
+                anyhow::bail!("device_snapshot for unauthenticated or mismatched agent");
             }
             ensure_current_session(state, &agent_id, connection_id).await?;
-            let mut by_kind: BTreeMap<String, Vec<crate::state::AgentDeviceObservationInput>> =
-                BTreeMap::new();
-            for observation in observations {
-                let kind = observation.kind.trim().to_ascii_lowercase();
-                by_kind
-                    .entry(kind.clone())
-                    .or_default()
-                    .push(crate::state::AgentDeviceObservationInput {
-                        kind,
-                        action: observation.action,
-                        mac: observation.mac,
-                        ip: observation.ip.map(|ip| ip.to_string()),
-                        hostname: observation.hostname,
-                        first_seen_unix: observation.first_seen_unix,
-                        last_seen_unix: observation.last_seen_unix,
-                    });
-            }
-            let mut accepted = 0usize;
-            for (kind, inputs) in by_kind {
-                match state
-                    .store
-                    .upsert_agent_observations_snapshot(&agent_id, &kind, inputs)
-                    .await
-                {
-                    Ok(written) => {
-                        accepted = accepted.saturating_add(written);
-                    }
-                    Err(err) => {
-                        warn!(agent_id = %agent_id, error = %err, kind = %kind, "failed to store websocket observations");
-                        anyhow::bail!("failed to store observations: {err}");
-                    }
+            match state
+                .store
+                .replace_agent_device_snapshot(&agent_id, &devices)
+                .await
+            {
+                Ok(accepted) => {
+                    debug!(agent_id = %agent_id, accepted, "agent websocket device snapshot accepted");
+                }
+                Err(err) => {
+                    warn!(agent_id = %agent_id, error = %err, "failed to store websocket device snapshot");
+                    anyhow::bail!("failed to store device snapshot: {err}");
                 }
             }
-            debug!(agent_id = %agent_id, accepted, "agent websocket observations accepted");
         }
         IncomingClientMessage::Result { request_id, result } => {
             let agent_id = authed_agent_id
