@@ -20,7 +20,7 @@ pub(crate) struct AgentRuntimeStatus {
     pub(crate) connected: bool,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct FleetAccumulator {
     device_key: String,
     display_name: Option<String>,
@@ -35,6 +35,26 @@ struct FleetAccumulator {
     last_seen_unix: Option<u64>,
     presence: Presence,
     routes: BTreeMap<String, FleetWakeRoute>,
+}
+
+impl Default for FleetAccumulator {
+    fn default() -> Self {
+        Self {
+            device_key: String::new(),
+            display_name: None,
+            known_device: None,
+            pinned: false,
+            ips: BTreeSet::new(),
+            macs: BTreeSet::new(),
+            hostnames: BTreeSet::new(),
+            sources: BTreeSet::new(),
+            agents: BTreeMap::new(),
+            first_seen_unix: None,
+            last_seen_unix: None,
+            presence: Presence::Offline,
+            routes: BTreeMap::new(),
+        }
+    }
 }
 
 pub(crate) fn build_fleet_devices(

@@ -7,16 +7,19 @@ use crate::model::{DhcpLease, NeighborEntry, NeighborState};
 use crate::parse::mac;
 
 /// Product-level presence derived from raw neighbor state.
+///
+/// Variant order defines `Ord`: Offline < Unknown < LikelyOnline < Online.
+/// `std::cmp::max` picks the most-online signal when merging.
 #[derive(
     Debug, PartialEq, Eq, Clone, Copy, Hash, Ord, PartialOrd, Serialize, serde::Deserialize, Default,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Presence {
-    Online,
-    LikelyOnline,
+    Offline,
     #[default]
     Unknown,
-    Offline,
+    LikelyOnline,
+    Online,
 }
 
 impl Presence {

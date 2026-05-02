@@ -160,6 +160,8 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
   const sortedDevices = useMemo(() => {
     const rows = [...devices];
     rows.sort((a, b) => {
+      // Pinned always float to top
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
       const dir = sort.dir === "asc" ? 1 : -1;
       if (sort.key === "presence") {
         return dir * (presenceRank(a.presence) - presenceRank(b.presence));
@@ -361,8 +363,17 @@ function FleetDeviceRow({
   onDetails: () => void;
   onCopy: (label: string, value: string) => void;
 }) {
+  const presenceBorder =
+    device.presence === "online"
+      ? "border-l-emerald-500/70"
+      : device.presence === "likely_online"
+        ? "border-l-sky-500/60"
+        : device.presence === "offline"
+          ? "border-l-muted-foreground/20"
+          : "";
+
   return (
-    <div className="grid gap-3 rounded-md border bg-card px-3 py-3 text-sm xl:grid-cols-[minmax(10rem,1.3fr)_8rem_minmax(9rem,1fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_8rem] xl:items-center xl:gap-2">
+    <div className={`grid gap-3 rounded-md border border-l-[3px] ${presenceBorder} bg-card px-3 py-3 text-sm xl:grid-cols-[minmax(10rem,1.3fr)_8rem_minmax(9rem,1fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_8rem] xl:items-center xl:gap-2`}>
       <button className="min-w-0 text-left" type="button" onClick={onDetails}>
         <div className="truncate font-medium">{device.display_name}</div>
         <div className="mt-1 flex flex-wrap gap-1">
