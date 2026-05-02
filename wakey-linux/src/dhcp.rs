@@ -2,10 +2,12 @@ use std::path::PathBuf;
 
 mod leases;
 
+#[allow(deprecated)]
+pub use leases::enrich_leases_with_nud_state;
+
 pub use leases::{
-    enrich_leases_with_nud_state, parse_dhcp_lease_line, read_dhcp_leases,
-    read_dhcp_leases_from_path, read_dhcp_leases_with_names,
-    read_dhcp_leases_with_names_from_paths,
+    parse_dhcp_lease_line, read_dhcp_leases, read_dhcp_leases_from_path,
+    read_dhcp_leases_with_names, read_dhcp_leases_with_names_from_paths,
 };
 
 const DEFAULT_DHCP_LEASES: &str = "/tmp/dhcp.leases";

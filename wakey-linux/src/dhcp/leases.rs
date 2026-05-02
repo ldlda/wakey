@@ -89,6 +89,7 @@ pub async fn read_dhcp_leases_with_names_from_paths(
 }
 
 /// Enrich DHCP leases with the best currently known neighbor state per IP.
+#[deprecated(note = "use inventory")]
 pub async fn enrich_leases_with_nud_state(leases: Vec<DhcpLease>) -> Vec<DhcpLeaseWithState> {
     let ips: Vec<IpAddr> = leases.iter().map(|l| l.ip).collect();
     let mut map: std::collections::HashMap<IpAddr, wakey_core::NeighborState> =

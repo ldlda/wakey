@@ -10,3 +10,6 @@ serde = { workspace = true }
 serde_with = { version = "3", features = ["json"] }
 strum = { version = "0", features = ["derive", "strum_macros"] }
 thiserror = "2"
+
+[dev-dependencies]
+serde_json.workspace = true

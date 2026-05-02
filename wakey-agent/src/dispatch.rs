@@ -29,6 +29,8 @@ async fn dispatch_leases(req: LeasesRequest, config: &AgentConfig) -> Result<Com
     )
     .await?;
     let leases = if req.include_state {
+        // only runs when requested explicitly to the endpoint
+        #[allow(deprecated)]
         wakey::wakey_linux::dhcp::enrich_leases_with_nud_state(leases).await
     } else {
         wakey::leases_without_state(leases)

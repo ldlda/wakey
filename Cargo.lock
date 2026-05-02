@@ -3779,6 +3779,7 @@ version = "0.3.0"
 dependencies = [
  "macaddr",
  "serde",
+ "serde_json",
  "serde_with",
  "strum",
  "thiserror 2.0.18",

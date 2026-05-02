@@ -16,6 +16,8 @@ pub async fn get_leases_with_neighbor_state() -> Result<Vec<DhcpLeaseWithState>>
     let leases = wakey_linux::dhcp::read_dhcp_leases_with_names()
         .await
         .context("failed to read DHCP leases")?;
+    // this is only used in the wakey CLI
+    #[allow(deprecated)]
     Ok(wakey_linux::dhcp::enrich_leases_with_nud_state(leases).await)
 }
 

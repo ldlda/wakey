@@ -12,7 +12,7 @@ use crate::parse::mac;
 pub struct NeighborEntry {
     pub ip: IpAddr,
     pub dev: Option<String>,
-    #[serde(with = "mac::option_mac")]
+    #[serde(with = "mac::option_mac", default)]
     pub mac: Option<MacAddr>,
     pub state: NeighborState,
 }
@@ -130,5 +130,29 @@ impl FromStr for NeighborEntry {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         parse_neighbor_line(s)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn deserialize_online_neighbor() {
+        NeighborEntry::deserialize(serde_json::json!({
+            "ip" : "192.168.100.94",
+            "dev" : "br-lan",
+            "mac" : "04:7C:16:79:6D:EE",
+            "state" : "REACHABLE"
+        }))
+        .expect("all fields must pass");
+    }
+    #[test]
+    fn deserialize_failed_neighbor() {
+        NeighborEntry::deserialize(serde_json::json!({
+            "ip" : "192.168.100.94",
+            "dev" : "br-lan",
+            "state" : "FAILED"
+        }))
+        .expect("default");
     }
 }
