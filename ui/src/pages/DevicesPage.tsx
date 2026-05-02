@@ -97,8 +97,8 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
       const result = await refreshFleetDevices();
       const failed = result.agents.filter((agent) => agent.status !== "ok");
       const msg = failed.length
-        ? `Stored ${result.total_accepted} observations; ${failed.length} agent refresh failed`
-        : `Stored ${result.total_accepted} observations from ${result.agents.length} connected agents`;
+        ? `Refreshed ${result.total_accepted} devices; ${failed.length} agent(s) failed`
+        : `Refreshed ${result.total_accepted} devices from ${result.agents.length} connected agents`;
       toast.success(msg);
       await loadFleet();
     } catch (err) {
@@ -190,7 +190,7 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
             <div>
               <CardTitle>Devices</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                {devices.length} fleet rows from stored observations and known
+                {devices.length} fleet rows from agent snapshots and known
                 devices
               </p>
             </div>

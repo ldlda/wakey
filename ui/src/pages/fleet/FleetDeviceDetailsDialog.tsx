@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
-import { Zap } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Minus, Plus, Zap } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   attachDeviceIdentifier,
   createKnownDevice,
+  detachDeviceIdentifier,
   mergeKnownDevice,
   type FleetDevice,
   type KnownDevice,
 } from "@/api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -52,67 +55,120 @@ export function FleetDeviceDetailsDialog({
   const [displayName, setDisplayName] = useState("");
   const [targetDeviceId, setTargetDeviceId] = useState("");
   const [routeId, setRouteId] = useState("");
+  const [addKind, setAddKind] = useState<"mac" | "ip">("mac");
+  const [addValue, setAddValue] = useState("");
   const [error, setError] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
 
   useEffect(() => {
     setDisplayName(device?.display_name ?? "");
     setTargetDeviceId("");
     setRouteId(device?.recommended_route?.route_id ?? "");
+    setAddKind("mac");
+    setAddValue("");
     setError("");
+    setActionBusy(false);
   }, [device]);
+
+  const rowIdentifiers = device ? identifiersFor(device) : [];
+
+  // Resolve the full KnownDevice object if this fleet row is known
+  const fullKnown = knownDevices.find(
+    (kd) => kd.device_id === device?.known_device?.device_id,
+  );
+
+  // Identifiers from the row that are NOT already on the known device
+  const unattachedIdentifiers = useMemo(() => {
+    if (!fullKnown) return rowIdentifiers;
+    const existing = new Set(
+      fullKnown.identifiers.map((id) => `${id.kind}:${id.value}`),
+    );
+    return rowIdentifiers.filter(
+      (id) => !existing.has(`${id.kind}:${id.value}`),
+    );
+  }, [fullKnown, rowIdentifiers]);
 
   if (!device) return null;
 
   const currentDevice = device;
-  const identifiers = identifiersFor(currentDevice);
+
   const otherKnownDevices = knownDevices.filter(
-    (known) => known.device_id !== currentDevice.known_device?.device_id,
+    (kd) => kd.device_id !== currentDevice.known_device?.device_id,
   );
 
-  async function createRemembered() {
+  async function wrap(fn: () => Promise<void>) {
     setError("");
+    setActionBusy(true);
     try {
-      await createKnownDevice({
+      await fn();
+      onChanged();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleCreateRemembered() {
+    await wrap(async () => {
+      const result = await createKnownDevice({
         display_name: displayName.trim() || currentDevice.display_name,
         pinned: true,
-        identifiers,
+        identifiers: rowIdentifiers,
       });
-      onChanged();
-    } catch (err) {
-      setError(String(err));
-    }
+      toast.success(`Remembered as "${result.display_name}"`);
+    });
   }
 
-  async function attachToExisting() {
+  async function handleAttachToExisting() {
     if (!targetDeviceId) return;
-    setError("");
-    try {
-      for (const identifier of identifiers) {
-        await attachDeviceIdentifier(targetDeviceId, identifier);
+    const target = knownDevices.find((kd) => kd.device_id === targetDeviceId);
+    await wrap(async () => {
+      const ids = fullKnown ? unattachedIdentifiers : rowIdentifiers;
+      for (const id of ids) {
+        await attachDeviceIdentifier(targetDeviceId, id);
       }
-      onChanged();
-    } catch (err) {
-      setError(String(err));
-    }
+      toast.success(
+        `Attached ${ids.length} identifier(s) to "${target?.display_name ?? targetDeviceId}"`,
+      );
+    });
   }
 
-  async function mergeIntoExisting() {
+  async function handleMerge() {
     if (!targetDeviceId || !currentDevice.known_device) return;
-    setError("");
-    try {
+    const target = knownDevices.find((kd) => kd.device_id === targetDeviceId);
+    await wrap(async () => {
       await mergeKnownDevice(
         targetDeviceId,
-        currentDevice.known_device.device_id,
+        currentDevice.known_device!.device_id,
       );
-      onChanged();
+      toast.success(`Merged into "${target?.display_name ?? targetDeviceId}"`);
       onOpenChange(false);
-    } catch (err) {
-      setError(String(err));
-    }
+    });
+  }
+
+  async function handleAddIdentifier() {
+    if (!fullKnown || !addValue.trim()) return;
+    await wrap(async () => {
+      await attachDeviceIdentifier(fullKnown!.device_id, {
+        kind: addKind,
+        value: addValue.trim(),
+      });
+      setAddValue("");
+      toast.success(`Added ${addKind} identifier`);
+    });
+  }
+
+  async function handleDetachIdentifier(identifierKey: string) {
+    if (!fullKnown) return;
+    await wrap(async () => {
+      await detachDeviceIdentifier(fullKnown!.device_id, identifierKey);
+      toast.success("Identifier removed");
+    });
   }
 
   const selectedRoute =
-    device.route_candidates.find((route) => route.route_id === routeId) ??
+    device.route_candidates.find((r) => r.route_id === routeId) ??
     device.recommended_route;
 
   return (
@@ -127,7 +183,7 @@ export function FleetDeviceDetailsDialog({
               <DialogDescription>
                 {device.known_device
                   ? "Remembered fleet device"
-                  : "Observed fleet device"}
+                  : "Unidentified fleet device"}
               </DialogDescription>
             </div>
             <PresenceBadge presence={device.presence} />
@@ -150,8 +206,8 @@ export function FleetDeviceDetailsDialog({
           />
           <DetailBlock
             label="Agents"
-            values={device.agents.map((agent) =>
-              agentLabel(agent.agent_id, agent.nickname),
+            values={device.agents.map((a) =>
+              agentLabel(a.agent_id, a.nickname),
             )}
             onCopy={onCopy}
           />
@@ -159,6 +215,7 @@ export function FleetDeviceDetailsDialog({
 
         <Separator />
 
+        {/* ── Wake route ── */}
         <div className="grid gap-2">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-medium">Wake route</h3>
@@ -171,10 +228,7 @@ export function FleetDeviceDetailsDialog({
               {busy ? "Waking" : "Wake"}
             </Button>
           </div>
-          <Select
-            value={routeId}
-            onValueChange={(value) => setRouteId(value ?? "")}
-          >
+          <Select value={routeId} onValueChange={(v) => setRouteId(v ?? "")}>
             <SelectTrigger>
               <span>
                 {selectedRoute
@@ -194,68 +248,250 @@ export function FleetDeviceDetailsDialog({
 
         <Separator />
 
+        {/* ── Identity section ── */}
         <div className="grid gap-3">
-          <h3 className="text-sm font-medium">Remember / merge</h3>
-          {!device.known_device && (
-            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
-              <Input
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Device name"
-              />
-              <Button
-                onClick={() => void createRemembered()}
-                disabled={!identifiers.length}
-              >
-                Remember device
-              </Button>
+          <h3 className="text-sm font-medium">Identity</h3>
+
+          {/* ── Known device: show metadata + identifiers ── */}
+          {fullKnown && (
+            <div className="grid gap-3">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant="secondary">known</Badge>
+                {fullKnown.pinned && <Badge variant="outline">pinned</Badge>}
+                <span className="font-medium">{fullKnown.display_name}</span>
+                {fullKnown.notes && (
+                  <span className="text-muted-foreground">
+                    — {fullKnown.notes}
+                  </span>
+                )}
+              </div>
+
+              {/* Current identifiers with remove buttons */}
+              <div className="rounded-md border bg-muted/30 p-3">
+                <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">
+                  Identifiers
+                </div>
+                {fullKnown.identifiers.length ? (
+                  <div className="grid gap-1">
+                    {fullKnown.identifiers.map((id) => (
+                      <div
+                        key={id.identifier_key}
+                        className="flex items-center justify-between gap-2 rounded px-1 py-0.5 text-sm hover:bg-accent"
+                      >
+                        <span className="min-w-0 truncate">
+                          <Badge
+                            variant="outline"
+                            className="mr-1.5 text-[0.65rem]"
+                          >
+                            {id.kind}
+                          </Badge>
+                          {id.value}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() =>
+                            void handleDetachIdentifier(id.identifier_key)
+                          }
+                          disabled={actionBusy}
+                          aria-label={`Remove ${id.kind} ${id.value}`}
+                        >
+                          <Minus className="size-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No identifiers attached
+                  </p>
+                )}
+              </div>
+
+              {/* Quick-add from row values */}
+              {unattachedIdentifiers.length > 0 && (
+                <div className="grid gap-1.5">
+                  <p className="text-xs text-muted-foreground">
+                    Add from this device row:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {unattachedIdentifiers.map((id) => (
+                      <Button
+                        key={`${id.kind}:${id.value}`}
+                        variant="outline"
+                        size="sm"
+                        disabled={actionBusy}
+                        onClick={() =>
+                          void wrap(async () => {
+                            await attachDeviceIdentifier(
+                              fullKnown!.device_id,
+                              id,
+                            );
+                            toast.success(`Added ${id.kind}: ${id.value}`);
+                          })
+                        }
+                      >
+                        <Plus className="size-3.5" />
+                        {id.kind}: {id.value}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Manual add identifier */}
+              <div className="grid gap-1.5">
+                <p className="text-xs text-muted-foreground">
+                  Add identifier manually:
+                </p>
+                <div className="grid grid-cols-[6rem_minmax(0,1fr)_auto] gap-2">
+                  <Select
+                    value={addKind}
+                    onValueChange={(v) =>
+                      setAddKind((v as "mac" | "ip") ?? "mac")
+                    }
+                  >
+                    <SelectTrigger>
+                      <span>{addKind}</span>
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      <SelectItem value="mac">mac</SelectItem>
+                      <SelectItem value="ip">ip</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={addValue}
+                    onChange={(e) => setAddValue(e.target.value)}
+                    placeholder={
+                      addKind === "mac" ? "aa:bb:cc:dd:ee:ff" : "192.168.1.100"
+                    }
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleAddIdentifier()}
+                    disabled={actionBusy || !addValue.trim()}
+                  >
+                    <Plus className="size-4" />
+                    Add
+                  </Button>
+                </div>
+              </div>
+
+              {/* Merge into another known device */}
+              <Separator />
+              <div className="grid gap-1.5">
+                <p className="text-xs text-muted-foreground">
+                  Merge this known device into another:
+                </p>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                  <Select
+                    value={targetDeviceId}
+                    onValueChange={(v) => setTargetDeviceId(v ?? "")}
+                  >
+                    <SelectTrigger>
+                      <span>
+                        {targetDeviceId
+                          ? knownDevices.find(
+                              (kd) => kd.device_id === targetDeviceId,
+                            )?.display_name
+                          : "Select target device"}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent
+                      className="max-w-[min(92vw,30rem)]"
+                      alignItemWithTrigger={false}
+                    >
+                      {otherKnownDevices.map((kd) => (
+                        <SelectItem key={kd.device_id} value={kd.device_id}>
+                          {kd.display_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleMerge()}
+                    disabled={actionBusy || !targetDeviceId}
+                  >
+                    Merge
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
-          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto]">
-            <Select
-              value={targetDeviceId}
-              onValueChange={(value) => setTargetDeviceId(value ?? "")}
-            >
-              <SelectTrigger>
-                <span>
-                  {targetDeviceId
-                    ? knownDevices.find(
-                        (known) => known.device_id === targetDeviceId,
-                      )?.display_name
-                    : "Select known device"}
-                </span>
-              </SelectTrigger>
-              <SelectContent
-                className="max-w-[min(92vw,30rem)]"
-                alignItemWithTrigger={false}
-              >
-                {otherKnownDevices.map((known) => (
-                  <SelectItem key={known.device_id} value={known.device_id}>
-                    {known.display_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              onClick={() => void attachToExisting()}
-              disabled={!targetDeviceId || !identifiers.length}
-            >
-              Attach IDs
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => void mergeIntoExisting()}
-              disabled={!targetDeviceId || !device.known_device}
-            >
-              Merge
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Proposed identifiers:{" "}
-            {identifiers.map((id) => `${id.kind}:${id.value}`).join(", ") ||
-              "-"}
-          </p>
+
+          {/* ── Unknown device: remember or attach ── */}
+          {!device.known_device && (
+            <div className="grid gap-3">
+              {/* Remember as new known device */}
+              <div className="grid gap-1.5">
+                <p className="text-xs text-muted-foreground">
+                  Remember as a new known device:
+                </p>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                  <Input
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Device name"
+                  />
+                  <Button
+                    onClick={() => void handleCreateRemembered()}
+                    disabled={actionBusy || !rowIdentifiers.length}
+                  >
+                    Remember device
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Identifiers:{" "}
+                  {rowIdentifiers
+                    .map((id) => `${id.kind}:${id.value}`)
+                    .join(", ") || "none"}
+                </p>
+              </div>
+
+              {/* Attach to existing known device */}
+              <div className="grid gap-1.5">
+                <p className="text-xs text-muted-foreground">
+                  Or attach to an existing known device:
+                </p>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                  <Select
+                    value={targetDeviceId}
+                    onValueChange={(v) => setTargetDeviceId(v ?? "")}
+                  >
+                    <SelectTrigger>
+                      <span>
+                        {targetDeviceId
+                          ? knownDevices.find(
+                              (kd) => kd.device_id === targetDeviceId,
+                            )?.display_name
+                          : "Select known device"}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent
+                      className="max-w-[min(92vw,30rem)]"
+                      alignItemWithTrigger={false}
+                    >
+                      {knownDevices.map((kd) => (
+                        <SelectItem key={kd.device_id} value={kd.device_id}>
+                          {kd.display_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    onClick={() => void handleAttachToExisting()}
+                    disabled={
+                      actionBusy || !targetDeviceId || !rowIdentifiers.length
+                    }
+                  >
+                    Attach IDs
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

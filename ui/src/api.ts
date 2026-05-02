@@ -96,32 +96,6 @@ export type KnownDeviceSummary = {
   pinned: boolean;
 };
 
-export type AgentDeviceObservation = {
-  observation_key: string;
-  agent_id: string;
-  kind: string;
-  mac: string | null;
-  ip: string | null;
-  hostname: string | null;
-  first_seen_unix: number;
-  last_seen_unix: number;
-  last_action: string;
-  known_device: KnownDeviceSummary | null;
-};
-
-export type AgentDeviceObservationEvent = {
-  event_id: string;
-  observation_key: string;
-  agent_id: string;
-  kind: string;
-  action: string;
-  mac: string | null;
-  ip: string | null;
-  hostname: string | null;
-  ts_unix: number;
-  known_device: KnownDeviceSummary | null;
-};
-
 export type FleetDeviceAgent = {
   agent_id: string;
   nickname?: string | null;
@@ -318,38 +292,6 @@ export function wakeFleetDevice(input: {
   });
 }
 
-export function fetchObservations(opts?: {
-  agentId?: string;
-  limit?: number;
-}): Promise<AgentDeviceObservation[]> {
-  const params = new URLSearchParams();
-  if (opts?.agentId) params.set("agent_id", opts.agentId);
-  params.set("limit", String(opts?.limit ?? 500));
-  return request<AgentDeviceObservation[]>(
-    `/api/v1/control/observations?${params.toString()}`,
-  );
-}
-
-export function fetchObservationHistory(opts?: {
-  agentId?: string;
-  kind?: string;
-  mac?: string;
-  ip?: string;
-  observationKey?: string;
-  limit?: number;
-}): Promise<AgentDeviceObservationEvent[]> {
-  const params = new URLSearchParams();
-  if (opts?.agentId) params.set("agent_id", opts.agentId);
-  if (opts?.kind) params.set("kind", opts.kind);
-  if (opts?.mac) params.set("mac", opts.mac);
-  if (opts?.ip) params.set("ip", opts.ip);
-  if (opts?.observationKey) params.set("observation_key", opts.observationKey);
-  params.set("limit", String(opts?.limit ?? 500));
-  return request<AgentDeviceObservationEvent[]>(
-    `/api/v1/control/observations/history?${params.toString()}`,
-  );
-}
-
 export function createKnownDevice(input: {
   display_name: string;
   pinned?: boolean;
@@ -367,19 +309,6 @@ export function createKnownDevice(input: {
   });
 }
 
-export function attachObservationIdentifier(
-  deviceId: string,
-  observationKey: string,
-): Promise<KnownDevice> {
-  return request<KnownDevice>(
-    `/api/v1/control/devices/${encodeURIComponent(deviceId)}/identifiers/from-observation`,
-    {
-      method: "POST",
-      body: JSON.stringify({ observation_key: observationKey }),
-    },
-  );
-}
-
 export function attachDeviceIdentifier(
   deviceId: string,
   identifier: { kind: string; value: string },
@@ -390,6 +319,16 @@ export function attachDeviceIdentifier(
       method: "POST",
       body: JSON.stringify(identifier),
     },
+  );
+}
+
+export function detachDeviceIdentifier(
+  deviceId: string,
+  identifierKey: string,
+): Promise<KnownDevice> {
+  return request<KnownDevice>(
+    `/api/v1/control/devices/${encodeURIComponent(deviceId)}/identifiers/${encodeURIComponent(identifierKey)}`,
+    { method: "DELETE" },
   );
 }
 

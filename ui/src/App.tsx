@@ -24,7 +24,6 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { DevicesPage } from "@/pages/DevicesPage";
 import { TokensPage } from "@/pages/TokensPage";
 import { WakeToolsPage } from "@/pages/WakeToolsPage";
-import { ObservationsPage } from "@/pages/ObservationsPage";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -215,7 +214,7 @@ export function App() {
             }
           />
           <Route path="tokens" element={<TokensPage />} />
-          <Route path="observations" element={<ObservationsPage />} />
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

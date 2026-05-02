@@ -11,7 +11,6 @@ import {
   Bot,
   FileText,
   Key,
-  Eye,
   Terminal,
   PanelLeftClose,
   PanelLeft,
@@ -49,7 +48,6 @@ const navSections: NavSection[] = [
     items: [
       { to: "/dashboard", label: "Fleet Health", icon: BarChart3 },
       { to: "/alerts", label: "Alerts", icon: Bell },
-      { to: "/observations", label: "Observations", icon: Eye },
     ],
   },
   {
