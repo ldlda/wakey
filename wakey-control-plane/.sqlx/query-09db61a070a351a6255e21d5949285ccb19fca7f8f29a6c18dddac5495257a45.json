@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM agent_devices WHERE agent_id = ?1 AND device_key = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "09db61a070a351a6255e21d5949285ccb19fca7f8f29a6c18dddac5495257a45"
+}

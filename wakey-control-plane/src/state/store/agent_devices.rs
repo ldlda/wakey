@@ -42,101 +42,107 @@ impl Store {
             let presence = presence_to_str(device.presence);
             let display_name: Option<String> = None;
 
-            sqlx::query(
+            sqlx::query!(
                 "INSERT INTO agent_devices (agent_id, device_key, presence, display_name, first_seen_unix, last_seen_unix)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT (agent_id, device_key) DO UPDATE SET
                     presence = excluded.presence,
                     last_seen_unix = excluded.last_seen_unix",
+                agent_id,
+                device_key,
+                presence,
+                display_name,
+                snapshot_time_i64,
+                snapshot_time_i64
             )
-            .bind(agent_id)
-            .bind(&device_key)
-            .bind(presence)
-            .bind(&display_name)
-            .bind(snapshot_time_i64)
-            .bind(snapshot_time_i64)
             .execute(&mut *tx)
             .await
             .context("failed upserting agent device")?;
 
             // Replace child rows.
-            sqlx::query("DELETE FROM agent_device_macs WHERE agent_id = ?1 AND device_key = ?2")
-                .bind(agent_id)
-                .bind(&device_key)
-                .execute(&mut *tx)
-                .await
-                .context("failed deleting device macs")?;
+            sqlx::query!(
+                "DELETE FROM agent_device_macs WHERE agent_id = ?1 AND device_key = ?2",
+                agent_id,
+                device_key
+            )
+            .execute(&mut *tx)
+            .await
+            .context("failed deleting device macs")?;
 
             for mac in &device.macs {
                 let mac_str = mac.to_string().to_ascii_lowercase();
-                sqlx::query(
+                sqlx::query!(
                     "INSERT INTO agent_device_macs (agent_id, device_key, mac) VALUES (?1, ?2, ?3)",
+                    agent_id,
+                    device_key,
+                    mac_str
                 )
-                .bind(agent_id)
-                .bind(&device_key)
-                .bind(&mac_str)
                 .execute(&mut *tx)
                 .await
                 .context("failed inserting device mac")?;
             }
 
-            sqlx::query("DELETE FROM agent_device_ips WHERE agent_id = ?1 AND device_key = ?2")
-                .bind(agent_id)
-                .bind(&device_key)
-                .execute(&mut *tx)
-                .await
-                .context("failed deleting device ips")?;
+            sqlx::query!(
+                "DELETE FROM agent_device_ips WHERE agent_id = ?1 AND device_key = ?2",
+                agent_id,
+                device_key
+            )
+            .execute(&mut *tx)
+            .await
+            .context("failed deleting device ips")?;
 
             for ip in &device.ips {
                 let ip_str = ip.to_string();
-                sqlx::query(
+                sqlx::query!(
                     "INSERT INTO agent_device_ips (agent_id, device_key, ip) VALUES (?1, ?2, ?3)",
+                    agent_id,
+                    device_key,
+                    ip_str
                 )
-                .bind(agent_id)
-                .bind(&device_key)
-                .bind(&ip_str)
                 .execute(&mut *tx)
                 .await
                 .context("failed inserting device ip")?;
             }
 
-            sqlx::query(
+            sqlx::query!(
                 "DELETE FROM agent_device_hostnames WHERE agent_id = ?1 AND device_key = ?2",
+                agent_id,
+                device_key
             )
-            .bind(agent_id)
-            .bind(&device_key)
             .execute(&mut *tx)
             .await
             .context("failed deleting device hostnames")?;
 
             for hostname in &device.names {
-                sqlx::query(
+                sqlx::query!(
                     "INSERT INTO agent_device_hostnames (agent_id, device_key, hostname) VALUES (?1, ?2, ?3)",
+                    agent_id,
+                    device_key,
+                    hostname
                 )
-                .bind(agent_id)
-                .bind(&device_key)
-                .bind(hostname)
                 .execute(&mut *tx)
                 .await
                 .context("failed inserting device hostname")?;
             }
 
-            sqlx::query("DELETE FROM agent_device_facts WHERE agent_id = ?1 AND device_key = ?2")
-                .bind(agent_id)
-                .bind(&device_key)
-                .execute(&mut *tx)
-                .await
-                .context("failed deleting device facts")?;
+            sqlx::query!(
+                "DELETE FROM agent_device_facts WHERE agent_id = ?1 AND device_key = ?2",
+                agent_id,
+                device_key
+            )
+            .execute(&mut *tx)
+            .await
+            .context("failed deleting device facts")?;
 
             for observation in &device.observations {
                 let fact_json =
                     serde_json::to_string(observation).context("failed serializing fact")?;
-                sqlx::query(
+                sqlx::query!(
                     "INSERT INTO agent_device_facts (agent_id, device_key, fact_json) VALUES (?1, ?2, ?3)",
+                    agent_id,
+                    device_key,
+                    fact_json
                 )
-                .bind(agent_id)
-                .bind(&device_key)
-                .bind(&fact_json)
                 .execute(&mut *tx)
                 .await
                 .context("failed inserting device fact")?;
@@ -145,12 +151,14 @@ impl Store {
 
         for old_key in existing_keys {
             if !incoming_keys.contains(&old_key) {
-                sqlx::query("DELETE FROM agent_devices WHERE agent_id = ?1 AND device_key = ?2")
-                    .bind(agent_id)
-                    .bind(&old_key)
-                    .execute(&mut *tx)
-                    .await
-                    .context("failed pruning old agent device")?;
+                sqlx::query!(
+                    "DELETE FROM agent_devices WHERE agent_id = ?1 AND device_key = ?2",
+                    agent_id,
+                    old_key
+                )
+                .execute(&mut *tx)
+                .await
+                .context("failed pruning old agent device")?;
             }
         }
 

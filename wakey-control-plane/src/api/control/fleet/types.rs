@@ -11,9 +11,13 @@ use wakey_core::parse::mac;
 #[derive(Debug, Default, Deserialize)]
 pub struct ListFleetDevicesQuery {
     pub query: Option<String>,
+    /// "all" or Presence variants
     pub presence: Option<String>,
+    /// "known", "unknown", "all"
     pub known: Option<String>,
+    /// "all" or specific agent id
     pub agent_id: Option<String>,
+    /// "operator" or "all"
     pub visibility: Option<String>,
     pub limit: Option<usize>,
 }

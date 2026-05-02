@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO agent_device_facts (agent_id, device_key, fact_json) VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "dd591c18060a1b6432eecacb1d1b6fb1fc518a4a7c134c11b60d42dc3c1b179d"
+}

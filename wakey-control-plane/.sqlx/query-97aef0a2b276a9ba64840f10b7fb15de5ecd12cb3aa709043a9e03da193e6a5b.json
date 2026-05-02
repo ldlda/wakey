@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO agent_device_ips (agent_id, device_key, ip) VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "97aef0a2b276a9ba64840f10b7fb15de5ecd12cb3aa709043a9e03da193e6a5b"
+}
