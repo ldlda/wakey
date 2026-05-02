@@ -27,6 +27,7 @@ pub async fn enroll(
     server_url: &str,
     enroll_token: &str,
     config_path: &Path,
+    base_config: Option<&AgentConfig>,
 ) -> Result<EnrollOutcome> {
     let server_url = normalize_server_url(server_url);
     let endpoint = format!("{server_url}/api/v1/agents/enroll");
@@ -58,12 +59,27 @@ pub async fn enroll(
         server_url: payload.server_url.unwrap_or(server_url),
         agent_id: payload.agent_id,
         agent_token: payload.agent_token,
-        reconnect_base_ms: 1_000,
-        reconnect_max_ms: 30_000,
-        observation_sync_interval_seconds: 60,
-        dhcp_leases_path: "/tmp/dhcp.leases".into(),
-        mac_name_cache_path: "/tmp/wakey_mac_names.json".into(),
-        observation_store_path: "/tmp/wakey_observations.json".into(),
+        reconnect_base_ms: base_config
+            .map(|config| config.reconnect_base_ms)
+            .unwrap_or(1_000),
+        reconnect_max_ms: base_config
+            .map(|config| config.reconnect_max_ms)
+            .unwrap_or(30_000),
+        observation_sync_interval_seconds: base_config
+            .map(|config| config.observation_sync_interval_seconds)
+            .unwrap_or(60),
+        pid_file: base_config
+            .map(|config| config.pid_file.clone())
+            .unwrap_or_else(|| crate::config::DEFAULT_PID_FILE.into()),
+        dhcp_leases_path: base_config
+            .map(|config| config.dhcp_leases_path.clone())
+            .unwrap_or_else(|| "/tmp/dhcp.leases".into()),
+        mac_name_cache_path: base_config
+            .map(|config| config.mac_name_cache_path.clone())
+            .unwrap_or_else(|| "/tmp/wakey_mac_names.json".into()),
+        observation_store_path: base_config
+            .map(|config| config.observation_store_path.clone())
+            .unwrap_or_else(|| "/tmp/wakey_observations.json".into()),
     };
     let backup_path = save_config_with_backup(config_path, &config)?;
     info!(agent_id = %config.agent_id, config_path = %config_path.display(), "agent enrollment succeeded and config was written");
@@ -143,7 +159,20 @@ mod tests {
         ));
         let path = dir.join("config.toml");
 
-        let outcome = enroll(&server_url, "enroll-abc", &path)
+        let base_config = AgentConfig {
+            server_url: "https://old.example.com".into(),
+            agent_id: "old-agent".into(),
+            agent_token: "old-token".into(),
+            reconnect_base_ms: 2_000,
+            reconnect_max_ms: 60_000,
+            observation_sync_interval_seconds: 30,
+            pid_file: "/tmp/custom-wakey-agent.pid".into(),
+            dhcp_leases_path: "/tmp/custom-dhcp.leases".into(),
+            mac_name_cache_path: "/tmp/custom-names.json".into(),
+            observation_store_path: "/tmp/custom-observations.json".into(),
+        };
+
+        let outcome = enroll(&server_url, "enroll-abc", &path, Some(&base_config))
             .await
             .expect("enroll should succeed");
         let config = outcome.config;
@@ -151,6 +180,8 @@ mod tests {
         assert_eq!(config.agent_id, "agent-123");
         assert_eq!(config.agent_token, "token-xyz");
         assert_eq!(config.server_url, "https://control.example.com");
+        assert_eq!(config.pid_file, base_config.pid_file);
+        assert_eq!(config.dhcp_leases_path, base_config.dhcp_leases_path);
         assert!(outcome.backup_path.is_none());
 
         let persisted = crate::config::load_config(&path).expect("load persisted config");

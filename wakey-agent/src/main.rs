@@ -29,21 +29,30 @@ async fn main() -> Result<()> {
             if let Some(config) = global_config {
                 args.config = config.to_path_buf();
             }
+            let existing_config = config::load_config(&args.config).ok();
             let resolved_server_url = if let Some(server_url) = args.server_url.as_deref() {
                 server_url.to_string()
+            } else if let Some(cfg) = existing_config.as_ref() {
+                cfg.server_url.clone()
             } else {
-                match config::load_config(&args.config) {
-                    Ok(cfg) => cfg.server_url,
-                    Err(_) => anyhow::bail!(
-                        "missing control-plane URL: pass --server-url or provide server_url in {}",
-                        args.config.display()
-                    ),
-                }
+                anyhow::bail!(
+                    "missing control-plane URL: pass --server-url or provide server_url in {}",
+                    args.config.display()
+                );
             };
 
             ::tracing::info!(server_url = %resolved_server_url, config = %args.config.display(), "wakey-agent command: enroll");
-            let outcome =
-                enroll::enroll(&resolved_server_url, &args.enroll_token, &args.config).await?;
+            let outcome = enroll::enroll(
+                &resolved_server_url,
+                &args.enroll_token,
+                &args.config,
+                existing_config.as_ref(),
+            )
+            .await?;
+            let pid_file = args
+                .pid_file
+                .as_deref()
+                .unwrap_or(outcome.config.pid_file.as_path());
             println!("agent_id={}", outcome.config.agent_id);
             println!("config={}", args.config.display());
             println!("config_write=updated");
@@ -51,10 +60,10 @@ async fn main() -> Result<()> {
                 println!("config_backup={}", backup_path.display());
             }
             if args.reload_running {
-                match serve::reload_daemon(&args.pid_file) {
-                    Ok(()) => println!("reload=signaled pid_file={}", args.pid_file.display()),
+                match serve::reload_daemon(pid_file) {
+                    Ok(()) => println!("reload=signaled pid_file={}", pid_file.display()),
                     Err(err) => {
-                        ::tracing::warn!(error = %err, pid_file = %args.pid_file.display(), "enroll completed but daemon reload failed");
+                        ::tracing::warn!(error = %err, pid_file = %pid_file.display(), "enroll completed but daemon reload failed");
                         if let Some(backup_path) = &outcome.backup_path {
                             match config::restore_backup(&args.config, backup_path) {
                                 Ok(()) => {
@@ -83,9 +92,10 @@ async fn main() -> Result<()> {
                 println!("reload=not_requested");
                 println!("runtime_config=unchanged_until_reload_or_restart");
                 println!(
-                    "next=wakey-agent reload --pid-file {}  # or restart wakey-agent",
-                    args.pid_file.display()
+                    "next=wakey-agent reload --pid-file {}  # if daemon is already running",
+                    pid_file.display()
                 );
+                println!("run={}", serve_command_for_config(&args.config));
             }
         }
         Command::InitConfig(mut args) => {
@@ -98,8 +108,9 @@ async fn main() -> Result<()> {
             init_config(args)?
         }
         Command::Reload(args) => {
-            ::tracing::info!(pid_file = %args.pid_file.display(), "wakey-agent command: reload");
-            serve::reload_daemon(&args.pid_file)?
+            let pid_file = resolve_pid_file(global_config, args.pid_file.as_deref())?;
+            ::tracing::info!(pid_file = %pid_file.display(), "wakey-agent command: reload");
+            serve::reload_daemon(&pid_file)?
         }
         Command::Observe(mut args) => {
             if let Some(config) = global_config {
@@ -110,6 +121,27 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn serve_command_for_config(config: &std::path::Path) -> String {
+    if config == std::path::Path::new(config::DEFAULT_CONFIG_PATH) {
+        "wakey-agent serve".to_string()
+    } else {
+        format!("wakey-agent --config {} serve", config.display())
+    }
+}
+
+fn resolve_pid_file(
+    config_path: Option<&std::path::Path>,
+    explicit_pid_file: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf> {
+    if let Some(pid_file) = explicit_pid_file {
+        return Ok(pid_file.to_path_buf());
+    }
+    if let Some(config_path) = config_path {
+        return Ok(config::load_config(config_path)?.pid_file);
+    }
+    Ok(config::DEFAULT_PID_FILE.into())
 }
 
 fn observe(args: cli::ObserveArgs) -> Result<()> {
@@ -211,6 +243,7 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
             reconnect_base_ms: 1_000,
             reconnect_max_ms: 30_000,
             observation_sync_interval_seconds: 60,
+            pid_file: config::DEFAULT_PID_FILE.into(),
             dhcp_leases_path: "/tmp/dhcp.leases".into(),
             mac_name_cache_path: "/tmp/wakey_mac_names.json".into(),
             observation_store_path: "/tmp/wakey_observations.json".into(),
@@ -230,10 +263,49 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
     if let Some(path) = &args.config {
         config::save_config(path, &cfg)?;
         println!("config={}", path.display());
-        println!("next=wakey-agent serve --config {}", path.display());
+        println!("run={}", serve_command_for_config(path));
     } else {
         let rendered = toml::to_string_pretty(&cfg)?;
         print!("{}", rendered);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serve_command_omits_default_config_path() {
+        assert_eq!(
+            serve_command_for_config(std::path::Path::new(config::DEFAULT_CONFIG_PATH)),
+            "wakey-agent serve"
+        );
+    }
+
+    #[test]
+    fn serve_command_includes_custom_config_path() {
+        assert_eq!(
+            serve_command_for_config(std::path::Path::new("/tmp/wakey-agent.toml")),
+            "wakey-agent --config /tmp/wakey-agent.toml serve"
+        );
+    }
+
+    #[test]
+    fn explicit_pid_file_wins_without_loading_config() {
+        let pid_file = resolve_pid_file(
+            Some(std::path::Path::new("/tmp/missing-agent.toml")),
+            Some(std::path::Path::new("/tmp/explicit.pid")),
+        )
+        .expect("explicit pid should resolve");
+
+        assert_eq!(pid_file, std::path::PathBuf::from("/tmp/explicit.pid"));
+    }
+
+    #[test]
+    fn pid_file_defaults_when_no_config_is_available() {
+        let pid_file = resolve_pid_file(None, None).expect("default pid should resolve");
+
+        assert_eq!(pid_file, std::path::PathBuf::from(config::DEFAULT_PID_FILE));
+    }
 }

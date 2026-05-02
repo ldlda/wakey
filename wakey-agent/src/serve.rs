@@ -16,10 +16,11 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
         );
     }
 
-    write_pid_file(&args.pid_file)?;
-    info!(pid_file = %args.pid_file.display(), "wrote wakey-agent pid file");
-
     let mut cfg = config::load_config(&args.config)?;
+    let pid_file = args.pid_file.unwrap_or_else(|| cfg.pid_file.clone());
+    write_pid_file(&pid_file)?;
+    info!(pid_file = %pid_file.display(), "wrote wakey-agent pid file");
+
     info!(config_path = %args.config.display(), agent_id = %cfg.agent_id, "starting wakey-agent");
 
     let mut worker = tokio::spawn(session::run(cfg.clone()));
@@ -51,7 +52,7 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
                 }
                 join = &mut worker => {
                     warn!("agent worker task exited; shutting down daemon");
-                    let _ = remove_pid_file(&args.pid_file);
+                    let _ = remove_pid_file(&pid_file);
                     return join.context("agent session join failed")?;
                 }
             }
@@ -66,7 +67,7 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
         worker.abort();
     }
 
-    let _ = remove_pid_file(&args.pid_file);
+    let _ = remove_pid_file(&pid_file);
     Ok(())
 }
 

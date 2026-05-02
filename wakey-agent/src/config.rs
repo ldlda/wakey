@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/wakey-agent/config.toml";
+pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-agent.pid";
 const WAKEY_DHCP_LEASES_ENV: &str = "WAKEY_DHCP_LEASES";
 const WAKEY_MAC_NAME_CACHE_ENV: &str = "WAKEY_MAC_NAME_CACHE";
 const WAKEY_OBSERVATION_STORE_ENV: &str = "WAKEY_OBSERVATION_STORE";
@@ -22,6 +23,8 @@ pub struct AgentConfig {
     pub reconnect_max_ms: u64,
     #[serde(default = "default_observation_sync_interval_seconds")]
     pub observation_sync_interval_seconds: u64,
+    #[serde(default = "default_pid_file")]
+    pub pid_file: PathBuf,
     #[serde(default = "default_dhcp_leases_path")]
     pub dhcp_leases_path: PathBuf,
     #[serde(default = "default_mac_name_cache_path")]
@@ -42,6 +45,7 @@ impl fmt::Debug for AgentConfig {
                 "observation_sync_interval_seconds",
                 &self.observation_sync_interval_seconds,
             )
+            .field("pid_file", &self.pid_file)
             .field("dhcp_leases_path", &self.dhcp_leases_path)
             .field("mac_name_cache_path", &self.mac_name_cache_path)
             .field("observation_store_path", &self.observation_store_path)
@@ -59,6 +63,10 @@ const fn default_reconnect_max_ms() -> u64 {
 
 const fn default_observation_sync_interval_seconds() -> u64 {
     60
+}
+
+fn default_pid_file() -> PathBuf {
+    DEFAULT_PID_FILE.into()
 }
 
 fn default_dhcp_leases_path() -> PathBuf {
@@ -175,6 +183,7 @@ mod tests {
             reconnect_base_ms: 123,
             reconnect_max_ms: 456,
             observation_sync_interval_seconds: 7,
+            pid_file: "/tmp/test-wakey-agent.pid".into(),
             dhcp_leases_path: "/tmp/test-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/test-names.json".into(),
             observation_store_path: "/tmp/test-observations.json".into(),

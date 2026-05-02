@@ -4,8 +4,6 @@ use clap::{ArgAction, Args, Parser, Subcommand};
 
 use crate::config;
 
-pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-agent.pid";
-
 #[derive(Parser)]
 #[command(name = "wakey-agent")]
 #[command(version, about = "Outbound control-plane agent for Wakey")]
@@ -42,9 +40,9 @@ pub struct ServeArgs {
     #[arg(long, short = 'c', default_value = config::DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
 
-    /// Path to pid file for reload signaling.
-    #[arg(long, default_value = DEFAULT_PID_FILE)]
-    pub pid_file: PathBuf,
+    /// Path to pid file. Overrides `pid_file` in config.
+    #[arg(long)]
+    pub pid_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -69,9 +67,9 @@ pub struct EnrollArgs {
     #[arg(long)]
     pub reload_running: bool,
 
-    /// Path to pid file used when `--reload-running` is enabled.
-    #[arg(long, default_value = DEFAULT_PID_FILE)]
-    pub pid_file: PathBuf,
+    /// Path to pid file used when `--reload-running` is enabled. Overrides `pid_file` in config.
+    #[arg(long)]
+    pub pid_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -107,9 +105,9 @@ pub struct InitConfigArgs {
 
 #[derive(Args)]
 pub struct ReloadArgs {
-    /// Path to pid file for reload signaling.
-    #[arg(long, default_value = DEFAULT_PID_FILE)]
-    pub pid_file: PathBuf,
+    /// Path to pid file for reload signaling. Overrides `pid_file` in config.
+    #[arg(long)]
+    pub pid_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -150,4 +148,35 @@ pub struct ObserveNeighArgs {
     pub mac: Option<String>,
     #[arg(long)]
     pub ip: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn global_config_is_accepted_before_enroll() {
+        let cli = Cli::try_parse_from([
+            "wakey-agent",
+            "--config",
+            "/tmp/wakey-agent.toml",
+            "enroll",
+            "--server-url",
+            "https://wakey.example.com",
+            "--enroll-token",
+            "token-123",
+        ])
+        .expect("global --config should parse before enroll");
+
+        assert_eq!(cli.config, Some(PathBuf::from("/tmp/wakey-agent.toml")));
+        let Command::Enroll(args) = cli.command else {
+            panic!("expected enroll command");
+        };
+        assert_eq!(
+            args.server_url.as_deref(),
+            Some("https://wakey.example.com")
+        );
+        assert_eq!(args.enroll_token, "token-123");
+    }
 }
