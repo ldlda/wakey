@@ -11,11 +11,7 @@ impl Store {
         let device_id = format!("dev-{}", Uuid::new_v4());
         let now = now_unix();
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("failed starting known device transaction")?;
+        let mut tx = self.begin_write().await?;
         let pinned = if input.pinned { 1_i64 } else { 0_i64 };
         let now_i64 = i64::try_from(now).context("known device timestamp overflow")?;
         sqlx::query!(
@@ -84,11 +80,7 @@ impl Store {
 
         let now = now_unix();
         let now_i64 = i64::try_from(now).context("known device timestamp overflow")?;
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("failed starting known device merge transaction")?;
+        let mut tx = self.begin_write().await?;
 
         let target_exists = sqlx::query_scalar!(
             r#"SELECT COUNT(*) as "count!: i64" FROM known_devices WHERE device_id = ?1"#,
@@ -149,11 +141,7 @@ impl Store {
     ) -> Result<Option<KnownDevice>> {
         let identifier = normalize_device_identifier(input)?;
         let now = now_unix();
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("failed starting device identifier transaction")?;
+        let mut tx = self.begin_write().await?;
         let exists = sqlx::query_scalar!(
             r#"SELECT COUNT(*) as "count!: i64" FROM known_devices WHERE device_id = ?1"#,
             device_id
@@ -188,11 +176,7 @@ impl Store {
     ) -> Result<Option<KnownDevice>> {
         let now = now_unix();
         let now_i64 = i64::try_from(now).context("known device timestamp overflow")?;
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("failed starting device identifier detach transaction")?;
+        let mut tx = self.begin_write().await?;
         let exists = sqlx::query_scalar!(
             r#"SELECT COUNT(*) as "count!: i64" FROM known_devices WHERE device_id = ?1"#,
             device_id

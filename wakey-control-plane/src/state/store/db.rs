@@ -115,11 +115,7 @@ impl Store {
             }
 
             let expires_at = now_unix().saturating_add(seed_ttl.as_secs().max(1));
-            let mut tx = self
-                .pool
-                .begin()
-                .await
-                .context("failed starting bootstrap token transaction")?;
+            let mut tx = self.begin_write().await?;
             let expires_at_i64 = i64::try_from(expires_at).context("token expiry overflow")?;
             sqlx::query!(
                 "INSERT OR REPLACE INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)",

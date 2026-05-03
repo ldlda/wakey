@@ -2,11 +2,7 @@ use super::*;
 
 impl Store {
     pub async fn enroll(&self, enroll_token: &str) -> Result<IssuedAgent> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("failed starting enroll transaction")?;
+        let mut tx = self.begin_write().await?;
         let expires_at_unix = sqlx::query_scalar!(
             "SELECT expires_at_unix FROM enroll_tokens WHERE token = ?1",
             enroll_token
@@ -102,11 +98,7 @@ impl Store {
     }
 
     pub async fn revoke_agent(&self, agent_id: &str) -> Result<bool> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("failed starting revoke transaction")?;
+        let mut tx = self.begin_write().await?;
         let result = sqlx::query!("DELETE FROM agents WHERE agent_id = ?1", agent_id)
             .execute(&mut *tx)
             .await

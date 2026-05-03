@@ -17,10 +17,21 @@ pub struct Store {
     db_path: PathBuf,
     pool: SqlitePool,
 }
+impl Store {
+    /// Begins a new transaction with an IMMEDIATE write lock.
+    ///
+    /// Use this for all transactions that perform writes to avoid SQLite upgrade deadlocks.
+    pub async fn begin_write(&self) -> Result<Transaction<'static, Sqlite>> {
+        self.pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .context("failed to begin write transaction")
+    }
+}
 
-const SCHEMA_VERSION_KEY: &str = "schema_version";
+pub(crate) const SCHEMA_VERSION_KEY: &str = "schema_version";
 const SEEDED_ENROLL_TOKEN_PREFIX: &str = "seeded_enroll_token:";
-const SCHEMA_VERSION: u32 = 2;
+pub(crate) const SCHEMA_VERSION: u32 = 2;
 
 pub(crate) mod agent_devices;
 mod alerts;

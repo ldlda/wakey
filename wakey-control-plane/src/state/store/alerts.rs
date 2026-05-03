@@ -1,3 +1,4 @@
+use super::helpers::core::*;
 use super::*;
 
 impl Store {
@@ -5,6 +6,8 @@ impl Store {
         &self,
         current: &[AlertState],
     ) -> Result<Vec<AlertTransition>> {
+        let mut tx = self.begin_write().await?;
+
         let mut previous = std::collections::HashMap::<String, AlertState>::new();
         let rows = sqlx::query_as!(
             AlertStateRow,
@@ -13,7 +16,7 @@ impl Store {
                     value, threshold, last_seen_unix, metadata_json as "metadata_json!"
              FROM active_alerts"#,
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await
         .context("failed iterating active_alerts table")?;
         for row in rows {
@@ -63,11 +66,6 @@ impl Store {
             });
         }
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("failed starting alert transaction")?;
         sqlx::query!("DELETE FROM active_alerts")
             .execute(&mut *tx)
             .await

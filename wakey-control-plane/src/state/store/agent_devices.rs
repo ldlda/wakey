@@ -15,11 +15,7 @@ impl Store {
         agent_id: &str,
         devices: &[Device],
     ) -> Result<usize> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .context("failed starting device snapshot transaction")?;
+        let mut tx = self.begin_write().await?;
 
         let mut incoming_keys = std::collections::HashSet::with_capacity(devices.len());
         let snapshot_time = now_unix();
