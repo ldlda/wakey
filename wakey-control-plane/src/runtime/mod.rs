@@ -27,7 +27,7 @@ mod admin;
 mod process;
 pub use admin::revoke_agent;
 pub use admin::{
-    import_sled_state, issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats,
+    issue_enroll_token, list_enroll_tokens, migrate_sqlite_state, revoke_enroll_token, state_stats,
 };
 pub use process::reload_daemon;
 use process::{remove_pid_file, write_pid_file};

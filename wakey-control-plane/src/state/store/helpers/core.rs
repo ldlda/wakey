@@ -29,15 +29,6 @@ pub fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-pub fn decode_expiry(raw: &[u8]) -> Result<u64> {
-    if raw.len() != 8 {
-        anyhow::bail!("invalid token expiry length {}", raw.len());
-    }
-    let mut arr = [0u8; 8];
-    arr.copy_from_slice(raw);
-    Ok(u64::from_le_bytes(arr))
-}
-
 pub fn decode_schema(raw: &[u8]) -> Result<u32> {
     if raw.len() != 4 {
         anyhow::bail!("invalid schema version length {}", raw.len());

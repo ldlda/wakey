@@ -29,11 +29,10 @@ mod db;
 mod devices;
 mod enrollment;
 mod helpers;
-mod import_sled;
+mod migrate_sqlite;
 
 use helpers::alerts_audit::*;
 use helpers::core::*;
-use helpers::legacy::*;
 use helpers::rows::*;
 
 #[cfg(test)]
@@ -584,67 +583,6 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("invalid or already-used enroll token")
-        );
-
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[tokio::test]
-    async fn import_sled_state_copies_core_records() {
-        let dir =
-            std::env::temp_dir().join(format!("wakey-cp-store-test-{}", uuid::Uuid::new_v4()));
-        let sled_path = dir.join("legacy-state.db");
-        let sqlite_path = dir.join("state.sqlite3");
-        fs::create_dir_all(&dir).expect("dir should exist");
-
-        let legacy = sled::open(&sled_path).expect("legacy db should open");
-        let meta = legacy.open_tree("meta").expect("meta should open");
-        meta.insert(
-            super::SCHEMA_VERSION_KEY.as_bytes(),
-            &super::SCHEMA_VERSION.to_le_bytes(),
-        )
-        .expect("schema should insert");
-        let enroll = legacy
-            .open_tree("enroll_tokens")
-            .expect("enroll tree should open");
-        enroll
-            .insert(b"enr-import-test", &(i64::MAX as u64).to_le_bytes())
-            .expect("token should insert");
-        let agents = legacy.open_tree("agents").expect("agents should open");
-        agents
-            .insert(b"agent-import", b"tok-import")
-            .expect("agent should insert");
-        let agent_meta = legacy.open_tree("agent_meta").expect("meta should open");
-        agent_meta
-            .insert(b"agent-import", b"imported-router")
-            .expect("nickname should insert");
-        legacy.flush().expect("legacy flush should succeed");
-        drop(agent_meta);
-        drop(agents);
-        drop(enroll);
-        drop(meta);
-        drop(legacy);
-
-        Store::import_sled_state(&sled_path, &sqlite_path, false)
-            .await
-            .expect("import should succeed");
-        let store = Store::load_or_init(&sqlite_path, Vec::new(), Duration::from_secs(60))
-            .await
-            .expect("sqlite should load");
-
-        assert!(store.verify_agent_token("agent-import", "tok-import").await);
-        let agents = store.list_agents_with_nicknames().await;
-        assert!(agents.iter().any(|(id, nickname)| {
-            id == "agent-import" && nickname.as_deref() == Some("imported-router")
-        }));
-        let tokens = store
-            .list_enroll_tokens()
-            .await
-            .expect("tokens should list");
-        assert!(
-            tokens
-                .iter()
-                .any(|token| token.enroll_token == "enr-import-test")
         );
 
         let _ = fs::remove_dir_all(&dir);

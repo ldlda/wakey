@@ -43,8 +43,8 @@ pub enum Command {
     RevokeAgent(RevokeAgentArgs),
     /// Print state backend stats.
     StateStats(StateStatsArgs),
-    /// Import a legacy sled state directory into a SQLite state file.
-    ImportSledState(ImportSledStateArgs),
+    /// Migrate a legacy sqlite state into a new SQLite state file.
+    MigrateSqliteState(MigrateSqliteStateArgs),
     /// Send SIGHUP to an already-running daemon.
     Reload(ReloadArgs),
 }
@@ -253,14 +253,13 @@ pub struct StateStatsArgs {
     pub target: AdminTargetArgs,
 }
 
-// not the greatest thing ive used, this and the migration code gets deleted shortly anyways
 #[derive(Args)]
-pub struct ImportSledStateArgs {
+pub struct MigrateSqliteStateArgs {
     #[arg(long, visible_alias = "from")]
-    pub from_sled_state: PathBuf,
+    pub from_sqlite_db: PathBuf,
 
     #[arg(long, visible_alias = "to")]
-    pub to_state_file: PathBuf,
+    pub to_sqlite_db: PathBuf,
 
     #[arg(long)]
     pub force: bool,

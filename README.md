@@ -146,7 +146,7 @@ Relative paths in config are resolved under `data_dir`.
 Legacy sled state can be imported explicitly:
 
 ```sh
-wakey-control-plane import-sled-state --from-sled-state /var/lib/wakey-control-plane/state.db --to-state-file /var/lib/wakey-control-plane/state.sqlite3
+wakey-control-plane migrate-sqlite-state --from /var/lib/wakey-control-plane/legacy.sqlite3 --to /var/lib/wakey-control-plane/state.sqlite3
 ```
 
 Enroll tokens are now expiring and revocable. Issuance returns `expires_at_unix`.

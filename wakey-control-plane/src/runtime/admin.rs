@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 use crate::api;
 use crate::cli::{
-    ImportSledStateArgs, IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeAgentArgs,
+    IssueEnrollTokenArgs, ListEnrollTokensArgs, MigrateSqliteStateArgs, RevokeAgentArgs,
     RevokeEnrollTokenArgs, StateStatsArgs,
 };
 use crate::config;
@@ -277,10 +277,11 @@ pub async fn state_stats(args: StateStatsArgs) -> Result<()> {
     Ok(())
 }
 
-pub async fn import_sled_state(args: ImportSledStateArgs) -> Result<()> {
-    state::Store::import_sled_state(&args.from_sled_state, &args.to_state_file, args.force).await?;
-    println!("from_sled_state={}", args.from_sled_state.display());
-    println!("to_state_file={}", args.to_state_file.display());
-    println!("imported=true");
+pub async fn migrate_sqlite_state(args: MigrateSqliteStateArgs) -> Result<()> {
+    state::Store::migrate_sqlite_state(&args.from_sqlite_db, &args.to_sqlite_db, args.force)
+        .await?;
+    println!("from_sqlite_db={}", args.from_sqlite_db.display());
+    println!("to_sqlite_db={}", args.to_sqlite_db.display());
+    println!("migrated=true");
     Ok(())
 }

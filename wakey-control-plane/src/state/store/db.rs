@@ -8,9 +8,8 @@ impl Store {
     ) -> Result<Self> {
         if path.is_dir() {
             anyhow::bail!(
-                "state_file {} is a directory, which looks like a legacy sled store; run `wakey-control-plane import-sled-state --from-sled-state {} --to-state-file <sqlite-file>` and update state_file",
+                "state_file {} is a directory, which looks like a legacy sled store; sled state is no longer supported",
                 path.display(),
-                path.display()
             );
         }
 

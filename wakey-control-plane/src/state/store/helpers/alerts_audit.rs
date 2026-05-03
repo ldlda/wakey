@@ -1,38 +1,5 @@
 use super::*;
 
-pub async fn insert_audit_event(pool: &SqlitePool, key: &str, event: &AuditEvent) -> Result<()> {
-    let metadata_json =
-        serde_json::to_string(&event.metadata).context("failed to encode audit metadata")?;
-    let ts_unix = i64::try_from(event.ts_unix).context("audit timestamp overflow")?;
-    let latency_ms = event
-        .latency_ms
-        .map(i64::try_from)
-        .transpose()
-        .context("audit latency overflow")?;
-    sqlx::query!(
-        "INSERT OR REPLACE INTO audit_events
-         (event_key, event_id, ts_unix, actor_type, actor_id, agent_id, request_id,
-          event_type, outcome, latency_ms, message, metadata_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        key,
-        event.event_id,
-        ts_unix,
-        event.actor_type,
-        event.actor_id,
-        event.agent_id,
-        event.request_id,
-        event.event_type,
-        event.outcome,
-        latency_ms,
-        event.message,
-        metadata_json
-    )
-    .execute(pool)
-    .await
-    .context("failed persisting audit event")?;
-    Ok(())
-}
-
 pub async fn insert_active_alert(
     tx: &mut Transaction<'_, Sqlite>,
     alert: &AlertState,
@@ -66,36 +33,6 @@ pub async fn insert_active_alert(
     Ok(())
 }
 
-pub async fn insert_active_alert_pool(pool: &SqlitePool, alert: &AlertState) -> Result<()> {
-    let metadata_json =
-        serde_json::to_string(&alert.metadata).context("failed to encode active alert metadata")?;
-    let alert_value = i64::try_from(alert.value).context("active alert value overflow")?;
-    let alert_threshold =
-        i64::try_from(alert.threshold).context("active alert threshold overflow")?;
-    let last_seen_unix =
-        i64::try_from(alert.last_seen_unix).context("active alert timestamp overflow")?;
-    sqlx::query!(
-        "INSERT OR REPLACE INTO active_alerts
-         (alert_id, kind, severity, status, agent_id, message, value, threshold,
-          last_seen_unix, metadata_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        alert.alert_id,
-        alert.kind,
-        alert.severity,
-        alert.status,
-        alert.agent_id,
-        alert.message,
-        alert_value,
-        alert_threshold,
-        last_seen_unix,
-        metadata_json
-    )
-    .execute(pool)
-    .await
-    .context("failed writing active alert snapshot")?;
-    Ok(())
-}
-
 pub async fn insert_alert_transition(
     tx: &mut Transaction<'_, Sqlite>,
     key: &str,
@@ -121,36 +58,6 @@ pub async fn insert_alert_transition(
         metadata_json
     )
     .execute(&mut **tx)
-    .await
-    .context("failed persisting alert transition")?;
-    Ok(())
-}
-
-pub async fn insert_alert_transition_pool(
-    pool: &SqlitePool,
-    key: &str,
-    transition: &AlertTransition,
-) -> Result<()> {
-    let metadata_json = serde_json::to_string(&transition.metadata)
-        .context("failed to encode alert transition metadata")?;
-    let ts_unix = i64::try_from(transition.ts_unix).context("alert timestamp overflow")?;
-    sqlx::query!(
-        "INSERT OR REPLACE INTO alert_transitions
-         (transition_key, transition_id, ts_unix, alert_id, kind, agent_id,
-          from_status, to_status, message, metadata_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        key,
-        transition.transition_id,
-        ts_unix,
-        transition.alert_id,
-        transition.kind,
-        transition.agent_id,
-        transition.from_status,
-        transition.to_status,
-        transition.message,
-        metadata_json
-    )
-    .execute(pool)
     .await
     .context("failed persisting alert transition")?;
     Ok(())
