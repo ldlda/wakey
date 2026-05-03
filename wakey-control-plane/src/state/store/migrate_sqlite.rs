@@ -36,19 +36,26 @@ impl Store {
         // 3. Initialize fresh schema on the temp file
         let store = Store::load_or_init(&temp_target, Vec::new(), Duration::from_secs(1)).await?;
 
+        // 4. Use a single connection for the entire migration
+        // ATTACH is connection-scoped, so we can't use the pool directly.
+        let mut conn = store
+            .pool
+            .acquire()
+            .await
+            .context("failed to acquire migration connection")?;
+
         let from_path_str = from_sqlite_state
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("invalid legacy path"))?;
 
-        // 4. Attach legacy and migrate
         sqlx::query(&format!("ATTACH DATABASE '{}' AS legacy", from_path_str))
-            .execute(&store.pool)
+            .execute(&mut *conn)
             .await
             .with_context(|| format!("failed to attach legacy database at {}", from_path_str))?;
 
         let legacy_tables: Vec<String> =
             sqlx::query_scalar("SELECT name FROM legacy.sqlite_master WHERE type='table'")
-                .fetch_all(&store.pool)
+                .fetch_all(&mut *conn)
                 .await
                 .context("failed to list tables in legacy database")?;
 
@@ -77,22 +84,24 @@ impl Store {
                 table, table
             );
             sqlx::query(&q)
-                .execute(&store.pool)
+                .execute(&mut *conn)
                 .await
                 .with_context(|| format!("failed to migrate table {}", table))?;
         }
 
         sqlx::query("DETACH DATABASE legacy")
-            .execute(&store.pool)
+            .execute(&mut *conn)
             .await
             .context("failed to detach legacy database")?;
 
         // 5. Finalize: Force a checkpoint to roll up WAL, then close and move
         sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
-            .execute(&store.pool)
+            .execute(&mut *conn)
             .await
             .context("failed to checkpoint WAL before finalization")?;
 
+        // Explicitly drop the connection so the pool can close properly
+        drop(conn);
         store.pool.close().await;
 
         // Clean up any "ghost" WAL/SHM files at the destination to prevent corruption
