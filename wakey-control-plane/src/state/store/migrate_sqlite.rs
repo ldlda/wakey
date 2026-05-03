@@ -1,4 +1,5 @@
 use super::*;
+use tracing::{debug, info, warn};
 
 impl Store {
     pub async fn migrate_sqlite_state(
@@ -12,71 +13,46 @@ impl Store {
                 from_sqlite_state.display()
             );
         }
-        if to_state_file.is_dir() {
+
+        // 1. Safety check for destination
+        if to_state_file.exists() && !force {
             anyhow::bail!(
-                "target state file {} is a directory",
+                "target state file {} already exists; use --force to overwrite",
                 to_state_file.display()
             );
         }
-        let is_same_file = match (
-            std::fs::canonicalize(from_sqlite_state),
-            std::fs::canonicalize(to_state_file),
-        ) {
-            (Ok(from_canon), Ok(to_canon)) => from_canon == to_canon,
-            _ => from_sqlite_state == to_state_file,
-        };
 
-        let actual_from_path = if is_same_file {
-            let mut bak = to_state_file.to_path_buf();
-            let mut file_name = bak.file_name().unwrap_or_default().to_os_string();
-            file_name.push(".bak");
-            bak.set_file_name(file_name);
+        // 2. Setup temporary migration target
+        let mut temp_target = to_state_file.to_path_buf();
+        let mut temp_name = temp_target.file_name().unwrap_or_default().to_os_string();
+        temp_name.push(".migration_tmp");
+        temp_target.set_file_name(temp_name);
 
-            if bak.exists() {
-                if !force {
-                    anyhow::bail!(
-                        "backup file {} already exists; re-run with --force to overwrite",
-                        bak.display()
-                    );
-                }
-                std::fs::remove_file(&bak).with_context(|| {
-                    format!("failed to remove existing backup {}", bak.display())
-                })?;
-            }
+        if temp_target.exists() {
+            std::fs::remove_file(&temp_target)
+                .context("failed to clean up stale migration temp file")?;
+        }
 
-            std::fs::rename(from_sqlite_state, &bak)
-                .with_context(|| "failed to rename legacy state for in-place migration")?;
-            bak
-        } else {
-            if to_state_file.exists()
-                && to_state_file
-                    .metadata()
-                    .with_context(|| format!("failed to stat {}", to_state_file.display()))?
-                    .len()
-                    > 0
-            {
-                if !force {
-                    anyhow::bail!(
-                        "target SQLite state file {} already exists and is non-empty; re-run with --force to overwrite",
-                        to_state_file.display()
-                    );
-                }
-                std::fs::remove_file(to_state_file)
-                    .with_context(|| format!("failed to remove {}", to_state_file.display()))?;
-            }
-            from_sqlite_state.to_path_buf()
-        };
+        // 3. Initialize fresh schema on the temp file
+        let store = Store::load_or_init(&temp_target, Vec::new(), Duration::from_secs(1)).await?;
 
-        let store = Store::load_or_init(to_state_file, Vec::new(), Duration::from_secs(1)).await?;
-
-        let from_path_str = actual_from_path
+        let from_path_str = from_sqlite_state
             .to_str()
-            .ok_or_else(|| anyhow::anyhow!("invalid path"))?;
+            .ok_or_else(|| anyhow::anyhow!("invalid legacy path"))?;
 
+        // 4. Attach legacy and migrate
         sqlx::query(&format!("ATTACH DATABASE '{}' AS legacy", from_path_str))
             .execute(&store.pool)
             .await
-            .with_context(|| "failed to attach legacy database")?;
+            .with_context(|| format!("failed to attach legacy database at {}", from_path_str))?;
+
+        let legacy_tables: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM legacy.sqlite_master WHERE type='table'")
+                .fetch_all(&store.pool)
+                .await
+                .context("failed to list tables in legacy database")?;
+
+        debug!(?legacy_tables, "found tables in legacy database");
 
         let tables = [
             "meta",
@@ -91,7 +67,15 @@ impl Store {
         ];
 
         for table in tables {
-            let q = format!("INSERT INTO {} SELECT * FROM legacy.{}", table, table);
+            if !legacy_tables.contains(&table.to_string()) {
+                warn!(table, "table missing in legacy database; skipping");
+                continue;
+            }
+
+            let q = format!(
+                "INSERT OR IGNORE INTO {} SELECT * FROM legacy.{}",
+                table, table
+            );
             sqlx::query(&q)
                 .execute(&store.pool)
                 .await
@@ -100,7 +84,29 @@ impl Store {
 
         sqlx::query("DETACH DATABASE legacy")
             .execute(&store.pool)
-            .await?;
+            .await
+            .context("failed to detach legacy database")?;
+
+        // 5. Finalize: Force a checkpoint to roll up WAL, then close and move
+        sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(&store.pool)
+            .await
+            .context("failed to checkpoint WAL before finalization")?;
+
+        store.pool.close().await;
+
+        // Clean up any "ghost" WAL/SHM files at the destination to prevent corruption
+        let to_path_str = to_state_file.to_string_lossy();
+        let _ = std::fs::remove_file(format!("{}-wal", to_path_str));
+        let _ = std::fs::remove_file(format!("{}-shm", to_path_str));
+
+        std::fs::rename(&temp_target, to_state_file)
+            .context("failed to move migrated database into final location")?;
+
+        // Also clean up any leftover temp WAL/SHM files just in case
+        let temp_path_str = temp_target.to_string_lossy();
+        let _ = std::fs::remove_file(format!("{}-wal", temp_path_str));
+        let _ = std::fs::remove_file(format!("{}-shm", temp_path_str));
 
         info!(
             from = %from_sqlite_state.display(),
