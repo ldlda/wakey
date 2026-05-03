@@ -28,6 +28,7 @@ impl TestStore {
     }
 }
 
+#[cfg(test)]
 impl Drop for TestStore {
     fn drop(&mut self) {
         self.store.take();

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT device_key FROM agent_devices WHERE agent_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_key",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3f24dfb51be2c3051dc8a8f732bd3e3fe9ca6b2649e1202d3725693b8011f269"
+}

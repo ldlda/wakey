@@ -138,21 +138,29 @@ mod test {
     use super::*;
     #[test]
     fn deserialize_online_neighbor() {
-        NeighborEntry::deserialize(serde_json::json!({
+        let entry = NeighborEntry::deserialize(serde_json::json!({
             "ip" : "192.168.100.94",
             "dev" : "br-lan",
             "mac" : "04:7C:16:79:6D:EE",
             "state" : "REACHABLE"
         }))
         .expect("all fields must pass");
+        assert_eq!(entry.ip, IpAddr::from([192, 168, 100, 94]));
+        assert_eq!(entry.dev, Some("br-lan".to_string()));
+        assert_eq!(entry.mac, Some("04:7c:16:79:6d:ee".parse().expect("mac")));
+        assert_eq!(entry.state, NeighborState::Reachable);
     }
     #[test]
     fn deserialize_failed_neighbor() {
-        NeighborEntry::deserialize(serde_json::json!({
+        let entry = NeighborEntry::deserialize(serde_json::json!({
             "ip" : "192.168.100.94",
             "dev" : "br-lan",
             "state" : "FAILED"
         }))
         .expect("default");
+        assert_eq!(entry.ip, IpAddr::from([192, 168, 100, 94]));
+        assert_eq!(entry.dev, Some("br-lan".to_string()));
+        assert_eq!(entry.mac, None);
+        assert_eq!(entry.state, NeighborState::Failed);
     }
 }

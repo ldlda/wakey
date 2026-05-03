@@ -8,7 +8,7 @@ use tracing::{info, info_span, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{AgentCommand, ErrorPayload, RequestId, ServerMessage};
 
-use crate::api::json_error;
+use crate::api::ApiError;
 use crate::runtime::{AgentReply, AppState, SessionEvent};
 use crate::state::AuditEventInput;
 
@@ -35,9 +35,7 @@ pub struct RelayCommandResponse {
     pub error: Option<ErrorPayload>,
 }
 
-pub async fn list_agents(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+pub async fn list_agents(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
     let enrolled = state.store.list_agents_with_nicknames().await;
     let sessions = state.sessions.read().await;
 
@@ -57,7 +55,7 @@ pub async fn run_command(
     State(state): State<AppState>,
     AxumPath(agent_id): AxumPath<String>,
     Json(req): Json<RelayCommandRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match relay_agent_command(&state, &agent_id, req.command, req.timeout_ms).await {
         Ok(response) => Ok((StatusCode::OK, Json(response))),
         Err(err) => Err(err),
@@ -69,7 +67,7 @@ pub async fn relay_agent_command(
     agent_id: &str,
     command: AgentCommand,
     timeout_ms: Option<u64>,
-) -> Result<RelayCommandResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<RelayCommandResponse, ApiError> {
     let request_id_string = format!("req-{}", Uuid::new_v4());
     let command_kind = command_kind(&command);
     let started = Instant::now();
@@ -82,7 +80,7 @@ pub async fn relay_agent_command(
     let _span_guard = span.enter();
 
     let request_id = RequestId::try_from(request_id_string.clone()).map_err(|err| {
-        json_error(
+        ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "invalid_request_id",
             &err,
@@ -95,7 +93,7 @@ pub async fn relay_agent_command(
     }
     .ok_or_else(|| {
         warn!("command rejected: agent not connected");
-        json_error(
+        ApiError::new(
             StatusCode::NOT_FOUND,
             "agent_not_connected",
             "agent is not connected",
@@ -151,7 +149,7 @@ pub async fn relay_agent_command(
         {
             warn!(error = %audit_err, "failed to append audit event for command send failure");
         }
-        return Err(json_error(
+        return Err(ApiError::new(
             StatusCode::BAD_GATEWAY,
             "agent_send_failed",
             &format!("failed to send command to agent: {err}"),
@@ -236,7 +234,7 @@ pub async fn relay_agent_command(
             {
                 warn!(error = %err, "failed to append audit event for dropped response");
             }
-            return Err(json_error(
+            return Err(ApiError::new(
                 StatusCode::BAD_GATEWAY,
                 "agent_response_dropped",
                 "agent response channel dropped",
@@ -265,7 +263,7 @@ pub async fn relay_agent_command(
             {
                 warn!(error = %err, "failed to append audit event for timeout");
             }
-            return Err(json_error(
+            return Err(ApiError::new(
                 StatusCode::GATEWAY_TIMEOUT,
                 "agent_timeout",
                 "agent did not answer before timeout",

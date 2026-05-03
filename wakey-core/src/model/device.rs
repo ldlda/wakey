@@ -11,7 +11,7 @@ use crate::parse::mac;
 /// Variant order defines `Ord`: Offline < Unknown < LikelyOnline < Online.
 /// `std::cmp::max` picks the most-online signal when merging.
 #[derive(
-    Debug, PartialEq, Eq, Clone, Copy, Hash, Ord, PartialOrd, Serialize, serde::Deserialize, Default,
+    Debug, PartialEq, Eq, Clone, Copy, Hash, Ord, PartialOrd, Serialize, Deserialize, Default,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Presence {
@@ -143,11 +143,7 @@ impl Device {
             if let Some(dev) = neighbor.dev.as_deref() {
                 interfaces.insert(dev);
             }
-            presence = std::cmp::max(
-                presence_rank(presence),
-                presence_rank(neighbor.state.into()),
-            )
-            .into();
+            presence = std::cmp::max(presence, Presence::from(neighbor.state));
         }
         let mut observed_non_remove = false;
         for observation in &observations {
@@ -163,11 +159,7 @@ impl Device {
             if observation.action != "remove" {
                 observed_non_remove = true;
             }
-            presence = std::cmp::max(
-                presence_rank(presence),
-                presence_rank(observation_presence(observation)),
-            )
-            .into();
+            presence = std::cmp::max(presence, observation_presence(observation));
         }
 
         if neighbors.is_empty()
@@ -204,26 +196,6 @@ fn observation_presence(observation: &DeviceObservationFact) -> Presence {
         (_, "remove") => Presence::Offline,
         ("neigh", "add" | "update" | "old") => Presence::LikelyOnline,
         _ => Presence::Unknown,
-    }
-}
-
-const fn presence_rank(presence: Presence) -> u8 {
-    match presence {
-        Presence::Online => 3,
-        Presence::LikelyOnline => 2,
-        Presence::Unknown => 1,
-        Presence::Offline => 0,
-    }
-}
-
-impl From<u8> for Presence {
-    fn from(value: u8) -> Self {
-        match value {
-            3 => Self::Online,
-            2 => Self::LikelyOnline,
-            0 => Self::Offline,
-            _ => Self::Unknown,
-        }
     }
 }
 

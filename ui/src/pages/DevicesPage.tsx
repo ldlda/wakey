@@ -78,6 +78,7 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
           presence,
           known,
           agentId: agentId === "all" ? "" : agentId,
+          visibility: "all",
           limit: 500,
         }),
         fetchKnownDevices(),
@@ -373,7 +374,9 @@ function FleetDeviceRow({
           : "";
 
   return (
-    <div className={`grid gap-3 rounded-md border border-l-[3px] ${presenceBorder} bg-card px-3 py-3 text-sm xl:grid-cols-[minmax(10rem,1.3fr)_8rem_minmax(9rem,1fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_8rem] xl:items-center xl:gap-2`}>
+    <div
+      className={`grid gap-3 rounded-md border border-l-[3px] ${presenceBorder} bg-card px-3 py-3 text-sm xl:grid-cols-[minmax(10rem,1.3fr)_8rem_minmax(9rem,1fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_8rem_8rem] xl:items-center xl:gap-2`}
+    >
       <button className="min-w-0 text-left" type="button" onClick={onDetails}>
         <div className="truncate font-medium">{device.display_name}</div>
         <div className="mt-1 flex flex-wrap gap-1">

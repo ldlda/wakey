@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::api::json_error;
+use crate::api::ApiError;
 use crate::runtime::AppState;
 use crate::state::AuditEventFilter;
 
@@ -38,7 +38,7 @@ pub struct AuditEventResponse {
 pub async fn list_audit_events(
     State(state): State<AppState>,
     Query(query): Query<ListAuditEventsQuery>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let filter = AuditEventFilter {
         agent_id: query.agent_id,
         request_id: query.request_id,
@@ -71,7 +71,7 @@ pub async fn list_audit_events(
         }
         Err(err) => {
             warn!(error = %err, "failed to list audit events");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_audit_events_failed",
                 &err.to_string(),

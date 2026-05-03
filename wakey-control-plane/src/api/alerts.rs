@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio::time::Duration;
 use tracing::warn;
 
-use crate::api::json_error;
+use crate::api::ApiError;
 use crate::runtime::AppState;
 use crate::state::{AlertState, AuditEvent, AuditEventFilter};
 
@@ -51,7 +51,7 @@ pub struct AlertRuleConfig {
 pub async fn active_alerts(
     State(state): State<AppState>,
     Query(query): Query<ActiveAlertsQuery>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let alerts = evaluate_alerts(
         &state,
         AlertRuleConfig {
@@ -73,7 +73,7 @@ pub async fn active_alerts(
 pub async fn alert_history(
     State(state): State<AppState>,
     Query(query): Query<AlertHistoryQuery>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let limit = query.limit.unwrap_or(100).clamp(1, 500);
     let history = state
         .store
@@ -81,7 +81,7 @@ pub async fn alert_history(
         .await
         .map_err(|err| {
             warn!(error = %err, "failed reading alert transition history");
-            json_error(
+            ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "alert_history_failed",
                 &err.to_string(),
@@ -112,7 +112,7 @@ async fn alerts_stream_socket(state: AppState, mut socket: WebSocket, config: Al
         let alerts = match evaluate_alerts(&state, config.clone()).await {
             Ok(alerts) => alerts,
             Err(err) => {
-                warn!(code = %err.0, "failed to evaluate alerts for stream");
+                warn!(code = %err.code, "failed to evaluate alerts for stream");
                 continue;
             }
         };
@@ -152,7 +152,7 @@ async fn alerts_stream_socket(state: AppState, mut socket: WebSocket, config: Al
 async fn evaluate_alerts(
     state: &AppState,
     config: AlertRuleConfig,
-) -> Result<Vec<AlertState>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Vec<AlertState>, ApiError> {
     let lookback_seconds = config.lookback_seconds.unwrap_or(900).clamp(60, 86_400);
     let timeout_threshold = config.timeout_threshold.unwrap_or(3).max(1);
     let auth_rejected_threshold = config.auth_rejected_threshold.unwrap_or(3).max(1);
@@ -182,7 +182,7 @@ async fn evaluate_alerts(
         .await
         .map_err(|err| {
             warn!(error = %err, "failed reading timeout audit events");
-            json_error(
+            ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "alerts_query_failed",
                 &err.to_string(),
@@ -201,7 +201,7 @@ async fn evaluate_alerts(
         .await
         .map_err(|err| {
             warn!(error = %err, "failed reading auth-rejected audit events");
-            json_error(
+            ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "alerts_query_failed",
                 &err.to_string(),
@@ -220,7 +220,7 @@ async fn evaluate_alerts(
         .await
         .map_err(|err| {
             warn!(error = %err, "failed reading enroll-rejected audit events");
-            json_error(
+            ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "alerts_query_failed",
                 &err.to_string(),

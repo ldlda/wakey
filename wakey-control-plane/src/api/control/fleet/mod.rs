@@ -7,8 +7,8 @@ use axum::response::IntoResponse;
 use tracing::warn;
 use wakey_agent::protocol::{AgentCommand, InventoryRequest, WakeRequest};
 
+use crate::api::ApiError;
 use crate::api::commands::relay_agent_command;
-use crate::api::json_error;
 use crate::runtime::AppState;
 
 mod build;
@@ -29,12 +29,12 @@ use types::{
 pub async fn list_fleet_devices(
     State(state): State<AppState>,
     Query(query): Query<ListFleetDevicesQuery>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match load_fleet_devices(&state, &query).await {
         Ok(devices) => Ok((StatusCode::OK, Json(devices))),
         Err(err) => {
             warn!(error = %err, "failed to list fleet devices");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_fleet_devices_failed",
                 &err.to_string(),
@@ -46,7 +46,7 @@ pub async fn list_fleet_devices(
 pub async fn refresh_fleet_devices(
     State(state): State<AppState>,
     Json(req): Json<RefreshFleetDevicesRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let mut agent_ids = if req.agent_ids.is_empty() {
         let sessions = state.sessions.read().await;
         sessions.keys().cloned().collect::<Vec<_>>()
@@ -131,11 +131,11 @@ pub async fn refresh_fleet_devices(
                     .map(|error| error.message)
                     .or_else(|| Some("inventory command failed".into())),
             }),
-            Err((status, body)) => results.push(RefreshFleetAgentResult {
+            Err(err) => results.push(RefreshFleetAgentResult {
                 agent_id,
                 status: "error".into(),
                 accepted: 0,
-                error: Some(format!("{status}: {}", body.0)),
+                error: Some(format!("{}: {}", err.status, err.message)),
             }),
         }
     }
@@ -152,7 +152,7 @@ pub async fn refresh_fleet_devices(
 pub async fn wake_fleet_device(
     State(state): State<AppState>,
     Json(req): Json<WakeFleetDeviceRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let query = ListFleetDevicesQuery {
         query: None,
         presence: None,
@@ -163,7 +163,7 @@ pub async fn wake_fleet_device(
     };
     let devices = load_fleet_devices(&state, &query).await.map_err(|err| {
         warn!(error = %err, "failed loading fleet devices for wake");
-        json_error(
+        ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "load_fleet_devices_failed",
             &err.to_string(),
@@ -174,7 +174,7 @@ pub async fn wake_fleet_device(
         .into_iter()
         .find(|device| device.device_key == req.device_key)
         .ok_or_else(|| {
-            json_error(
+            ApiError::new(
                 StatusCode::NOT_FOUND,
                 "fleet_device_not_found",
                 "fleet device not found",
@@ -189,7 +189,7 @@ pub async fn wake_fleet_device(
         None => device.recommended_route,
     }
     .ok_or_else(|| {
-        json_error(
+        ApiError::new(
             StatusCode::BAD_REQUEST,
             "wake_route_unavailable",
             "no wakeable connected MAC-backed route is available",
@@ -197,21 +197,21 @@ pub async fn wake_fleet_device(
     })?;
 
     let Some(mac) = route.mac else {
-        return Err(json_error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "wake_route_unavailable",
             "selected route does not include a MAC address",
         ));
     };
     if !route.connected {
-        return Err(json_error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "wake_route_unavailable",
             "selected route agent is not connected",
         ));
     }
     if !route.wakeable {
-        return Err(json_error(
+        return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "wake_route_unavailable",
             "selected route is not wakeable",

@@ -29,7 +29,19 @@ async fn main() -> Result<()> {
             if let Some(config) = global_config {
                 args.config = config.to_path_buf();
             }
-            let existing_config = config::load_config(&args.config).ok();
+            let existing_config = match config::load_config(&args.config) {
+                Ok(cfg) => Some(cfg),
+                Err(e) => {
+                    if e.root_cause()
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
+                    {
+                        None
+                    } else {
+                        return Err(e);
+                    }
+                }
+            };
             let resolved_server_url = if let Some(server_url) = args.server_url.as_deref() {
                 server_url.to_string()
             } else if let Some(cfg) = existing_config.as_ref() {

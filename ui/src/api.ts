@@ -153,6 +153,25 @@ export type WakeFleetDeviceResponse = {
   };
 };
 
+export interface APIErrorResponse {
+  error: {
+    code: string;
+    message: string;
+    details?: any;
+  };
+}
+
+export class APIError extends Error {
+  constructor(
+    message: string,
+    public code: string,
+    public details: any,
+  ) {
+    super(message);
+    this.name = "APIError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -164,11 +183,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const raw = await res.text();
-    let detail = raw;
+    let parsed: APIErrorResponse | null = null;
     try {
-      detail = JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {}
-    throw new Error(`${res.status} ${res.statusText}\n${detail}`);
+      parsed = JSON.parse(raw);
+      // assume APIError
+      if (parsed?.error?.details) {
+        parsed.error.details = JSON.stringify(parsed.error.details);
+      }
+    } catch {
+      // not JSON
+    }
+
+    throw new APIError(
+      `${res.status} ${res.statusText}\n${raw}`,
+      parsed?.error?.code ?? "unknown",
+      parsed?.error?.details ?? parsed?.error?.message ?? raw,
+    );
   }
 
   return res.json() as Promise<T>;

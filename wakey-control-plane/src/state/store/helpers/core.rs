@@ -14,7 +14,7 @@ pub async fn open_sqlite_pool(path: &Path) -> Result<SqlitePool> {
         .with_context(|| format!("failed to open SQLite state db {}", path.display()))
 }
 
-pub async fn sql_count(pool: &SqlitePool, table: &str) -> Result<i64> {
+pub async fn sql_count(pool: &SqlitePool, table: &'static str) -> Result<i64> {
     let sql = format!("SELECT COUNT(*) FROM {table}");
     sqlx::query_scalar::<_, i64>(&sql)
         .fetch_one(pool)

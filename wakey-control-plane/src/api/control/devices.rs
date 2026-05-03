@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::api::json_error;
+use crate::api::ApiError;
 use crate::runtime::AppState;
 use crate::state::{DeviceIdentifierInput, KnownDeviceInput};
 
@@ -59,7 +59,7 @@ pub struct MergeKnownDeviceRequest {
 pub async fn create_known_device(
     State(state): State<AppState>,
     Json(req): Json<CreateKnownDeviceRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let input = KnownDeviceInput {
         display_name: req.display_name,
         pinned: req.pinned,
@@ -78,7 +78,7 @@ pub async fn create_known_device(
         Ok(device) => Ok((StatusCode::CREATED, Json(known_device_response(device)))),
         Err(err) => {
             warn!(error = %err, "failed to create known device");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "create_known_device_failed",
                 &err.to_string(),
@@ -89,7 +89,7 @@ pub async fn create_known_device(
 
 pub async fn list_known_devices(
     State(state): State<AppState>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match state.store.list_known_devices().await {
         Ok(devices) => Ok((
             StatusCode::OK,
@@ -102,7 +102,7 @@ pub async fn list_known_devices(
         )),
         Err(err) => {
             warn!(error = %err, "failed to list known devices");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_known_devices_failed",
                 &err.to_string(),
@@ -114,7 +114,7 @@ pub async fn list_known_devices(
 pub async fn forget_known_device(
     State(state): State<AppState>,
     AxumPath(device_id): AxumPath<String>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match state.store.forget_known_device(&device_id).await {
         Ok(forgotten) => Ok((
             StatusCode::OK,
@@ -125,7 +125,7 @@ pub async fn forget_known_device(
         )),
         Err(err) => {
             warn!(error = %err, "failed to forget known device");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "forget_known_device_failed",
                 &err.to_string(),
@@ -138,7 +138,7 @@ pub async fn attach_device_identifier(
     State(state): State<AppState>,
     AxumPath(device_id): AxumPath<String>,
     Json(req): Json<DeviceIdentifierRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let input = DeviceIdentifierInput {
         kind: req.kind,
         value: req.value,
@@ -150,14 +150,14 @@ pub async fn attach_device_identifier(
         .await
     {
         Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
-        Ok(None) => Err(json_error(
+        Ok(None) => Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "known_device_not_found",
             "known device not found",
         )),
         Err(err) => {
             warn!(error = %err, "failed to attach device identifier");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "attach_device_identifier_failed",
                 &err.to_string(),
@@ -169,21 +169,21 @@ pub async fn attach_device_identifier(
 pub async fn detach_device_identifier(
     State(state): State<AppState>,
     AxumPath((device_id, identifier_key)): AxumPath<(String, String)>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match state
         .store
         .detach_device_identifier(&device_id, &identifier_key)
         .await
     {
         Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
-        Ok(None) => Err(json_error(
+        Ok(None) => Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "known_device_not_found",
             "known device not found",
         )),
         Err(err) => {
             warn!(error = %err, "failed to detach device identifier");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "detach_device_identifier_failed",
                 &err.to_string(),
@@ -196,21 +196,21 @@ pub async fn merge_known_device(
     State(state): State<AppState>,
     AxumPath(device_id): AxumPath<String>,
     Json(req): Json<MergeKnownDeviceRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match state
         .store
         .merge_known_devices(&device_id, &req.source_device_id)
         .await
     {
         Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
-        Ok(None) => Err(json_error(
+        Ok(None) => Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "known_device_not_found",
             "target or source known device not found",
         )),
         Err(err) => {
             warn!(error = %err, "failed to merge known devices");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "merge_known_device_failed",
                 &err.to_string(),

@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::api::json_error;
+use crate::api::ApiError;
 use crate::runtime::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -17,9 +17,7 @@ pub struct StateStatsResponse {
     pub expired_enroll_token_count: usize,
 }
 
-pub async fn state_stats(
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+pub async fn state_stats(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
     match state.store.stats().await {
         Ok(stats) => Ok((
             StatusCode::OK,
@@ -33,7 +31,7 @@ pub async fn state_stats(
         )),
         Err(err) => {
             warn!(error = %err, "failed to read state stats");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "state_stats_failed",
                 &err.to_string(),

@@ -96,14 +96,19 @@ export function FleetDeviceDetailsDialog({
     (kd) => kd.device_id !== currentDevice.known_device?.device_id,
   );
 
-  async function wrap(fn: () => Promise<void>) {
+  async function wrap(fn: () => Promise<void | { changed?: boolean }>) {
     setError("");
     setActionBusy(true);
     try {
-      await fn();
-      onChanged();
-    } catch (err) {
+      const res = await fn();
+      if (!res || res.changed !== false) {
+        onChanged();
+      }
+    } catch (err: any) {
       setError(String(err));
+      if (err && (err.changed || err.partial)) {
+        onChanged();
+      }
     } finally {
       setActionBusy(false);
     }
@@ -125,12 +130,25 @@ export function FleetDeviceDetailsDialog({
     const target = knownDevices.find((kd) => kd.device_id === targetDeviceId);
     await wrap(async () => {
       const ids = fullKnown ? unattachedIdentifiers : rowIdentifiers;
-      for (const id of ids) {
-        await attachDeviceIdentifier(targetDeviceId, id);
+      if (ids.length === 0) return;
+
+      const results = await Promise.allSettled(
+        ids.map((id) => attachDeviceIdentifier(targetDeviceId, id)),
+      );
+
+      const changed = results.some((r) => r.status === "fulfilled");
+      const errors = results.filter((r) => r.status === "rejected");
+
+      if (errors.length) {
+        const err = errors[0].reason as Error;
+        if (changed) (err as any).changed = true;
+        throw err;
       }
+
       toast.success(
         `Attached ${ids.length} identifier(s) to "${target?.display_name ?? targetDeviceId}"`,
       );
+      return { changed };
     });
   }
 

@@ -25,12 +25,13 @@ impl Store {
         let snapshot_time = now_unix();
         let snapshot_time_i64 = i64::try_from(snapshot_time).context("snapshot time overflow")?;
 
-        let existing_keys: Vec<String> =
-            sqlx::query_scalar("SELECT device_key FROM agent_devices WHERE agent_id = ?1")
-                .bind(agent_id)
-                .fetch_all(&mut *tx)
-                .await
-                .context("failed fetching existing keys")?;
+        let existing_keys: Vec<String> = sqlx::query_scalar!(
+            "SELECT device_key FROM agent_devices WHERE agent_id = ?1",
+            agent_id
+        )
+        .fetch_all(&mut *tx)
+        .await
+        .context("failed fetching existing keys")?;
 
         for device in devices {
             let Some(device_id) = &device.id else {
@@ -47,6 +48,7 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT (agent_id, device_key) DO UPDATE SET
                     presence = excluded.presence,
+                    display_name = excluded.display_name,
                     last_seen_unix = excluded.last_seen_unix",
                 agent_id,
                 device_key,
@@ -69,17 +71,20 @@ impl Store {
             .await
             .context("failed deleting device macs")?;
 
-            for mac in &device.macs {
-                let mac_str = mac.to_string().to_ascii_lowercase();
-                sqlx::query!(
-                    "INSERT INTO agent_device_macs (agent_id, device_key, mac) VALUES (?1, ?2, ?3)",
-                    agent_id,
-                    device_key,
-                    mac_str
-                )
-                .execute(&mut *tx)
-                .await
-                .context("failed inserting device mac")?;
+            if !device.macs.is_empty() {
+                let mut builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO agent_device_macs (agent_id, device_key, mac) ",
+                );
+                builder.push_values(&device.macs, |mut b, mac| {
+                    b.push_bind(agent_id)
+                        .push_bind(device_key.clone())
+                        .push_bind(mac.to_string().to_ascii_lowercase());
+                });
+                builder
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .context("failed inserting device macs")?;
             }
 
             sqlx::query!(
@@ -91,17 +96,20 @@ impl Store {
             .await
             .context("failed deleting device ips")?;
 
-            for ip in &device.ips {
-                let ip_str = ip.to_string();
-                sqlx::query!(
-                    "INSERT INTO agent_device_ips (agent_id, device_key, ip) VALUES (?1, ?2, ?3)",
-                    agent_id,
-                    device_key,
-                    ip_str
-                )
-                .execute(&mut *tx)
-                .await
-                .context("failed inserting device ip")?;
+            if !device.ips.is_empty() {
+                let mut builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO agent_device_ips (agent_id, device_key, ip) ",
+                );
+                builder.push_values(&device.ips, |mut b, ip| {
+                    b.push_bind(agent_id)
+                        .push_bind(device_key.clone())
+                        .push_bind(ip.to_string());
+                });
+                builder
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .context("failed inserting device ips")?;
             }
 
             sqlx::query!(
@@ -113,16 +121,20 @@ impl Store {
             .await
             .context("failed deleting device hostnames")?;
 
-            for hostname in &device.names {
-                sqlx::query!(
-                    "INSERT INTO agent_device_hostnames (agent_id, device_key, hostname) VALUES (?1, ?2, ?3)",
-                    agent_id,
-                    device_key,
-                    hostname
-                )
-                .execute(&mut *tx)
-                .await
-                .context("failed inserting device hostname")?;
+            if !device.names.is_empty() {
+                let mut builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO agent_device_hostnames (agent_id, device_key, hostname) ",
+                );
+                builder.push_values(&device.names, |mut b, hostname| {
+                    b.push_bind(agent_id)
+                        .push_bind(device_key.clone())
+                        .push_bind(hostname);
+                });
+                builder
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .context("failed inserting device hostnames")?;
             }
 
             sqlx::query!(
@@ -134,18 +146,24 @@ impl Store {
             .await
             .context("failed deleting device facts")?;
 
-            for observation in &device.observations {
-                let fact_json =
-                    serde_json::to_string(observation).context("failed serializing fact")?;
-                sqlx::query!(
-                    "INSERT INTO agent_device_facts (agent_id, device_key, fact_json) VALUES (?1, ?2, ?3)",
-                    agent_id,
-                    device_key,
-                    fact_json
-                )
-                .execute(&mut *tx)
-                .await
-                .context("failed inserting device fact")?;
+            if !device.observations.is_empty() {
+                let mut facts_json = Vec::with_capacity(device.observations.len());
+                for obs in &device.observations {
+                    facts_json.push(serde_json::to_string(obs).context("failed serializing fact")?);
+                }
+                let mut builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO agent_device_facts (agent_id, device_key, fact_json) ",
+                );
+                builder.push_values(facts_json, |mut b, fact| {
+                    b.push_bind(agent_id)
+                        .push_bind(device_key.clone())
+                        .push_bind(fact);
+                });
+                builder
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .context("failed inserting device facts")?;
             }
         }
 
@@ -334,13 +352,25 @@ fn assemble_device_rows(
                 .get(&key)
                 .into_iter()
                 .flatten()
-                .filter_map(|row| macaddr::MacAddr::try_from(*row).ok())
+                .filter_map(|row| match macaddr::MacAddr::try_from(*row) {
+                    Ok(mac) => Some(mac),
+                    Err(e) => {
+                        ::tracing::warn!(error = %e, agent_id = %device.agent_id, device_key = %device.device_key, raw_mac = %row.mac, "failed to parse mac from agent_device_macs row");
+                        None
+                    }
+                })
                 .collect();
             let ips: Vec<std::net::IpAddr> = ip_map
                 .get(&key)
                 .into_iter()
                 .flatten()
-                .filter_map(|row| std::net::IpAddr::try_from(*row).ok())
+                .filter_map(|row| match std::net::IpAddr::try_from(*row) {
+                    Ok(ip) => Some(ip),
+                    Err(e) => {
+                        ::tracing::warn!(error = %e, agent_id = %device.agent_id, device_key = %device.device_key, raw_ip = %row.ip, "failed to parse ip from agent_device_ips row");
+                        None
+                    }
+                })
                 .collect();
             let hostnames = hostname_map.get(&key).cloned().unwrap_or_default();
             let facts = fact_map.get(&key).cloned().unwrap_or_default();

@@ -47,11 +47,12 @@ mod tests {
     use super::helpers::test_helpers::TestStore;
 
     async fn insert_token(store: &Store, token: &str, expires_at_unix: u64) {
-        sqlx::query(
+        let expires = expires_at_unix as i64;
+        sqlx::query!(
             "INSERT OR REPLACE INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)",
+            token,
+            expires
         )
-        .bind(token)
-        .bind(expires_at_unix as i64)
         .execute(&store.pool)
         .await
         .expect("insert should succeed");
@@ -82,12 +83,13 @@ mod tests {
             .expect("gc should succeed");
 
         assert_eq!(removed, 1);
-        let exists =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1")
-                .bind("enr-expired-gc-test")
-                .fetch_one(&ts.store().pool)
-                .await
-                .expect("read should succeed");
+        let exists = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1",
+            "enr-expired-gc-test"
+        )
+        .fetch_one(&ts.store().pool)
+        .await
+        .expect("read should succeed");
         assert_eq!(exists, 0);
     }
 
@@ -103,12 +105,13 @@ mod tests {
             .expect_err("expired token should be rejected");
 
         assert!(err.to_string().contains("expired"));
-        let exists =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1")
-                .bind("enr-expired-enroll-test")
-                .fetch_one(&ts.store().pool)
-                .await
-                .expect("read should succeed");
+        let exists = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1",
+            "enr-expired-enroll-test"
+        )
+        .fetch_one(&ts.store().pool)
+        .await
+        .expect("read should succeed");
         assert_eq!(exists, 0);
     }
 

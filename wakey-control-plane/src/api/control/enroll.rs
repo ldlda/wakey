@@ -5,7 +5,7 @@ use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
-use crate::api::json_error;
+use crate::api::ApiError;
 use crate::runtime::{AppState, SessionEvent};
 use crate::state::AuditEventInput;
 
@@ -70,7 +70,7 @@ pub async fn healthz() -> &'static str {
 pub async fn enroll(
     State(state): State<AppState>,
     Json(req): Json<EnrollRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match state.store.enroll(&req.enroll_token).await {
         Ok(issued) => {
             info!(agent_id = %issued.agent_id, "agent enrollment accepted");
@@ -119,7 +119,7 @@ pub async fn enroll(
             {
                 warn!(error = %audit_err, "failed to append audit event for enroll rejection");
             }
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "enrollment_rejected",
                 &err.to_string(),
@@ -131,7 +131,7 @@ pub async fn enroll(
 pub async fn issue_enroll_token(
     State(state): State<AppState>,
     Query(query): Query<IssueEnrollTokenQuery>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let ttl = std::time::Duration::from_secs(
         query
             .ttl_seconds
@@ -175,7 +175,7 @@ pub async fn issue_enroll_token(
         }
         Err(err) => {
             warn!(error = %err, "failed to issue enroll token");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "issue_enroll_token_failed",
                 &err.to_string(),
@@ -186,7 +186,7 @@ pub async fn issue_enroll_token(
 
 pub async fn list_enroll_tokens(
     State(state): State<AppState>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match state.store.list_enroll_tokens().await {
         Ok(tokens) => {
             if let Err(err) = state
@@ -220,7 +220,7 @@ pub async fn list_enroll_tokens(
         }
         Err(err) => {
             warn!(error = %err, "failed to list enroll tokens");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_enroll_tokens_failed",
                 &err.to_string(),
@@ -232,7 +232,7 @@ pub async fn list_enroll_tokens(
 pub async fn revoke_enroll_token(
     State(state): State<AppState>,
     AxumPath(token): AxumPath<String>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match state.store.revoke_enroll_token(&token).await {
         Ok(revoked) => {
             if let Err(err) = state
@@ -267,7 +267,7 @@ pub async fn revoke_enroll_token(
         }
         Err(err) => {
             warn!(error = %err, "failed to revoke enroll token");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "revoke_enroll_token_failed",
                 &err.to_string(),
@@ -279,7 +279,7 @@ pub async fn revoke_enroll_token(
 pub async fn revoke_agent(
     State(state): State<AppState>,
     AxumPath(agent_id): AxumPath<String>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     match state.store.revoke_agent(&agent_id).await {
         Ok(revoked) => {
             if revoked {
@@ -322,7 +322,7 @@ pub async fn revoke_agent(
         }
         Err(err) => {
             warn!(error = %err, "failed to revoke agent credentials");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "revoke_agent_failed",
                 &err.to_string(),
@@ -335,7 +335,7 @@ pub async fn set_agent_nickname(
     State(state): State<AppState>,
     AxumPath(agent_id): AxumPath<String>,
     Json(req): Json<SetAgentNicknameRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
     let normalized = req
         .nickname
         .as_deref()
@@ -389,7 +389,7 @@ pub async fn set_agent_nickname(
         }
         Err(err) => {
             warn!(error = %err, "failed to update agent nickname");
-            Err(json_error(
+            Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "set_agent_nickname_failed",
                 &err.to_string(),

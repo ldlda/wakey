@@ -17,18 +17,55 @@ pub use control::{
     revoke_agent, revoke_enroll_token, set_agent_nickname, state_stats, wake_fleet_device,
 };
 
-pub fn json_error(
-    status: StatusCode,
-    code: &str,
-    message: &str,
-) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        status,
-        Json(serde_json::json!({
-            "error": {
-                "code": code,
-                "message": message,
-            }
-        })),
-    )
+use axum::response::{IntoResponse, Response};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ApiErrorResponse {
+    pub error: ApiErrorDetail,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ApiErrorDetail {
+    pub code: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
+}
+
+#[derive(Debug)]
+pub struct ApiError {
+    pub status: StatusCode,
+    pub code: String,
+    pub message: String,
+    pub details: Option<serde_json::Value>,
+}
+
+impl ApiError {
+    pub fn new(status: StatusCode, code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code: code.into(),
+            message: message.into(),
+            details: None,
+        }
+    }
+
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let body = Json(ApiErrorResponse {
+            error: ApiErrorDetail {
+                code: self.code,
+                message: self.message,
+                details: self.details,
+            },
+        });
+        (self.status, body).into_response()
+    }
 }

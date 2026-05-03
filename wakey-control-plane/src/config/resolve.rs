@@ -69,7 +69,8 @@ impl DaemonConfig {
         let observation_retention = Duration::from_secs(
             args.observation_retention_seconds
                 .or(file.observation_retention_seconds)
-                .unwrap_or(2_592_000),
+                .unwrap_or(2_592_000)
+                .max(1),
         );
 
         let pid_file_raw = args

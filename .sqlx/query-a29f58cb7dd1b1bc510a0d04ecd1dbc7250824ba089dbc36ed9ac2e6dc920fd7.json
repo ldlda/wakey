@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO agent_devices (agent_id, device_key, presence, display_name, first_seen_unix, last_seen_unix)\n                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)\n                 ON CONFLICT (agent_id, device_key) DO UPDATE SET\n                    presence = excluded.presence,\n                    display_name = excluded.display_name,\n                    last_seen_unix = excluded.last_seen_unix",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "a29f58cb7dd1b1bc510a0d04ecd1dbc7250824ba089dbc36ed9ac2e6dc920fd7"
+}
