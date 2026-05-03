@@ -122,7 +122,7 @@ pub async fn enroll(
             Err(ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "enrollment_rejected",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -178,7 +178,7 @@ pub async fn issue_enroll_token(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "issue_enroll_token_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -223,7 +223,7 @@ pub async fn list_enroll_tokens(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_enroll_tokens_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -270,7 +270,7 @@ pub async fn revoke_enroll_token(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "revoke_enroll_token_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -325,7 +325,7 @@ pub async fn revoke_agent(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "revoke_agent_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -392,7 +392,7 @@ pub async fn set_agent_nickname(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "set_agent_nickname_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }

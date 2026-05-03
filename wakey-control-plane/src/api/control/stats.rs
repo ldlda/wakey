@@ -34,7 +34,7 @@ pub async fn state_stats(State(state): State<AppState>) -> Result<impl IntoRespo
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "state_stats_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }

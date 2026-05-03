@@ -37,7 +37,7 @@ pub async fn list_fleet_devices(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_fleet_devices_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -166,7 +166,7 @@ pub async fn wake_fleet_device(
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "load_fleet_devices_failed",
-            &err.to_string(),
+            err.to_string(),
         )
     })?;
 

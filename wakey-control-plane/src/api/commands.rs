@@ -152,7 +152,7 @@ pub async fn relay_agent_command(
         return Err(ApiError::new(
             StatusCode::BAD_GATEWAY,
             "agent_send_failed",
-            &format!("failed to send command to agent: {err}"),
+            format!("failed to send command to agent: {err}"),
         ));
     }
 

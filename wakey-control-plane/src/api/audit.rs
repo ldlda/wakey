@@ -74,7 +74,7 @@ pub async fn list_audit_events(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_audit_events_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }

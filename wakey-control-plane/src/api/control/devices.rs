@@ -81,7 +81,7 @@ pub async fn create_known_device(
             Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "create_known_device_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -105,7 +105,7 @@ pub async fn list_known_devices(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "list_known_devices_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -128,7 +128,7 @@ pub async fn forget_known_device(
             Err(ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "forget_known_device_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -160,7 +160,7 @@ pub async fn attach_device_identifier(
             Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "attach_device_identifier_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -186,7 +186,7 @@ pub async fn detach_device_identifier(
             Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "detach_device_identifier_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }
@@ -213,7 +213,7 @@ pub async fn merge_known_device(
             Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "merge_known_device_failed",
-                &err.to_string(),
+                err.to_string(),
             ))
         }
     }

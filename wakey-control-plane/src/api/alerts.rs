@@ -84,7 +84,7 @@ pub async fn alert_history(
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "alert_history_failed",
-                &err.to_string(),
+                err.to_string(),
             )
         })?;
 
@@ -185,7 +185,7 @@ async fn evaluate_alerts(
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "alerts_query_failed",
-                &err.to_string(),
+                err.to_string(),
             )
         })?;
 
@@ -204,7 +204,7 @@ async fn evaluate_alerts(
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "alerts_query_failed",
-                &err.to_string(),
+                err.to_string(),
             )
         })?;
 
@@ -223,7 +223,7 @@ async fn evaluate_alerts(
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "alerts_query_failed",
-                &err.to_string(),
+                err.to_string(),
             )
         })?;
 
