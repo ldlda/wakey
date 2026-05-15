@@ -5,7 +5,10 @@ mod neighbor;
 mod query;
 mod wake;
 
-pub use device::{Device, DeviceId, DeviceInventory, DeviceObservationFact, Presence};
+pub use device::{
+    AgentEndpointKey, Device, DeviceEndpoint, DeviceId, DeviceInventory, DeviceObservationFact,
+    EndpointKey, EndpointSource, Presence,
+};
 #[allow(deprecated)]
 pub use dhcp::LeaseQuery;
 pub use dhcp::{DhcpLease, DhcpLeaseWithState};

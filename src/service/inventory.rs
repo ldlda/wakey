@@ -181,7 +181,7 @@ const fn presence_rank(presence: Presence) -> u8 {
 mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
-    use wakey_core::{DeviceId, DhcpLease, InventoryQueryBuilder, NeighborState};
+    use wakey_core::{DeviceId, DhcpLease, EndpointSource, InventoryQueryBuilder, NeighborState};
 
     fn sample_neighbors() -> Vec<NeighborEntry> {
         vec![NeighborEntry {
@@ -279,11 +279,14 @@ mod tests {
             Some(DeviceId::Mac("aa:bb:cc:dd:ee:ff".parse().expect("mac")))
         );
         assert_eq!(out[0].observations.len(), 1);
+        assert_eq!(out[0].endpoints.len(), 1);
+        assert_eq!(out[0].endpoints[0].key.source, EndpointSource::HookDhcp);
+        assert!(out[0].ips.is_empty());
         assert_eq!(out[0].presence, Presence::Unknown);
     }
 
     #[test]
-    fn merge_devices_marks_remove_only_observation_offline() {
+    fn merge_devices_marks_neigh_remove_observation_offline() {
         let query = InventoryQueryBuilder::new().build();
         let out = merge_devices_with_observations(
             Vec::new(),
@@ -302,5 +305,56 @@ mod tests {
 
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].presence, Presence::Offline);
+        assert_eq!(out[0].endpoints[0].key.source, EndpointSource::HookNeighbor);
+        assert!(out[0].ips.is_empty());
+    }
+
+    #[test]
+    fn merge_devices_keeps_dhcp_remove_observation_unknown() {
+        let query = InventoryQueryBuilder::new().build();
+        let out = merge_devices_with_observations(
+            Vec::new(),
+            Vec::new(),
+            vec![DeviceObservationFact {
+                kind: "dhcp".into(),
+                action: "remove".into(),
+                mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
+                ip: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 30))),
+                hostname: None,
+                first_seen_unix: Some(10),
+                last_seen_unix: Some(20),
+            }],
+            &query,
+        );
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].presence, Presence::Unknown);
+        assert_eq!(out[0].endpoints[0].key.source, EndpointSource::HookDhcp);
+        assert!(out[0].ips.is_empty());
+    }
+
+    #[test]
+    fn merge_devices_uses_ip_id_for_ip_only_hook_endpoint_without_summary_ip() {
+        let query = InventoryQueryBuilder::new().build();
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 31));
+        let out = merge_devices_with_observations(
+            Vec::new(),
+            Vec::new(),
+            vec![DeviceObservationFact {
+                kind: "neigh".into(),
+                action: "remove".into(),
+                mac: None,
+                ip: Some(ip),
+                hostname: None,
+                first_seen_unix: Some(10),
+                last_seen_unix: Some(20),
+            }],
+            &query,
+        );
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, Some(DeviceId::Ip(ip)));
+        assert!(out[0].ips.is_empty());
+        assert_eq!(out[0].endpoints.len(), 1);
     }
 }

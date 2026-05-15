@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use wakey_core::{Device, DeviceId};
+use wakey_core::{Device, DeviceEndpoint, DeviceId, EndpointSource};
 
 use super::Store;
 use super::helpers::core::*;
@@ -106,6 +106,48 @@ impl Store {
                     .execute(&mut *tx)
                     .await
                     .context("failed inserting device ips")?;
+            }
+
+            sqlx::query(
+                "DELETE FROM agent_device_endpoints WHERE agent_id = ?1 AND device_key = ?2",
+            )
+            .bind(agent_id)
+            .bind(&device_key)
+            .execute(&mut *tx)
+            .await
+            .context("failed deleting device endpoints")?;
+
+            let endpoints = endpoints_for_storage(device);
+            if !endpoints.is_empty() {
+                let mut builder = sqlx::QueryBuilder::new(
+                    "INSERT INTO agent_device_endpoints \
+                     (agent_id, device_key, endpoint_key, source, mac, ip, hostname, interface, presence, first_seen_unix, last_seen_unix) ",
+                );
+                builder.push_values(endpoints, |mut b, endpoint| {
+                    let first_seen = endpoint.first_seen_unix.unwrap_or(snapshot_time);
+                    let last_seen = endpoint.last_seen_unix.unwrap_or(snapshot_time);
+                    b.push_bind(agent_id)
+                        .push_bind(device_key.clone())
+                        .push_bind(endpoint_storage_key(&endpoint))
+                        .push_bind(endpoint_source_to_str(endpoint.key.source))
+                        .push_bind(
+                            endpoint
+                                .key
+                                .mac
+                                .map(|mac| mac.to_string().to_ascii_lowercase()),
+                        )
+                        .push_bind(endpoint.key.ip.map(|ip| ip.to_string()))
+                        .push_bind(endpoint.hostname.clone())
+                        .push_bind(endpoint.interface.clone())
+                        .push_bind(presence_to_str(endpoint.presence))
+                        .push_bind(i64::try_from(first_seen).unwrap_or(i64::MAX))
+                        .push_bind(i64::try_from(last_seen).unwrap_or(i64::MAX));
+                });
+                builder
+                    .build()
+                    .execute(&mut *tx)
+                    .await
+                    .context("failed inserting device endpoints")?;
             }
 
             sqlx::query!(
@@ -223,6 +265,15 @@ impl Store {
         .await
         .context("failed listing agent device hostnames")?;
 
+        let endpoints = sqlx::query_as::<_, AgentDeviceEndpointRow>(
+            r#"SELECT agent_id, device_key, endpoint_key, source, mac, ip,
+                    hostname, interface, presence, first_seen_unix, last_seen_unix
+             FROM agent_device_endpoints"#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed listing agent device endpoints")?;
+
         let facts = sqlx::query_as!(
             AgentDeviceFactRow,
             r#"SELECT agent_id as "agent_id!", device_key as "device_key!", fact_json as "fact_json!"
@@ -232,7 +283,9 @@ impl Store {
         .await
         .context("failed listing agent device facts")?;
 
-        Ok(assemble_device_rows(devices, macs, ips, hostnames, facts))
+        Ok(assemble_device_rows(
+            devices, macs, ips, hostnames, endpoints, facts,
+        ))
     }
 
     /// List agent device rows for a single agent.
@@ -287,6 +340,17 @@ impl Store {
         .await
         .context("failed listing agent device hostnames for agent")?;
 
+        let endpoints = sqlx::query_as::<_, AgentDeviceEndpointRow>(
+            r#"SELECT agent_id, device_key, endpoint_key, source, mac, ip,
+                    hostname, interface, presence, first_seen_unix, last_seen_unix
+             FROM agent_device_endpoints
+             WHERE agent_id = ?1"#,
+        )
+        .bind(agent_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed listing agent device endpoints for agent")?;
+
         let facts = sqlx::query_as!(
             AgentDeviceFactRow,
             r#"SELECT agent_id as "agent_id!", device_key as "device_key!", fact_json as "fact_json!"
@@ -298,7 +362,9 @@ impl Store {
         .await
         .context("failed listing agent device facts for agent")?;
 
-        Ok(assemble_device_rows(devices, macs, ips, hostnames, facts))
+        Ok(assemble_device_rows(
+            devices, macs, ips, hostnames, endpoints, facts,
+        ))
     }
 }
 
@@ -307,6 +373,7 @@ fn assemble_device_rows(
     macs: Vec<AgentDeviceMacRow>,
     ips: Vec<AgentDeviceIpRow>,
     hostnames: Vec<AgentDeviceHostnameRow>,
+    endpoints: Vec<AgentDeviceEndpointRow>,
     facts: Vec<AgentDeviceFactRow>,
 ) -> Vec<AgentDeviceWithChildren> {
     use std::collections::BTreeMap;
@@ -331,6 +398,15 @@ fn assemble_device_rows(
             .entry((row.agent_id.as_str(), row.device_key.as_str()))
             .or_default()
             .push(row.hostname.clone());
+    }
+    let mut endpoint_map: BTreeMap<(&str, &str), Vec<DeviceEndpoint>> = BTreeMap::new();
+    for row in &endpoints {
+        if let Some(endpoint) = row.to_endpoint() {
+            endpoint_map
+                .entry((row.agent_id.as_str(), row.device_key.as_str()))
+                .or_default()
+                .push(endpoint);
+        }
     }
     let mut fact_map: BTreeMap<(&str, &str), Vec<String>> = BTreeMap::new();
     for row in &facts {
@@ -369,11 +445,13 @@ fn assemble_device_rows(
                 })
                 .collect();
             let hostnames = hostname_map.get(&key).cloned().unwrap_or_default();
+            let endpoints = endpoint_map.get(&key).cloned().unwrap_or_default();
             let facts = fact_map.get(&key).cloned().unwrap_or_default();
             AgentDeviceWithChildren {
                 macs,
                 ips,
                 hostnames,
+                endpoints,
                 facts,
                 device,
             }
@@ -397,6 +475,65 @@ fn presence_to_str(presence: wakey_core::Presence) -> &'static str {
     }
 }
 
+fn endpoint_source_to_str(source: EndpointSource) -> &'static str {
+    match source {
+        EndpointSource::Neighbor => "neighbor",
+        EndpointSource::DhcpLease => "dhcp_lease",
+        EndpointSource::HookNeighbor => "hook_neighbor",
+        EndpointSource::HookDhcp => "hook_dhcp",
+    }
+}
+
+fn endpoint_storage_key(endpoint: &DeviceEndpoint) -> String {
+    format!(
+        "{}|{}|{}",
+        endpoint_source_to_str(endpoint.key.source),
+        endpoint
+            .key
+            .mac
+            .map(|mac| mac.to_string().to_ascii_lowercase())
+            .unwrap_or_default(),
+        endpoint.key.ip.map(|ip| ip.to_string()).unwrap_or_default()
+    )
+}
+
+fn endpoints_for_storage(device: &Device) -> Vec<DeviceEndpoint> {
+    if !device.endpoints.is_empty() {
+        return device.endpoints.clone();
+    }
+
+    let mut endpoints = Vec::new();
+    for neighbor in &device.neighbors {
+        endpoints.push(DeviceEndpoint {
+            key: wakey_core::EndpointKey {
+                source: EndpointSource::Neighbor,
+                mac: neighbor.mac,
+                ip: Some(neighbor.ip),
+            },
+            hostname: None,
+            interface: neighbor.dev.clone(),
+            presence: wakey_core::Presence::from(neighbor.state),
+            first_seen_unix: None,
+            last_seen_unix: None,
+        });
+    }
+    for lease in &device.leases {
+        endpoints.push(DeviceEndpoint {
+            key: wakey_core::EndpointKey {
+                source: EndpointSource::DhcpLease,
+                mac: Some(lease.mac),
+                ip: Some(lease.ip),
+            },
+            hostname: lease.name.clone(),
+            interface: None,
+            presence: wakey_core::Presence::Unknown,
+            first_seen_unix: None,
+            last_seen_unix: None,
+        });
+    }
+    endpoints
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::helpers::test_helpers::TestStore;
@@ -412,6 +549,7 @@ mod tests {
             ips: vec![ip.parse().expect("ip")],
             macs: vec![mac.parse().expect("mac")],
             interfaces: vec!["br-lan".to_string()],
+            endpoints: vec![],
             neighbors: vec![NeighborEntry {
                 ip: ip.parse().expect("ip"),
                 dev: Some("br-lan".to_string()),
@@ -457,6 +595,15 @@ mod tests {
             vec!["192.168.1.10".parse::<std::net::IpAddr>().unwrap()]
         );
         assert_eq!(rows[0].hostnames, vec!["first-pc"]);
+        assert_eq!(rows[0].endpoints.len(), 1);
+        assert_eq!(
+            rows[0].endpoints[0].key.source,
+            wakey_core::EndpointSource::Neighbor
+        );
+        assert_eq!(
+            rows[0].endpoints[0].key.ip,
+            Some("192.168.1.10".parse().expect("ip"))
+        );
     }
 
     #[tokio::test]
@@ -582,6 +729,7 @@ mod tests {
             ips: vec![],
             macs: vec![],
             interfaces: vec![],
+            endpoints: vec![],
             neighbors: vec![],
             leases: vec![],
             observations: vec![],
@@ -612,6 +760,7 @@ mod tests {
             ips: vec!["192.168.1.10".parse().expect("ip")],
             macs: vec!["aa:bb:cc:dd:ee:01".parse().expect("mac")],
             interfaces: vec![],
+            endpoints: vec![],
             neighbors: vec![],
             leases: vec![],
             observations: vec![DeviceObservationFact {

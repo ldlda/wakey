@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
-use wakey_core::Presence;
+use wakey_core::{DeviceEndpoint, EndpointKey, EndpointSource, Presence};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssuedAgent {
@@ -134,6 +134,66 @@ pub struct AgentDeviceHostnameRow {
     pub hostname: String,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AgentDeviceEndpointRow {
+    pub agent_id: String,
+    pub device_key: String,
+    pub endpoint_key: String,
+    pub source: String,
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+    pub hostname: Option<String>,
+    pub interface: Option<String>,
+    pub presence: String,
+    pub first_seen_unix: i64,
+    pub last_seen_unix: i64,
+}
+
+impl AgentDeviceEndpointRow {
+    pub fn to_endpoint(&self) -> Option<DeviceEndpoint> {
+        let source = endpoint_source_from_str(&self.source)?;
+        let mac = match self.mac.as_deref() {
+            Some(raw) => match raw.parse() {
+                Ok(mac) => Some(mac),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        endpoint_key = %self.endpoint_key,
+                        raw_mac = raw,
+                        "failed to parse endpoint mac"
+                    );
+                    return None;
+                }
+            },
+            None => None,
+        };
+        let ip = match self.ip.as_deref() {
+            Some(raw) => match raw.parse() {
+                Ok(ip) => Some(ip),
+                Err(err) => {
+                    tracing::warn!(
+                        error = %err,
+                        endpoint_key = %self.endpoint_key,
+                        raw_ip = raw,
+                        "failed to parse endpoint ip"
+                    );
+                    return None;
+                }
+            },
+            None => None,
+        };
+        let key = EndpointKey::new(source, mac, ip)?;
+        Some(DeviceEndpoint {
+            key,
+            hostname: self.hostname.clone(),
+            interface: self.interface.clone(),
+            presence: Presence::from(self.presence.as_str()),
+            first_seen_unix: Some(self.first_seen_unix.max(0) as u64),
+            last_seen_unix: Some(self.last_seen_unix.max(0) as u64),
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentDeviceFactRow {
     pub agent_id: String,
@@ -147,8 +207,22 @@ pub struct AgentDeviceWithChildren {
     pub macs: Vec<macaddr::MacAddr>,
     pub ips: Vec<std::net::IpAddr>,
     pub hostnames: Vec<String>,
+    pub endpoints: Vec<DeviceEndpoint>,
     #[allow(dead_code)]
     pub facts: Vec<String>,
+}
+
+fn endpoint_source_from_str(raw: &str) -> Option<EndpointSource> {
+    match raw {
+        "neighbor" => Some(EndpointSource::Neighbor),
+        "dhcp_lease" => Some(EndpointSource::DhcpLease),
+        "hook_neighbor" => Some(EndpointSource::HookNeighbor),
+        "hook_dhcp" => Some(EndpointSource::HookDhcp),
+        _ => {
+            tracing::warn!(source = raw, "unknown endpoint source");
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -68,6 +68,7 @@ pub struct FleetDevice {
     pub hostnames: Vec<String>,
     pub agents: Vec<FleetDeviceAgent>,
     pub sources: Vec<String>,
+    pub endpoints: Vec<FleetDeviceEndpoint>,
     pub first_seen_unix: Option<u64>,
     pub last_seen_unix: Option<u64>,
     pub presence: Presence,
@@ -84,6 +85,22 @@ pub struct FleetDeviceAgent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetDeviceEndpoint {
+    pub agent_id: String,
+    pub nickname: Option<String>,
+    pub connected: bool,
+    pub source: String,
+    #[serde(with = "mac::option_mac")]
+    pub mac: Option<MacAddr>,
+    pub ip: Option<IpAddr>,
+    pub hostname: Option<String>,
+    pub interface: Option<String>,
+    pub presence: Presence,
+    pub first_seen_unix: Option<u64>,
+    pub last_seen_unix: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FleetWakeRoute {
     pub route_id: String,
     pub agent_id: String,
@@ -93,7 +110,9 @@ pub struct FleetWakeRoute {
     pub mac: Option<MacAddr>,
     pub ip: Option<IpAddr>,
     pub hostname: Option<String>,
+    pub interface: Option<String>,
     pub source: String,
+    pub presence: Presence,
     pub last_seen_unix: u64,
     pub wakeable: bool,
 }

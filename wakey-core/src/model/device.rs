@@ -71,6 +71,75 @@ pub enum DeviceId {
     Ip(IpAddr),
 }
 
+/// Typed origin of an endpoint.
+///
+/// Raw source strings stay on `DeviceObservationFact` for debugging. Endpoint
+/// source is the domain value used for summaries and wake-route ranking.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointSource {
+    Neighbor,
+    DhcpLease,
+    HookNeighbor,
+    HookDhcp,
+}
+
+impl EndpointSource {
+    /// Whether this source contributes an IP to the device summary.
+    pub const fn summary_ip_eligible(self) -> bool {
+        matches!(self, Self::Neighbor | Self::DhcpLease)
+    }
+
+    /// Source quality used after reachability and recency when ranking routes.
+    pub const fn quality_rank(self) -> u8 {
+        match self {
+            Self::Neighbor => 4,
+            Self::DhcpLease => 3,
+            Self::HookNeighbor => 2,
+            Self::HookDhcp => 1,
+        }
+    }
+}
+
+/// Source-scoped identity for one observed network contact point.
+#[skip_serializing_none]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
+pub struct EndpointKey {
+    pub source: EndpointSource,
+    #[serde(with = "mac::option_mac", default)]
+    pub mac: Option<MacAddr>,
+    pub ip: Option<IpAddr>,
+}
+
+impl EndpointKey {
+    pub fn new(source: EndpointSource, mac: Option<MacAddr>, ip: Option<IpAddr>) -> Option<Self> {
+        if mac.is_none() && ip.is_none() {
+            return None;
+        }
+        Some(Self { source, mac, ip })
+    }
+}
+
+/// Agent-scoped endpoint key used by control-plane storage and APIs.
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
+pub struct AgentEndpointKey {
+    pub agent_id: String,
+    #[serde(flatten)]
+    pub endpoint: EndpointKey,
+}
+
+/// One interpreted network contact point for a device aggregate.
+#[skip_serializing_none]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
+pub struct DeviceEndpoint {
+    pub key: EndpointKey,
+    pub hostname: Option<String>,
+    pub interface: Option<String>,
+    pub presence: Presence,
+    pub first_seen_unix: Option<u64>,
+    pub last_seen_unix: Option<u64>,
+}
+
 /// One raw source fact used while building a device aggregate.
 ///
 /// These are intentionally source-shaped and non-durable. They preserve details
@@ -102,6 +171,8 @@ pub struct Device {
     #[serde(with = "mac::vec_mac")]
     pub macs: Vec<MacAddr>,
     pub interfaces: Vec<String>,
+    #[serde(default)]
+    pub endpoints: Vec<DeviceEndpoint>,
     pub neighbors: Vec<NeighborEntry>,
     pub leases: Vec<DhcpLease>,
     pub observations: Vec<DeviceObservationFact>,
@@ -126,6 +197,7 @@ impl Device {
         let mut ips = BTreeSet::new();
         let mut macs = BTreeSet::new();
         let mut interfaces = BTreeSet::new();
+        let mut endpoints = Vec::new();
         let mut presence = Presence::Unknown;
 
         for lease in &leases {
@@ -134,6 +206,18 @@ impl Device {
             if let Some(name) = lease.name.as_deref() {
                 names.insert(name);
             }
+            endpoints.push(DeviceEndpoint {
+                key: EndpointKey {
+                    source: EndpointSource::DhcpLease,
+                    mac: Some(lease.mac),
+                    ip: Some(lease.ip),
+                },
+                hostname: lease.name.clone(),
+                interface: None,
+                presence: Presence::Unknown,
+                first_seen_unix: None,
+                last_seen_unix: None,
+            });
         }
         for neighbor in &neighbors {
             ips.insert(neighbor.ip);
@@ -143,47 +227,61 @@ impl Device {
             if let Some(dev) = neighbor.dev.as_deref() {
                 interfaces.insert(dev);
             }
-            presence = std::cmp::max(presence, Presence::from(neighbor.state));
+            let endpoint_presence = Presence::from(neighbor.state);
+            endpoints.push(DeviceEndpoint {
+                key: EndpointKey {
+                    source: EndpointSource::Neighbor,
+                    mac: neighbor.mac,
+                    ip: Some(neighbor.ip),
+                },
+                hostname: None,
+                interface: neighbor.dev.clone(),
+                presence: endpoint_presence,
+                first_seen_unix: None,
+                last_seen_unix: None,
+            });
+            presence = std::cmp::max(presence, endpoint_presence);
         }
 
-        let mut observed_non_remove = false;
         for observation in &observations {
             if let Some(name) = observation.hostname.as_deref() {
                 names.insert(name);
             }
-            if let Some(ip) = observation.ip {
-                ips.insert(ip); // is adding removed IPs right? Or should we have a separate map of presence -> IP sets?
-            }
             if let Some(mac) = observation.mac {
                 macs.insert(mac);
             }
-            if observation.action != "remove" {
-                observed_non_remove = true;
+            if let Some(source) = observation_endpoint_source(observation)
+                && let Some(key) = EndpointKey::new(source, observation.mac, observation.ip)
+            {
+                let endpoint_presence = observation_presence(observation);
+                endpoints.push(DeviceEndpoint {
+                    key,
+                    hostname: observation.hostname.clone(),
+                    interface: None,
+                    presence: endpoint_presence,
+                    first_seen_unix: observation.first_seen_unix,
+                    last_seen_unix: observation.last_seen_unix,
+                });
+                presence = std::cmp::max(presence, endpoint_presence);
             }
-            presence = std::cmp::max(presence, observation_presence(observation));
-        }
-
-        if neighbors.is_empty()
-            && leases.is_empty()
-            && !observed_non_remove
-            && !observations.is_empty()
-        {
-            presence = Presence::Offline;
         }
 
         let macs: Vec<MacAddr> = macs.into_iter().collect();
         let ips: Vec<IpAddr> = ips.into_iter().collect();
-        let id = macs
-            .first()
-            .copied()
-            .map(DeviceId::Mac)
-            .or_else(|| ips.first().copied().map(DeviceId::Ip));
+        let id = macs.first().copied().map(DeviceId::Mac).or_else(|| {
+            endpoints
+                .iter()
+                .filter_map(|endpoint| endpoint.key.ip)
+                .min()
+                .map(DeviceId::Ip)
+        });
         Self {
             id,
             names: names.into_iter().map(|n| n.to_owned()).collect(),
             ips,
             macs,
             interfaces: interfaces.into_iter().map(|d| d.to_owned()).collect(),
+            endpoints,
             neighbors,
             leases,
             observations,
@@ -194,10 +292,17 @@ impl Device {
 
 fn observation_presence(observation: &DeviceObservationFact) -> Presence {
     match (observation.kind.as_str(), observation.action.as_str()) {
-        (_, "remove") => Presence::Offline,
+        ("neigh", "remove") => Presence::Offline,
         ("neigh", "add" | "update" | "old") => Presence::LikelyOnline,
         _ => Presence::Unknown,
-        // dhcp events does not say anything about offline status, but this may shadow neighbor entries. This may be undesirable.
+    }
+}
+
+fn observation_endpoint_source(observation: &DeviceObservationFact) -> Option<EndpointSource> {
+    match observation.kind.as_str() {
+        "neigh" => Some(EndpointSource::HookNeighbor),
+        "dhcp" => Some(EndpointSource::HookDhcp),
+        _ => None,
     }
 }
 

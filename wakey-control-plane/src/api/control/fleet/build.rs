@@ -6,7 +6,9 @@ use wakey_core::Presence;
 
 use crate::state::{AgentDeviceWithChildren, DeviceIdentifier, KnownDevice, KnownDeviceSummary};
 
-use super::types::{FleetDevice, FleetDeviceAgent, FleetWakeRoute, ListFleetDevicesQuery};
+use super::types::{
+    FleetDevice, FleetDeviceAgent, FleetDeviceEndpoint, FleetWakeRoute, ListFleetDevicesQuery,
+};
 
 #[derive(Debug, Default)]
 pub(crate) struct FleetBuildContext {
@@ -31,6 +33,7 @@ struct FleetAccumulator {
     hostnames: BTreeSet<String>,
     sources: BTreeSet<String>,
     agents: BTreeMap<String, FleetDeviceAgent>,
+    endpoints: Vec<FleetDeviceEndpoint>,
     first_seen_unix: Option<u64>,
     last_seen_unix: Option<u64>,
     presence: Presence,
@@ -49,6 +52,7 @@ impl Default for FleetAccumulator {
             hostnames: BTreeSet::new(),
             sources: BTreeSet::new(),
             agents: BTreeMap::new(),
+            endpoints: Vec::new(),
             first_seen_unix: None,
             last_seen_unix: None,
             presence: Presence::Offline,
@@ -213,7 +217,6 @@ fn add_agent_device_to_entry(
         }
         entry.hostnames.insert(hostname.clone());
     }
-    entry.sources.insert("device".to_string());
     let first_seen = agent_device.device.first_seen();
     let last_seen = agent_device.device.last_seen();
     entry.first_seen_unix = Some(
@@ -255,30 +258,83 @@ fn add_agent_device_to_entry(
             last_seen_unix: last_seen,
         });
 
-    for mac in &agent_device.macs {
-        let ip_for_mac = agent_device.ips.first().copied();
-        let hostname_for_mac = agent_device.hostnames.first().cloned();
-        let rid = route_id(&agent_id, Some(mac), ip_for_mac.as_ref(), "device");
-        let wakeable = status.connected && !device_offline;
+    if agent_device.endpoints.is_empty() {
+        entry.sources.insert("device".to_string());
+    }
+
+    for endpoint in &agent_device.endpoints {
+        let source = endpoint_source_label(endpoint.key.source).to_string();
+        entry.sources.insert(source.clone());
+        let endpoint_last_seen = endpoint.last_seen_unix.unwrap_or(last_seen);
+        let endpoint_first_seen = endpoint.first_seen_unix.or(Some(first_seen));
+        entry.endpoints.push(FleetDeviceEndpoint {
+            agent_id: agent_id.clone(),
+            nickname: status.nickname.clone(),
+            connected: status.connected,
+            source: source.clone(),
+            mac: endpoint.key.mac,
+            ip: endpoint.key.ip,
+            hostname: endpoint.hostname.clone(),
+            interface: endpoint.interface.clone(),
+            presence: endpoint.presence,
+            first_seen_unix: endpoint_first_seen,
+            last_seen_unix: Some(endpoint_last_seen),
+        });
+
+        let rid = route_id(
+            &agent_id,
+            endpoint.key.mac.as_ref(),
+            endpoint.key.ip.as_ref(),
+            &source,
+        );
+        let wakeable = status.connected && endpoint.key.mac.is_some();
         entry.routes.insert(
-            // one per mac... when is one per mac/ip pair? this a regression.
             rid.clone(),
             FleetWakeRoute {
                 route_id: rid,
                 agent_id: agent_id.clone(),
                 nickname: status.nickname.clone(),
                 connected: status.connected,
-                mac: Some(*mac),
-                ip: ip_for_mac,
-                hostname: hostname_for_mac,
-                source: "device".to_string(),
-                last_seen_unix: last_seen,
+                mac: endpoint.key.mac,
+                ip: endpoint.key.ip,
+                hostname: endpoint.hostname.clone(),
+                interface: endpoint.interface.clone(),
+                source,
+                presence: endpoint.presence,
+                last_seen_unix: endpoint_last_seen,
                 wakeable,
             },
         );
     }
 
-    if agent_device.macs.is_empty()
+    if agent_device.endpoints.is_empty() && !agent_device.macs.is_empty() {
+        for mac in &agent_device.macs {
+            let ip_for_mac = agent_device.ips.first().copied();
+            let hostname_for_mac = agent_device.hostnames.first().cloned();
+            let rid = route_id(&agent_id, Some(mac), ip_for_mac.as_ref(), "device");
+            let wakeable = status.connected;
+            entry.routes.insert(
+                rid.clone(),
+                FleetWakeRoute {
+                    route_id: rid,
+                    agent_id: agent_id.clone(),
+                    nickname: status.nickname.clone(),
+                    connected: status.connected,
+                    mac: Some(*mac),
+                    ip: ip_for_mac,
+                    hostname: hostname_for_mac,
+                    interface: None,
+                    source: "device".to_string(),
+                    presence: device_presence,
+                    last_seen_unix: last_seen,
+                    wakeable,
+                },
+            );
+        }
+    }
+
+    if agent_device.endpoints.is_empty()
+        && agent_device.macs.is_empty()
         && let Some(ip) = agent_device.ips.first()
     {
         let hostname = agent_device.hostnames.first().cloned();
@@ -293,7 +349,9 @@ fn add_agent_device_to_entry(
                 mac: None,
                 ip: Some(*ip),
                 hostname,
+                interface: None,
                 source: "device".to_string(),
+                presence: device_presence,
                 last_seen_unix: last_seen,
                 wakeable: false,
             },
@@ -350,7 +408,10 @@ impl FleetAccumulator {
             b.connected
                 .cmp(&a.connected)
                 .then_with(|| b.wakeable.cmp(&a.wakeable))
+                .then_with(|| b.ip.is_some().cmp(&a.ip.is_some()))
+                .then_with(|| b.presence.cmp(&a.presence))
                 .then_with(|| b.last_seen_unix.cmp(&a.last_seen_unix))
+                .then_with(|| source_quality_rank(&b.source).cmp(&source_quality_rank(&a.source)))
                 .then_with(|| a.agent_id.cmp(&b.agent_id))
         });
         let recommended_route = route_candidates
@@ -374,12 +435,32 @@ impl FleetAccumulator {
             hostnames: self.hostnames.into_iter().collect(),
             agents: self.agents.into_values().collect(),
             sources: self.sources.into_iter().collect(),
+            endpoints: self.endpoints,
             first_seen_unix: self.first_seen_unix,
             last_seen_unix: self.last_seen_unix,
             presence: self.presence,
             route_candidates,
             recommended_route,
         }
+    }
+}
+
+fn endpoint_source_label(source: wakey_core::EndpointSource) -> &'static str {
+    match source {
+        wakey_core::EndpointSource::Neighbor => "neighbor",
+        wakey_core::EndpointSource::DhcpLease => "dhcp_lease",
+        wakey_core::EndpointSource::HookNeighbor => "hook_neighbor",
+        wakey_core::EndpointSource::HookDhcp => "hook_dhcp",
+    }
+}
+
+fn source_quality_rank(source: &str) -> u8 {
+    match source {
+        "neighbor" => 4,
+        "dhcp_lease" => 3,
+        "hook_neighbor" => 2,
+        "hook_dhcp" => 1,
+        _ => 0,
     }
 }
 

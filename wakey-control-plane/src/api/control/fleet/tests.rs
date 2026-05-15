@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 
 use macaddr::MacAddr;
-use wakey_core::Presence;
+use wakey_core::{DeviceEndpoint, EndpointKey, EndpointSource, Presence};
 
 use super::build::{
     AgentRuntimeStatus, FleetBuildContext, build_fleet_devices, filter_fleet_devices,
@@ -54,6 +54,7 @@ fn agent_device(
             .into_iter()
             .collect(),
         hostnames: vec!["lda".to_string()],
+        endpoints: vec![],
         facts: vec![],
     }
 }
@@ -83,6 +84,7 @@ fn offline_agent_device(
             .into_iter()
             .collect(),
         hostnames: vec!["lda".to_string()],
+        endpoints: vec![],
         facts: vec![],
     }
 }
@@ -105,7 +107,29 @@ fn offline_ip_only_unknown(
         macs: vec![],
         ips: vec![ip.parse().unwrap()],
         hostnames: vec![],
+        endpoints: vec![],
         facts: vec![],
+    }
+}
+
+fn endpoint(
+    source: EndpointSource,
+    mac: Option<&str>,
+    ip: Option<&str>,
+    last_seen_unix: u64,
+) -> DeviceEndpoint {
+    DeviceEndpoint {
+        key: EndpointKey::new(
+            source,
+            mac.map(|m| m.parse::<MacAddr>().unwrap()),
+            ip.map(|i| i.parse::<IpAddr>().unwrap()),
+        )
+        .expect("endpoint key"),
+        hostname: Some("lda".into()),
+        interface: Some("br-lan".into()),
+        presence: Presence::LikelyOnline,
+        first_seen_unix: Some(1),
+        last_seen_unix: Some(last_seen_unix),
     }
 }
 
@@ -142,6 +166,40 @@ fn fleet_grouping_combines_same_mac_across_agents() {
             .as_ref()
             .map(|route| route.agent_id.as_str()),
         Some("agent-b")
+    );
+}
+
+#[test]
+fn fleet_routes_use_endpoint_mac_ip_pairs() {
+    let mac = "aa:bb:cc:dd:ee:ff";
+    let mut row = agent_device(
+        "agent-a",
+        "mac:aa:bb:cc:dd:ee:ff",
+        Some(mac),
+        Some("192.168.1.2"),
+        20,
+    );
+    row.endpoints = vec![
+        endpoint(
+            EndpointSource::HookNeighbor,
+            Some(mac),
+            Some("192.168.1.2"),
+            10,
+        ),
+        endpoint(EndpointSource::Neighbor, Some(mac), Some("192.168.1.3"), 20),
+    ];
+
+    let devices = build_fleet_devices(Vec::new(), vec![row], &context(&["agent-a"]));
+
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].endpoints.len(), 2);
+    assert_eq!(devices[0].route_candidates.len(), 2);
+    assert_eq!(
+        devices[0]
+            .recommended_route
+            .as_ref()
+            .and_then(|route| route.ip),
+        Some("192.168.1.3".parse().unwrap())
     );
 }
 
@@ -242,7 +300,7 @@ fn offline_device_has_offline_presence() {
     assert_eq!(devices.len(), 1);
     assert!(devices[0].ips.is_empty());
     assert_eq!(devices[0].presence, Presence::Offline);
-    assert!(devices[0].recommended_route.is_none());
+    assert!(devices[0].recommended_route.is_some());
 }
 
 #[test]
