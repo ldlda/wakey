@@ -51,9 +51,10 @@ type Props = {
   selectedAgentId: string;
   onSelectAgent: (agentId: string) => void;
   onAfterWake?: () => Promise<void>;
+  onRefresh?: () => Promise<void>;
 };
 
-export function DevicesPage({ agents, onAfterWake }: Props) {
+export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
   const [devices, setDevices] = useState<FleetDevice[]>([]);
   const [knownDevices, setKnownDevices] = useState<KnownDevice[]>([]);
   const [query, setQuery] = useState("");
@@ -137,8 +138,7 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
     } catch {
       const area = document.createElement("textarea");
       area.value = text;
-      area.style.position = "fixed";
-      area.style.opacity = "0";
+      area.style.cssText = "position:fixed;opacity:0";
       document.body.appendChild(area);
       area.select();
       document.execCommand("copy");
@@ -201,7 +201,10 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => void loadFleet()}
+                onClick={() => {
+                  void loadFleet();
+                  if (onRefresh) void onRefresh();
+                }}
                 disabled={loading}
               >
                 <RefreshCw className="size-4" aria-hidden />
@@ -222,11 +225,12 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-2 lg:grid-cols-[minmax(16rem,1fr)_11rem_10rem_14rem_10rem]">
-            <label className="grid gap-1 text-sm text-muted-foreground">
+            <label htmlFor="fleet-search" className="grid gap-1 text-sm text-muted-foreground">
               <span>Search</span>
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 size-4 text-muted-foreground" />
                 <Input
+                  id="fleet-search"
                   className="pl-8"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
@@ -246,7 +250,7 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
               values={knownFilters}
               onChange={(value) => setKnown(value as KnownFilter)}
             />
-            <label className="grid gap-1 text-sm text-muted-foreground">
+            <label htmlFor="fleet-agent" className="grid gap-1 text-sm text-muted-foreground">
               <span>Agent</span>
               <Select
                 value={agentId}
@@ -334,6 +338,7 @@ export function DevicesPage({ agents, onAfterWake }: Props) {
       </Card>
 
       <FleetDeviceDetailsDialog
+        key={details?.device_key ?? "__none"}
         device={details}
         knownDevices={knownDevices}
         open={Boolean(details)}

@@ -77,7 +77,7 @@ pub fn merge_devices_with_observations(
         let key = row
             .mac
             .map(|m| m.to_string())
-            .unwrap_or_else(|| format!("ip:{}", row.ip));
+            .unwrap_or_else(|| format!("ip:{}", row.ip)); // key by mac or by FAILED ip
         by_key.entry(key).or_default().0.push(row);
     }
     for lease in leases {
@@ -99,30 +99,31 @@ pub fn merge_devices_with_observations(
             Device::from_parts_with_observations(neighbors, leases, observations)
         })
         .collect();
+    if !query.is_empty() {
+        let mut texts = Vec::new();
+        let mut devs = Vec::new();
+        let mut ips = Vec::new();
+        let mut macs = Vec::new();
+        let mut nuds = Vec::new();
 
-    let mut texts = Vec::new();
-    let mut devs = Vec::new();
-    let mut ips = Vec::new();
-    let mut macs = Vec::new();
-    let mut nuds = Vec::new();
+        for term in query {
+            match term {
+                Query::Text(v) => texts.push(v.as_str()),
+                Query::Interface(v) => devs.push(v.as_str()),
+                Query::Ip(v) => ips.push(*v),
+                Query::Mac(v) => macs.push(*v),
+                Query::NeighborState(v) => nuds.push(*v),
+            };
+        }
 
-    for term in query {
-        match term {
-            Query::Text(v) => texts.push(v.as_str()),
-            Query::Interface(v) => devs.push(v.as_str()),
-            Query::Ip(v) => ips.push(*v),
-            Query::Mac(v) => macs.push(*v),
-            Query::NeighborState(v) => nuds.push(*v),
-        };
-    }
-
-    devices.retain(|device| {
-        (texts.is_empty() || device.names.iter().any(|n| texts.contains(&n.as_str())))
+        devices.retain(|device| {
+            (texts.is_empty() || device.names.iter().any(|n| texts.contains(&n.as_str())))
             && (devs.is_empty() || device.interfaces.iter().any(|i| devs.contains(&i.as_str()))) // same pattern as iter().any
             && (ips.is_empty() || device.ips.iter().any(|ip| ips.contains(ip)))
             && (macs.is_empty() || device.macs.iter().any(|mac| macs.contains(mac)))
             && (nuds.is_empty() || device.neighbors.iter().any(|n| nuds.contains(&n.state)))
-    });
+        });
+    }
     devices.sort_by(|a, b| {
         presence_rank(b.presence)
             .cmp(&presence_rank(a.presence))

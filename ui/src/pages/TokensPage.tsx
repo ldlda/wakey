@@ -118,7 +118,7 @@ export function TokensPage() {
   return (
     <section className="grid gap-4 xl:grid-cols-2">
       <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 gap-y-0">
           <div>
             <CardTitle className="flex items-center gap-2">
               <Key className="size-5 text-primary" />
@@ -219,9 +219,10 @@ export function TokensPage() {
                 </Button>
               </div>
               {useCustom && (
-                <label className="mt-2 grid gap-1 text-sm text-muted-foreground">
+                <label htmlFor="token-custom-ttl" className="mt-2 grid gap-1 text-sm text-muted-foreground">
                   <span>TTL (seconds)</span>
                   <Input
+                    id="token-custom-ttl"
                     type="number"
                     min={1}
                     value={customTtl}

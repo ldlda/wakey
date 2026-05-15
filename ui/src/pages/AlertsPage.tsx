@@ -72,7 +72,7 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-2 sm:grid-cols-3">
-            <label className="grid gap-1 text-sm text-muted-foreground">
+            <label htmlFor="alert-severity" className="grid gap-1 text-sm text-muted-foreground">
               Severity
               <Select
                 value={severity}
@@ -80,7 +80,7 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
                   if (value) setSeverity(value);
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="alert-severity" className="w-full">
                   <SelectValue placeholder="Severity" />
                 </SelectTrigger>
                 <SelectContent>
@@ -93,7 +93,7 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
               </Select>
             </label>
 
-            <label className="grid gap-1 text-sm text-muted-foreground">
+            <label htmlFor="alert-status" className="grid gap-1 text-sm text-muted-foreground">
               Status
               <Select
                 value={status}
@@ -101,7 +101,7 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
                   if (value) setStatus(value);
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="alert-status" className="w-full">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -114,7 +114,7 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
               </Select>
             </label>
 
-            <label className="grid gap-1 text-sm text-muted-foreground">
+            <label htmlFor="alert-kind" className="grid gap-1 text-sm text-muted-foreground">
               Kind
               <Select
                 value={kind}
@@ -122,7 +122,7 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
                   if (value) setKind(value);
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="alert-kind" className="w-full">
                   <SelectValue placeholder="Kind" />
                 </SelectTrigger>
                 <SelectContent>
@@ -170,9 +170,10 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
           </span>
         </CardHeader>
         <CardContent className="space-y-2">
-          <label className="grid gap-1 text-sm text-muted-foreground">
+          <label htmlFor="alert-transition-search" className="grid gap-1 text-sm text-muted-foreground">
             Search
             <Input
+              id="alert-transition-search"
               value={transitionQ}
               onChange={(e) => setTransitionQ(e.target.value)}
               placeholder="kind, status, message, agent"

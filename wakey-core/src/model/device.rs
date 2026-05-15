@@ -74,8 +74,8 @@ pub enum DeviceId {
 /// One raw source fact used while building a device aggregate.
 ///
 /// These are intentionally source-shaped and non-durable. They preserve details
-/// from hooks and live inventory so higher layers can explain why a device looks
-/// online, stale, or unknown without reverse-engineering flattened fields.
+/// from hooks (arp, dhcp, etc) so higher layers can explain why a device looks
+/// online, stale, or unknown.
 #[skip_serializing_none]
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct DeviceObservationFact {
@@ -145,13 +145,14 @@ impl Device {
             }
             presence = std::cmp::max(presence, Presence::from(neighbor.state));
         }
+
         let mut observed_non_remove = false;
         for observation in &observations {
             if let Some(name) = observation.hostname.as_deref() {
                 names.insert(name);
             }
             if let Some(ip) = observation.ip {
-                ips.insert(ip);
+                ips.insert(ip); // should we just add removed IPs? Or a separate map of presence -> IP sets?
             }
             if let Some(mac) = observation.mac {
                 macs.insert(mac);
@@ -196,11 +197,13 @@ fn observation_presence(observation: &DeviceObservationFact) -> Presence {
         (_, "remove") => Presence::Offline,
         ("neigh", "add" | "update" | "old") => Presence::LikelyOnline,
         _ => Presence::Unknown,
+        // dhcp events does not say anything about offline status, but this may shadow neighbor entries. This may be undesirable.
     }
 }
 
 /// Collection of merged discovered devices.
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DeviceInventory {
+    #[serde(default)]
     pub devices: Vec<Device>,
 }

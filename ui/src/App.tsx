@@ -144,6 +144,7 @@ export function App() {
                 selectedAgentId={selectedAgentId}
                 onSelectAgent={setSelectedAgentId}
                 onAfterWake={loadAll}
+                onRefresh={loadAll}
               />
             }
           />

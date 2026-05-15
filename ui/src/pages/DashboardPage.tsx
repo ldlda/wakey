@@ -115,7 +115,7 @@ export function DashboardPage({
     <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {/* Fleet Status */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
           <CardDescription className="flex items-center gap-1.5">
             <Bot className="size-3.5" />
             Fleet Status
@@ -152,7 +152,7 @@ export function DashboardPage({
 
       {/* Active Alerts */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
           <CardDescription className="flex items-center gap-1.5">
             <Bell className="size-3.5" />
             Active Alerts
@@ -188,7 +188,7 @@ export function DashboardPage({
 
       {/* Transitions */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
           <CardDescription className="flex items-center gap-1.5">
             <Activity className="size-3.5" />
             Transitions
@@ -206,7 +206,7 @@ export function DashboardPage({
 
       {/* Token Health */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
           <CardDescription className="flex items-center gap-1.5">
             <Key className="size-3.5" />
             Enroll Tokens
@@ -228,7 +228,7 @@ export function DashboardPage({
 
       {/* Recent Activity Feed */}
       <Card className="sm:col-span-2 lg:col-span-4">
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 gap-y-0">
           <div>
             <CardTitle>Recent Activity</CardTitle>
             <CardDescription className="mt-1">

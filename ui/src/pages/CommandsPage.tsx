@@ -66,12 +66,12 @@ export function CommandsPage({
           Command Runner
         </CardTitle>
         <CardDescription>
-          Debug tool — send raw commands to agents and inspect JSON responses
+          Debug tool: send raw commands to agents and inspect JSON responses
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="grid gap-3" onSubmit={submit}>
-          <label className="grid gap-1 text-sm text-muted-foreground">
+          <label htmlFor="cmd-agent" className="grid gap-1 text-sm text-muted-foreground">
             <span>Agent</span>
             <AgentSelector
               agents={agents}
@@ -80,13 +80,13 @@ export function CommandsPage({
             />
           </label>
 
-          <label className="grid gap-1 text-sm text-muted-foreground">
+          <label htmlFor="cmd-kind" className="grid gap-1 text-sm text-muted-foreground">
             <span>Command</span>
             <Select
               value={kind}
               onValueChange={(value) => setKind(value as CommandKind)}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="cmd-kind" className="w-full">
                 <SelectValue placeholder="Pick command" />
               </SelectTrigger>
               <SelectContent>
@@ -98,9 +98,10 @@ export function CommandsPage({
             </Select>
           </label>
 
-          <label className="grid gap-1 text-sm text-muted-foreground">
+          <label htmlFor="cmd-query" className="grid gap-1 text-sm text-muted-foreground">
             <span>Query</span>
             <Input
+              id="cmd-query"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="optional"

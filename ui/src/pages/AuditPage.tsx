@@ -70,7 +70,7 @@ export function AuditPage({ events, onRefresh }: Props) {
 
       <CardContent className="space-y-3">
         <div className="grid gap-2 sm:grid-cols-3">
-          <label className="grid gap-1 text-sm text-muted-foreground">
+          <label htmlFor="audit-event-type" className="grid gap-1 text-sm text-muted-foreground">
             Event type
             <Select
               value={eventType}
@@ -78,7 +78,7 @@ export function AuditPage({ events, onRefresh }: Props) {
                 if (value) setEventType(value);
               }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="audit-event-type" className="w-full">
                 <SelectValue placeholder="Event type" />
               </SelectTrigger>
               <SelectContent>
@@ -91,7 +91,7 @@ export function AuditPage({ events, onRefresh }: Props) {
             </Select>
           </label>
 
-          <label className="grid gap-1 text-sm text-muted-foreground">
+          <label htmlFor="audit-outcome" className="grid gap-1 text-sm text-muted-foreground">
             Outcome
             <Select
               value={outcome}
@@ -99,7 +99,7 @@ export function AuditPage({ events, onRefresh }: Props) {
                 if (value) setOutcome(value);
               }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="audit-outcome" className="w-full">
                 <SelectValue placeholder="Outcome" />
               </SelectTrigger>
               <SelectContent>
@@ -112,9 +112,10 @@ export function AuditPage({ events, onRefresh }: Props) {
             </Select>
           </label>
 
-          <label className="grid gap-1 text-sm text-muted-foreground">
+          <label htmlFor="audit-search" className="grid gap-1 text-sm text-muted-foreground">
             Search
             <Input
+              id="audit-search"
               value={needle}
               onChange={(e) => setNeedle(e.target.value)}
               placeholder="message, agent, actor"

@@ -235,11 +235,11 @@ pub async fn observe_dhcp_event(
                 row.hostname = hostname.clone();
                 row.last_action = action.to_string();
                 row.last_seen_unix = now;
-                changed = true;
+                changed = true; // update row
             }
         })
         .or_insert_with(|| {
-            changed = true;
+            changed = true; // insert new row
             ObservedDhcpClient {
                 mac: mac_s.clone(),
                 ip,
@@ -258,7 +258,7 @@ pub async fn observe_dhcp_event(
         if cache.get(&mac_s).map(|v| v != &hostname).unwrap_or(true) {
             cache.insert(mac_s, hostname);
             save_mac_name_cache(&cache).await?;
-            changed = true;
+            changed = true; // update mac -> name cache... 
         }
     }
 
@@ -292,7 +292,7 @@ pub async fn observe_neighbor_event(
                 .find_map(|alias| store.neighbors.remove(alias))
         })
         .unwrap_or_else(|| {
-            changed = true;
+            changed = true; // append
             ObservedNeighbor {
                 key: key.clone(),
                 mac: mac.clone(),
@@ -304,7 +304,7 @@ pub async fn observe_neighbor_event(
         });
     for alias in alias_keys {
         if store.neighbors.remove(&alias).is_some() {
-            changed = true;
+            changed = true; // remove old alias
         }
     }
     if row.key != key
@@ -318,7 +318,7 @@ pub async fn observe_neighbor_event(
         row.ip = ip;
         row.last_action = action.clone();
         row.last_seen_unix = now;
-        changed = true;
+        changed = true; // something changed
     }
     store.neighbors.insert(key, row);
     if let (Some(mac), Some(ip)) = (mac.as_deref(), ip)
@@ -387,6 +387,7 @@ fn mark_replaced_neighbor_ips_removed(
         let Some(row_ip) = row.ip else {
             continue;
         };
+        // found another ip for same mac, mark it as removed
         if row.mac.as_deref() == Some(mac)
             && row_ip != current_ip
             && same_ip_family(row_ip, current_ip)
@@ -412,7 +413,7 @@ mod tests {
     use serial_test::serial;
 
     struct EnvGuard {
-        keys: Vec<&'static str>,
+        keys: Vec<&'static str>, // vec of 1 key
     }
 
     impl EnvGuard {

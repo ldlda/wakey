@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Minus, Plus, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,23 +52,13 @@ export function FleetDeviceDetailsDialog({
   onCopy,
   onChanged,
 }: Props) {
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(device?.display_name ?? "");
   const [targetDeviceId, setTargetDeviceId] = useState("");
-  const [routeId, setRouteId] = useState("");
+  const [routeId, setRouteId] = useState(device?.recommended_route?.route_id ?? "");
   const [addKind, setAddKind] = useState<"mac" | "ip">("mac");
   const [addValue, setAddValue] = useState("");
   const [error, setError] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
-
-  useEffect(() => {
-    setDisplayName(device?.display_name ?? "");
-    setTargetDeviceId("");
-    setRouteId(device?.recommended_route?.route_id ?? "");
-    setAddKind("mac");
-    setAddValue("");
-    setError("");
-    setActionBusy(false);
-  }, [device]);
 
   const rowIdentifiers = device ? identifiersFor(device) : [];
 
@@ -279,7 +269,7 @@ export function FleetDeviceDetailsDialog({
                 <span className="font-medium">{fullKnown.display_name}</span>
                 {fullKnown.notes && (
                   <span className="text-muted-foreground">
-                    — {fullKnown.notes}
+                    : {fullKnown.notes}
                   </span>
                 )}
               </div>

@@ -261,6 +261,7 @@ fn add_agent_device_to_entry(
         let rid = route_id(&agent_id, Some(mac), ip_for_mac.as_ref(), "device");
         let wakeable = status.connected && !device_offline;
         entry.routes.insert(
+            // one per mac... when is one per mac/ip pair? this a regression.
             rid.clone(),
             FleetWakeRoute {
                 route_id: rid,

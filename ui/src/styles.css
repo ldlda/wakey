@@ -135,7 +135,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground transition-colors duration-100 ease-in-out;
     margin: 0;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -189,6 +189,7 @@
   background-size: 100% 100%;
   overflow-y: auto;
   max-width: 100%;
+  transition: background 100ms ease-in-out;
 }
 
 /* ── Sidebar internals ────────────────────────────────────────────────── */

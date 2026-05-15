@@ -85,12 +85,9 @@ pub async fn refresh_fleet_devices(
                     });
                     continue;
                 };
-                match serde_json::from_value::<Vec<wakey_core::Device>>(
-                    result
-                        .get("devices")
-                        .cloned()
-                        .unwrap_or(serde_json::Value::Array(vec![])),
-                ) {
+                match serde_json::from_value::<wakey_core::DeviceInventory>(result)
+                    .map(|i| i.devices)
+                {
                     Ok(devices) => {
                         match state
                             .store
@@ -276,6 +273,7 @@ async fn load_fleet_devices(
     let mut devices = build_fleet_devices(known_devices, agent_devices, &context);
     filter_fleet_devices(&mut devices, query);
     let limit = query.limit.unwrap_or(500).clamp(1, 1000);
+    // this is going to be 10 million times harder if i decide to do this lazily
     devices.truncate(limit);
     Ok(devices)
 }

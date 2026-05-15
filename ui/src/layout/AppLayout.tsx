@@ -93,7 +93,7 @@ export function AppLayout() {
         className={[
           "sidebar",
           collapsed ? "sidebar--collapsed" : "",
-          "fixed inset-y-0 left-0 z-50 shadow-xl transition-all duration-300 ease-in-out",
+          "fixed inset-y-0 left-0 z-50 shadow-xl transition-all duration-100 ease-in-out",
           "md:sticky md:top-0 md:z-30 md:shadow-none",
           collapsed ? "-translate-x-full md:translate-x-0" : "translate-x-0",
         ]
@@ -219,8 +219,14 @@ export function AppLayout() {
       {/* Mobile backdrop */}
       {!collapsed && (
         <div
+          role="button"
+          tabIndex={0}
           className="fixed inset-0 z-40 bg-black/20 md:hidden animate-in fade-in duration-200"
           onClick={() => setCollapsed(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") setCollapsed(true);
+          }}
+          aria-label="Close menu"
         />
       )}
 

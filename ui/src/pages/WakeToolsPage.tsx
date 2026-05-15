@@ -101,7 +101,7 @@ export function WakeToolsPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <label className="grid gap-1.5 text-sm text-muted-foreground">
+          <label htmlFor="wake-agent" className="grid gap-1.5 text-sm text-muted-foreground">
             <span>Agent</span>
             <AgentSelector
               agents={agents}
@@ -111,14 +111,14 @@ export function WakeToolsPage({
           </label>
 
           <form onSubmit={handleWake} className="grid gap-3">
-            <label className="grid gap-1.5 text-sm text-muted-foreground">
+            <label htmlFor="wake-target" className="grid gap-1.5 text-sm text-muted-foreground">
               <span>Target</span>
               <Input
+                id="wake-target"
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
                 placeholder="bedroom-pc, 192.168.1.100, or aa:bb:cc:dd:ee:ff"
                 disabled={busy}
-                autoFocus
               />
             </label>
             <Button
@@ -134,7 +134,7 @@ export function WakeToolsPage({
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 gap-y-0">
           <CardTitle>Recent Wakes</CardTitle>
           <Button
             variant="outline"
@@ -147,10 +147,10 @@ export function WakeToolsPage({
         <CardContent>
           {recentWakes.length > 0 ? (
             <div className="grid gap-0">
-              {recentWakes.map((event, idx) => (
+              {recentWakes.map((event, i) => (
                 <div
-                  className={`flex items-start justify-between gap-3 py-2.5 ${idx < recentWakes.length - 1 ? "border-b border-border/50" : ""}`}
-                  key={`${event.ts}-${idx}`}
+                  className={`flex items-start justify-between gap-3 py-2.5 ${i < recentWakes.length - 1 ? "border-b border-border/50" : ""}`}
+                  key={`${event.ts}-${event.target}-${event.agentId}`}
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
