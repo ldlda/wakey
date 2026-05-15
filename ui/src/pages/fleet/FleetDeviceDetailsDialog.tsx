@@ -54,7 +54,9 @@ export function FleetDeviceDetailsDialog({
 }: Props) {
   const [displayName, setDisplayName] = useState(device?.display_name ?? "");
   const [targetDeviceId, setTargetDeviceId] = useState("");
-  const [routeId, setRouteId] = useState(device?.recommended_route?.route_id ?? "");
+  const [routeId, setRouteId] = useState(
+    device?.recommended_route?.route_id ?? "",
+  );
   const [addKind, setAddKind] = useState<"mac" | "ip">("mac");
   const [addValue, setAddValue] = useState("");
   const [error, setError] = useState("");

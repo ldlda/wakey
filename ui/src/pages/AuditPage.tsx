@@ -70,7 +70,10 @@ export function AuditPage({ events, onRefresh }: Props) {
 
       <CardContent className="space-y-3">
         <div className="grid gap-2 sm:grid-cols-3">
-          <label htmlFor="audit-event-type" className="grid gap-1 text-sm text-muted-foreground">
+          <label
+            htmlFor="audit-event-type"
+            className="grid gap-1 text-sm text-muted-foreground"
+          >
             Event type
             <Select
               value={eventType}
@@ -91,7 +94,10 @@ export function AuditPage({ events, onRefresh }: Props) {
             </Select>
           </label>
 
-          <label htmlFor="audit-outcome" className="grid gap-1 text-sm text-muted-foreground">
+          <label
+            htmlFor="audit-outcome"
+            className="grid gap-1 text-sm text-muted-foreground"
+          >
             Outcome
             <Select
               value={outcome}
@@ -112,7 +118,10 @@ export function AuditPage({ events, onRefresh }: Props) {
             </Select>
           </label>
 
-          <label htmlFor="audit-search" className="grid gap-1 text-sm text-muted-foreground">
+          <label
+            htmlFor="audit-search"
+            className="grid gap-1 text-sm text-muted-foreground"
+          >
             Search
             <Input
               id="audit-search"

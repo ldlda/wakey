@@ -8,16 +8,16 @@ use crate::parse::mac;
 
 /// Product-level presence derived from raw neighbor state.
 ///
-/// Variant order defines `Ord`: Offline < Unknown < LikelyOnline < Online.
+/// Variant order defines `Ord`: Unknown < Offline < LikelyOnline < Online.
 /// `std::cmp::max` picks the most-online signal when merging.
 #[derive(
     Debug, PartialEq, Eq, Clone, Copy, Hash, Ord, PartialOrd, Serialize, Deserialize, Default,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Presence {
-    Offline,
     #[default]
     Unknown,
+    Offline,
     LikelyOnline,
     Online,
 }
@@ -152,7 +152,7 @@ impl Device {
                 names.insert(name);
             }
             if let Some(ip) = observation.ip {
-                ips.insert(ip); // should we just add removed IPs? Or a separate map of presence -> IP sets?
+                ips.insert(ip); // is adding removed IPs right? Or should we have a separate map of presence -> IP sets?
             }
             if let Some(mac) = observation.mac {
                 macs.insert(mac);

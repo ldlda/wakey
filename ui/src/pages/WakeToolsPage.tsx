@@ -101,7 +101,10 @@ export function WakeToolsPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <label htmlFor="wake-agent" className="grid gap-1.5 text-sm text-muted-foreground">
+          <label
+            htmlFor="wake-agent"
+            className="grid gap-1.5 text-sm text-muted-foreground"
+          >
             <span>Agent</span>
             <AgentSelector
               agents={agents}
@@ -111,7 +114,10 @@ export function WakeToolsPage({
           </label>
 
           <form onSubmit={handleWake} className="grid gap-3">
-            <label htmlFor="wake-target" className="grid gap-1.5 text-sm text-muted-foreground">
+            <label
+              htmlFor="wake-target"
+              className="grid gap-1.5 text-sm text-muted-foreground"
+            >
               <span>Target</span>
               <Input
                 id="wake-target"

@@ -219,7 +219,10 @@ export function TokensPage() {
                 </Button>
               </div>
               {useCustom && (
-                <label htmlFor="token-custom-ttl" className="mt-2 grid gap-1 text-sm text-muted-foreground">
+                <label
+                  htmlFor="token-custom-ttl"
+                  className="mt-2 grid gap-1 text-sm text-muted-foreground"
+                >
                   <span>TTL (seconds)</span>
                   <Input
                     id="token-custom-ttl"

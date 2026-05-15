@@ -64,6 +64,15 @@ async fn dispatch_devs(req: DevsRequest) -> Result<CommandResult> {
 }
 
 async fn dispatch_inventory(req: InventoryRequest, config: &AgentConfig) -> Result<CommandResult> {
+    Ok(CommandResult::Inventory(
+        inventory_for_config(req, config).await?,
+    ))
+}
+
+pub async fn inventory_for_config(
+    req: InventoryRequest,
+    config: &AgentConfig,
+) -> Result<wakey_core::DeviceInventory> {
     let query = req.into_inventory_query();
     let neighbors = wakey::wakey_linux::devices::query_neighbors(&query).await?;
     let leases = wakey::wakey_linux::dhcp::read_dhcp_leases_with_names_from_paths(
@@ -72,6 +81,20 @@ async fn dispatch_inventory(req: InventoryRequest, config: &AgentConfig) -> Resu
         &config.mac_name_cache_path,
     )
     .await?;
+    match wakey::wakey_linux::observations::prune_stale_observations_from_path(
+        &config.observation_store_path,
+        config.observation_retention_days,
+    )
+    .await
+    {
+        Ok(removed) if removed > 0 => {
+            debug!(removed, "pruned stale local hook observations");
+        }
+        Ok(_) => {}
+        Err(err) => {
+            warn!(error = %err, "failed pruning stale local hook observations");
+        }
+    }
     let observations = match wakey::wakey_linux::observations::list_local_observations_from_path(
         &config.observation_store_path,
     )
@@ -104,7 +127,7 @@ async fn dispatch_inventory(req: InventoryRequest, config: &AgentConfig) -> Resu
         rows = inventory.devices.len(),
         "dispatched inventory command"
     );
-    Ok(CommandResult::Inventory(inventory))
+    Ok(inventory)
 }
 
 async fn dispatch_wake(req: WakeRequest) -> Result<CommandResult> {

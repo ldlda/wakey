@@ -225,7 +225,10 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-2 lg:grid-cols-[minmax(16rem,1fr)_11rem_10rem_14rem_10rem]">
-            <label htmlFor="fleet-search" className="grid gap-1 text-sm text-muted-foreground">
+            <label
+              htmlFor="fleet-search"
+              className="grid gap-1 text-sm text-muted-foreground"
+            >
               <span>Search</span>
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 size-4 text-muted-foreground" />
@@ -250,7 +253,10 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
               values={knownFilters}
               onChange={(value) => setKnown(value as KnownFilter)}
             />
-            <label htmlFor="fleet-agent" className="grid gap-1 text-sm text-muted-foreground">
+            <label
+              htmlFor="fleet-agent"
+              className="grid gap-1 text-sm text-muted-foreground"
+            >
               <span>Agent</span>
               <Select
                 value={agentId}

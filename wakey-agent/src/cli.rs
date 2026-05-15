@@ -98,6 +98,10 @@ pub struct InitConfigArgs {
     #[arg(long)]
     pub agent_token: Option<String>,
 
+    /// Days to keep local hook observation rows since last seen. Zero disables pruning.
+    #[arg(long)]
+    pub observation_retention_days: Option<u64>,
+
     /// Replace an existing config file.
     #[arg(long)]
     pub force: bool,

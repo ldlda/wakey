@@ -11,6 +11,7 @@ const WAKEY_OBSERVATION_STORE_ENV: &str = "WAKEY_OBSERVATION_STORE";
 const DEFAULT_DHCP_LEASES_PATH: &str = "/tmp/dhcp.leases";
 const DEFAULT_MAC_NAME_CACHE_PATH: &str = "/tmp/wakey_mac_names.json";
 const DEFAULT_OBSERVATION_STORE_PATH: &str = "/tmp/wakey_observations.json";
+pub const DEFAULT_OBSERVATION_RETENTION_DAYS: u64 = 30;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentConfig {
@@ -23,6 +24,8 @@ pub struct AgentConfig {
     pub reconnect_max_ms: u64,
     #[serde(default = "default_observation_sync_interval_seconds")]
     pub observation_sync_interval_seconds: u64,
+    #[serde(default = "default_observation_retention_days")]
+    pub observation_retention_days: u64,
     #[serde(default = "default_pid_file")]
     pub pid_file: PathBuf,
     #[serde(default = "default_dhcp_leases_path")]
@@ -45,6 +48,10 @@ impl fmt::Debug for AgentConfig {
                 "observation_sync_interval_seconds",
                 &self.observation_sync_interval_seconds,
             )
+            .field(
+                "observation_retention_days",
+                &self.observation_retention_days,
+            )
             .field("pid_file", &self.pid_file)
             .field("dhcp_leases_path", &self.dhcp_leases_path)
             .field("mac_name_cache_path", &self.mac_name_cache_path)
@@ -63,6 +70,10 @@ const fn default_reconnect_max_ms() -> u64 {
 
 const fn default_observation_sync_interval_seconds() -> u64 {
     60
+}
+
+const fn default_observation_retention_days() -> u64 {
+    DEFAULT_OBSERVATION_RETENTION_DAYS
 }
 
 fn default_pid_file() -> PathBuf {
@@ -183,6 +194,7 @@ mod tests {
             reconnect_base_ms: 123,
             reconnect_max_ms: 456,
             observation_sync_interval_seconds: 7,
+            observation_retention_days: 3,
             pid_file: "/tmp/test-wakey-agent.pid".into(),
             dhcp_leases_path: "/tmp/test-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/test-names.json".into(),

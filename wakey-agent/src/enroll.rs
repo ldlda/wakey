@@ -68,6 +68,9 @@ pub async fn enroll(
         observation_sync_interval_seconds: base_config
             .map(|config| config.observation_sync_interval_seconds)
             .unwrap_or(60),
+        observation_retention_days: base_config
+            .map(|config| config.observation_retention_days)
+            .unwrap_or(crate::config::DEFAULT_OBSERVATION_RETENTION_DAYS),
         pid_file: base_config
             .map(|config| config.pid_file.clone())
             .unwrap_or_else(|| crate::config::DEFAULT_PID_FILE.into()),
@@ -166,6 +169,7 @@ mod tests {
             reconnect_base_ms: 2_000,
             reconnect_max_ms: 60_000,
             observation_sync_interval_seconds: 30,
+            observation_retention_days: 11,
             pid_file: "/tmp/custom-wakey-agent.pid".into(),
             dhcp_leases_path: "/tmp/custom-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/custom-names.json".into(),
@@ -180,6 +184,7 @@ mod tests {
         assert_eq!(config.agent_id, "agent-123");
         assert_eq!(config.agent_token, "token-xyz");
         assert_eq!(config.server_url, "https://control.example.com");
+        assert_eq!(config.observation_retention_days, 11);
         assert_eq!(config.pid_file, base_config.pid_file);
         assert_eq!(config.dhcp_leases_path, base_config.dhcp_leases_path);
         assert!(outcome.backup_path.is_none());

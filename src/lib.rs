@@ -13,6 +13,7 @@ pub use service::{
 };
 pub use wakey_linux::observations::{
     list_local_observations, observe_dhcp_event, observe_neighbor_event,
+    prune_stale_observations_from_path,
 };
 
 #[cfg(test)]

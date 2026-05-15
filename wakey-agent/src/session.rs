@@ -7,7 +7,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, info_span, warn};
 
 use crate::config::AgentConfig;
-use crate::dispatch::dispatch_command;
+use crate::dispatch::{dispatch_command, inventory_for_config};
 use crate::protocol::{AgentCommand, ClientMessage, ErrorPayload, ServerMessage};
 
 pub async fn run(config: AgentConfig) -> Result<()> {
@@ -150,8 +150,15 @@ where
     S: SinkExt<Message> + Unpin,
     <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
 {
-    let query = wakey_core::InventoryQueryBuilder::new().build();
-    let inventory = wakey::inventory(query)
+    let req = crate::protocol::InventoryRequest {
+        query: None,
+        name: None,
+        ips: Vec::new(),
+        devs: Vec::new(),
+        nuds: Vec::new(),
+        macs: Vec::new(),
+    };
+    let inventory = inventory_for_config(req, config)
         .await
         .context("failed to run inventory for device snapshot")?;
     let count = inventory.devices.len();

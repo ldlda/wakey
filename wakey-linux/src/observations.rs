@@ -161,6 +161,38 @@ pub async fn prune_removed_observations_from_path(path: impl AsRef<Path>) -> io:
     Ok(removed)
 }
 
+pub async fn prune_stale_observations_from_path(
+    path: impl AsRef<Path>,
+    retention_days: u64,
+) -> io::Result<usize> {
+    if retention_days == 0 {
+        return Ok(0);
+    }
+    let max_age_seconds = retention_days.saturating_mul(24 * 60 * 60);
+    prune_observations_older_than_from_path(path, now_unix().saturating_sub(max_age_seconds)).await
+}
+
+async fn prune_observations_older_than_from_path(
+    path: impl AsRef<Path>,
+    cutoff_unix: u64,
+) -> io::Result<usize> {
+    let path = path.as_ref();
+    let mut store = load_observation_store_from_path(path).await?;
+    let before = store.dhcp_clients.len() + store.neighbors.len();
+    store
+        .dhcp_clients
+        .retain(|_, row| row.last_seen_unix >= cutoff_unix);
+    store
+        .neighbors
+        .retain(|_, row| row.last_seen_unix >= cutoff_unix);
+    let after = store.dhcp_clients.len() + store.neighbors.len();
+    let removed = before.saturating_sub(after);
+    if removed > 0 {
+        save_observation_store_to_path(path, &store).await?;
+    }
+    Ok(removed)
+}
+
 fn list_local_observations_from_store(store: LocalObservationStore) -> Vec<LocalDeviceObservation> {
     let mut out = Vec::with_capacity(store.dhcp_clients.len() + store.neighbors.len());
     out.extend(
@@ -574,6 +606,58 @@ mod tests {
             "192.168.1.2"
         );
         assert_eq!(row.last_action, "update");
+
+        let _ = tokio::fs::remove_file(observation_path).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn stale_observation_prune_uses_last_seen_cutoff() {
+        let observation_path = temp_file("stale-observations");
+        let mut dhcp_clients = std::collections::BTreeMap::new();
+        dhcp_clients.insert(
+            "aa:bb:cc:dd:ee:01".to_string(),
+            ObservedDhcpClient {
+                mac: "aa:bb:cc:dd:ee:01".to_string(),
+                ip: Some("192.168.1.2".parse().expect("ip")),
+                hostname: Some("old".to_string()),
+                first_seen_unix: 1,
+                last_seen_unix: 10,
+                last_action: "remove".to_string(),
+            },
+        );
+        dhcp_clients.insert(
+            "aa:bb:cc:dd:ee:02".to_string(),
+            ObservedDhcpClient {
+                mac: "aa:bb:cc:dd:ee:02".to_string(),
+                ip: Some("192.168.1.3".parse().expect("ip")),
+                hostname: Some("new".to_string()),
+                first_seen_unix: 1,
+                last_seen_unix: 20,
+                last_action: "remove".to_string(),
+            },
+        );
+        let fixture = LocalObservationStore {
+            dhcp_clients,
+            neighbors: Default::default(),
+        };
+        tokio::fs::write(
+            &observation_path,
+            serde_json::to_string(&fixture).expect("fixture should serialize"),
+        )
+        .await
+        .expect("fixture should write");
+
+        let removed = prune_observations_older_than_from_path(&observation_path, 15)
+            .await
+            .expect("prune should succeed");
+
+        assert_eq!(removed, 1);
+        let store = load_observation_store_from_path(&observation_path)
+            .await
+            .expect("store should read");
+        assert!(!store.dhcp_clients.contains_key("aa:bb:cc:dd:ee:01"));
+        assert!(store.dhcp_clients.contains_key("aa:bb:cc:dd:ee:02"));
 
         let _ = tokio::fs::remove_file(observation_path).await;
     }

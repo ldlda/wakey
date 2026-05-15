@@ -71,7 +71,10 @@ export function CommandsPage({
       </CardHeader>
       <CardContent>
         <form className="grid gap-3" onSubmit={submit}>
-          <label htmlFor="cmd-agent" className="grid gap-1 text-sm text-muted-foreground">
+          <label
+            htmlFor="cmd-agent"
+            className="grid gap-1 text-sm text-muted-foreground"
+          >
             <span>Agent</span>
             <AgentSelector
               agents={agents}
@@ -80,7 +83,10 @@ export function CommandsPage({
             />
           </label>
 
-          <label htmlFor="cmd-kind" className="grid gap-1 text-sm text-muted-foreground">
+          <label
+            htmlFor="cmd-kind"
+            className="grid gap-1 text-sm text-muted-foreground"
+          >
             <span>Command</span>
             <Select
               value={kind}
@@ -98,7 +104,10 @@ export function CommandsPage({
             </Select>
           </label>
 
-          <label htmlFor="cmd-query" className="grid gap-1 text-sm text-muted-foreground">
+          <label
+            htmlFor="cmd-query"
+            className="grid gap-1 text-sm text-muted-foreground"
+          >
             <span>Query</span>
             <Input
               id="cmd-query"

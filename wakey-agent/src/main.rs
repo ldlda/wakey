@@ -255,6 +255,7 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
             reconnect_base_ms: 1_000,
             reconnect_max_ms: 30_000,
             observation_sync_interval_seconds: 60,
+            observation_retention_days: config::DEFAULT_OBSERVATION_RETENTION_DAYS,
             pid_file: config::DEFAULT_PID_FILE.into(),
             dhcp_leases_path: "/tmp/dhcp.leases".into(),
             mac_name_cache_path: "/tmp/wakey_mac_names.json".into(),
@@ -270,6 +271,9 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
     }
     if let Some(agent_token) = args.agent_token {
         cfg.agent_token = agent_token;
+    }
+    if let Some(days) = args.observation_retention_days {
+        cfg.observation_retention_days = days;
     }
 
     if let Some(path) = &args.config {
