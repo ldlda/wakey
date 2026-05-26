@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
-use crate::config::{AgentConfig, save_config_with_backup};
+use crate::config::{AgentConfig, DEFAULT_CONFIG, save_config_with_backup};
 
 pub struct EnrollOutcome {
     pub config: AgentConfig,
@@ -55,35 +55,12 @@ pub async fn enroll(
         .await
         .context("failed to decode enrollment response")?;
 
-    let config = AgentConfig {
-        server_url: payload.server_url.unwrap_or(server_url),
-        agent_id: payload.agent_id,
-        agent_token: payload.agent_token,
-        reconnect_base_ms: base_config
-            .map(|config| config.reconnect_base_ms)
-            .unwrap_or(1_000),
-        reconnect_max_ms: base_config
-            .map(|config| config.reconnect_max_ms)
-            .unwrap_or(30_000),
-        observation_sync_interval_seconds: base_config
-            .map(|config| config.observation_sync_interval_seconds)
-            .unwrap_or(60),
-        observation_retention_days: base_config
-            .map(|config| config.observation_retention_days)
-            .unwrap_or(crate::config::DEFAULT_OBSERVATION_RETENTION_DAYS),
-        pid_file: base_config
-            .map(|config| config.pid_file.clone())
-            .unwrap_or_else(|| crate::config::DEFAULT_PID_FILE.into()),
-        dhcp_leases_path: base_config
-            .map(|config| config.dhcp_leases_path.clone())
-            .unwrap_or_else(|| "/tmp/dhcp.leases".into()),
-        mac_name_cache_path: base_config
-            .map(|config| config.mac_name_cache_path.clone())
-            .unwrap_or_else(|| "/tmp/wakey_mac_names.json".into()),
-        observation_store_path: base_config
-            .map(|config| config.observation_store_path.clone())
-            .unwrap_or_else(|| "/tmp/wakey_observations.json".into()),
-    };
+    let mut config = base_config
+        .cloned()
+        .unwrap_or_else(|| (*DEFAULT_CONFIG).clone());
+    config.server_url = payload.server_url.unwrap_or(server_url);
+    config.agent_id = payload.agent_id;
+    config.agent_token = payload.agent_token;
     let backup_path = save_config_with_backup(config_path, &config)?;
     info!(agent_id = %config.agent_id, config_path = %config_path.display(), "agent enrollment succeeded and config was written");
     Ok(EnrollOutcome {

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 use crate::cli::{InitConfigArgs, ServeArgs};
 use crate::config::resolve::{load_file_config, normalize_public_url, resolve_path};
-use crate::config::types::{WritableConfig, WritableTelemetry};
+use crate::config::types::{DEFAULT_CONFIG, WritableConfig, WritableTelemetry};
 
 pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
     if args.stdout && args.config_file.is_some() {
@@ -30,6 +30,7 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         Default::default()
     };
     let base_telemetry = base.telemetry.unwrap_or_default();
+    let defaults = &*DEFAULT_CONFIG;
 
     let bind = match args.bind {
         Some(bind) => bind,
@@ -43,7 +44,8 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
                         .unwrap_or_else(|| "<defaults>".to_string())
                 )
             })?,
-            None => "0.0.0.0:8080"
+            None => defaults
+                .bind
                 .parse()
                 .expect("static default bind should parse"),
         },
@@ -52,37 +54,38 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         args.public_url
             .as_deref()
             .or(base.public_url.as_deref())
-            .unwrap_or("http://127.0.0.1:8080"),
+            .unwrap_or(&defaults.public_url),
     );
 
     let data_dir = args
         .data_dir
         .clone()
         .or(base.data_dir)
-        .unwrap_or_else(|| PathBuf::from(crate::cli::DEFAULT_DATA_DIR));
+        .unwrap_or_else(|| defaults.data_dir.clone());
 
     let state_file_raw = args
         .state_file
         .clone()
         .or(base.state_file)
-        .unwrap_or_else(|| PathBuf::from("state.sqlite3"));
+        .unwrap_or_else(|| defaults.state_file.clone());
     let state_file = resolve_path(&data_dir, state_file_raw);
 
     let pid_file_raw = args
         .pid_file
         .clone()
         .or(base.pid_file)
-        .unwrap_or_else(|| PathBuf::from("wakey-control-plane.pid"));
+        .unwrap_or_else(|| defaults.pid_file.clone());
     let pid_file = resolve_path(&data_dir, pid_file_raw);
 
     let ui_dist_dir = args
         .ui_dist_dir
         .clone()
         .or(base.ui_dist_dir)
-        .unwrap_or_else(|| PathBuf::from("ui/dist"));
+        .unwrap_or_else(|| defaults.ui_dist_dir.clone());
 
     let bootstrap_enroll_tokens = if args.bootstrap_enroll_tokens.is_empty() {
-        base.bootstrap_enroll_tokens.unwrap_or_default()
+        base.bootstrap_enroll_tokens
+            .unwrap_or_else(|| defaults.bootstrap_enroll_tokens.clone())
     } else {
         args.bootstrap_enroll_tokens.clone()
     };
@@ -95,17 +98,17 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         command_timeout_ms: args
             .command_timeout_ms
             .or(base.command_timeout_ms)
-            .unwrap_or(30_000)
+            .unwrap_or(defaults.command_timeout_ms)
             .max(1),
         enroll_token_ttl_seconds: args
             .enroll_token_ttl_seconds
             .or(base.enroll_token_ttl_seconds)
-            .unwrap_or(86_400)
+            .unwrap_or(defaults.enroll_token_ttl_seconds)
             .max(1),
         observation_retention_seconds: args
             .observation_retention_seconds
             .or(base.observation_retention_seconds)
-            .unwrap_or(2_592_000),
+            .unwrap_or(defaults.observation_retention_seconds),
         pid_file,
         ui_dist_dir,
         bootstrap_enroll_tokens,
@@ -113,16 +116,17 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
             otlp_endpoint: args
                 .telemetry_otlp_endpoint
                 .clone()
-                .or(base_telemetry.otlp_endpoint),
+                .or(base_telemetry.otlp_endpoint)
+                .or_else(|| defaults.telemetry.otlp_endpoint.clone()),
             service_name: args
                 .telemetry_service_name
                 .clone()
                 .or(base_telemetry.service_name)
-                .unwrap_or_else(|| "wakey-control-plane".to_string()),
+                .unwrap_or_else(|| defaults.telemetry.service_name.clone()),
             json_logs: args
                 .telemetry_json_logs
                 .or(base_telemetry.json_logs)
-                .unwrap_or(false),
+                .unwrap_or(defaults.telemetry.json_logs),
         },
     };
 
@@ -176,6 +180,7 @@ pub fn bootstrap_config_if_missing(args: &ServeArgs) -> Result<bool> {
 mod tests {
     use super::write_init_config;
     use crate::cli::InitConfigArgs;
+    use crate::config::types::DEFAULT_CONFIG;
 
     fn temp_test_dir(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
@@ -247,6 +252,53 @@ json_logs = true
         assert_eq!(
             parsed["telemetry"]["service_name"].as_str(),
             Some("old-service")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_config_renders_shared_default_template() {
+        let dir = temp_test_dir("defaults");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let out = dir.join("out.toml");
+
+        write_init_config(&InitConfigArgs {
+            config_file: Some(out.clone()),
+            from_config: None,
+            stdout: false,
+            data_dir: None,
+            bind: None,
+            public_url: None,
+            state_file: None,
+            pid_file: None,
+            ui_dist_dir: None,
+            command_timeout_ms: None,
+            enroll_token_ttl_seconds: None,
+            observation_retention_seconds: None,
+            bootstrap_enroll_tokens: Vec::new(),
+            telemetry_otlp_endpoint: None,
+            telemetry_service_name: None,
+            telemetry_json_logs: None,
+            force: false,
+        })
+        .expect("write default config");
+
+        let rendered = std::fs::read_to_string(&out).expect("read default config");
+        let parsed: toml::Value = toml::from_str(&rendered).expect("parse default config");
+        let defaults = &*DEFAULT_CONFIG;
+        assert_eq!(
+            parsed["state_file"].as_str(),
+            defaults.data_dir.join(&defaults.state_file).to_str()
+        );
+        assert_eq!(
+            parsed["command_timeout_ms"].as_integer(),
+            Some(defaults.command_timeout_ms as i64)
+        );
+        assert_eq!(
+            parsed["telemetry"]["service_name"].as_str(),
+            Some(defaults.telemetry.service_name.as_str())
         );
 
         let _ = std::fs::remove_dir_all(&dir);

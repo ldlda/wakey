@@ -248,19 +248,7 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
     let mut cfg = if let Some(from_config) = &args.from_config {
         config::load_config(from_config)?
     } else {
-        config::AgentConfig {
-            server_url: "https://wakey.ldlda.com".to_string(),
-            agent_id: "REPLACE_ME_AGENT_ID".to_string(),
-            agent_token: "REPLACE_ME_AGENT_TOKEN".to_string(),
-            reconnect_base_ms: 1_000,
-            reconnect_max_ms: 30_000,
-            observation_sync_interval_seconds: 60,
-            observation_retention_days: config::DEFAULT_OBSERVATION_RETENTION_DAYS,
-            pid_file: config::DEFAULT_PID_FILE.into(),
-            dhcp_leases_path: "/tmp/dhcp.leases".into(),
-            mac_name_cache_path: "/tmp/wakey_mac_names.json".into(),
-            observation_store_path: "/tmp/wakey_observations.json".into(),
-        }
+        (*config::DEFAULT_CONFIG).clone()
     };
 
     if let Some(server_url) = args.server_url {

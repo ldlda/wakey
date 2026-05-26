@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/wakey-agent/config.toml";
 pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-agent.pid";
@@ -35,6 +36,20 @@ pub struct AgentConfig {
     #[serde(default = "default_observation_store_path")]
     pub observation_store_path: PathBuf,
 }
+
+pub static DEFAULT_CONFIG: LazyLock<AgentConfig> = LazyLock::new(|| AgentConfig {
+    server_url: "https://wakey.ldlda.com".to_string(),
+    agent_id: "REPLACE_ME_AGENT_ID".to_string(),
+    agent_token: "REPLACE_ME_AGENT_TOKEN".to_string(),
+    reconnect_base_ms: default_reconnect_base_ms(),
+    reconnect_max_ms: default_reconnect_max_ms(),
+    observation_sync_interval_seconds: default_observation_sync_interval_seconds(),
+    observation_retention_days: default_observation_retention_days(),
+    pid_file: default_pid_file(),
+    dhcp_leases_path: default_dhcp_leases_path(),
+    mac_name_cache_path: default_mac_name_cache_path(),
+    observation_store_path: default_observation_store_path(),
+});
 
 impl fmt::Debug for AgentConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -226,6 +241,9 @@ agent_token = "secret"
         )
         .expect("config should parse");
 
-        assert_eq!(config.observation_retention_days, 7);
+        assert_eq!(
+            config.observation_retention_days,
+            DEFAULT_OBSERVATION_RETENTION_DAYS
+        );
     }
 }

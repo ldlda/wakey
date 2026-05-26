@@ -9,19 +9,20 @@ use crate::cli::{
     RevokeEnrollTokenArgs, ServeArgs, StateStatsArgs,
 };
 use crate::config::types::{
-    DaemonConfig, FileConfig, FileTelemetryConfig, IssueTokenSettings, StateAccessSettings,
-    TelemetryConfig,
+    DEFAULT_CONFIG, DaemonConfig, FileConfig, FileTelemetryConfig, IssueTokenSettings,
+    StateAccessSettings, TelemetryConfig,
 };
 
 impl DaemonConfig {
     pub fn from_serve_args(args: &ServeArgs) -> Result<Self> {
         let file = load_file_config(&args.config_file)?;
+        let defaults = &*DEFAULT_CONFIG;
 
         let data_dir = args
             .data_dir
             .clone()
             .or(file.data_dir.clone())
-            .unwrap_or_else(|| PathBuf::from(crate::cli::DEFAULT_DATA_DIR));
+            .unwrap_or_else(|| defaults.data_dir.clone());
 
         let bind = match args.bind {
             Some(bind) => bind,
@@ -32,7 +33,8 @@ impl DaemonConfig {
                         args.config_file.display()
                     )
                 })?,
-                None => "0.0.0.0:8080"
+                None => defaults
+                    .bind
                     .parse()
                     .expect("static default bind should parse"),
             },
@@ -42,34 +44,34 @@ impl DaemonConfig {
             args.public_url
                 .as_deref()
                 .or(file.public_url.as_deref())
-                .unwrap_or("http://127.0.0.1:8080"),
+                .unwrap_or(&defaults.public_url),
         );
 
         let state_file_raw = args
             .state_file
             .clone()
             .or(file.state_file)
-            .unwrap_or_else(|| PathBuf::from("state.sqlite3"));
+            .unwrap_or_else(|| defaults.state_file.clone());
         let state_file = resolve_path(&data_dir, state_file_raw);
 
         let command_timeout = Duration::from_millis(
             args.command_timeout_ms
                 .or(file.command_timeout_ms)
-                .unwrap_or(30_000)
+                .unwrap_or(defaults.command_timeout_ms)
                 .max(1),
         );
 
         let enroll_token_ttl = Duration::from_secs(
             args.enroll_token_ttl_seconds
                 .or(file.enroll_token_ttl_seconds)
-                .unwrap_or(86_400)
+                .unwrap_or(defaults.enroll_token_ttl_seconds)
                 .max(1),
         );
 
         let observation_retention = Duration::from_secs(
             args.observation_retention_seconds
                 .or(file.observation_retention_seconds)
-                .unwrap_or(2_592_000)
+                .unwrap_or(defaults.observation_retention_seconds)
                 .max(1),
         );
 
@@ -77,17 +79,18 @@ impl DaemonConfig {
             .pid_file
             .clone()
             .or(file.pid_file)
-            .unwrap_or_else(|| PathBuf::from("wakey-control-plane.pid"));
+            .unwrap_or_else(|| defaults.pid_file.clone());
         let pid_file = resolve_path(&data_dir, pid_file_raw);
 
         let ui_dist_dir = args
             .ui_dist_dir
             .clone()
             .or(file.ui_dist_dir)
-            .unwrap_or_else(|| PathBuf::from("ui/dist"));
+            .unwrap_or_else(|| defaults.ui_dist_dir.clone());
 
         let bootstrap_enroll_tokens = if args.bootstrap_enroll_tokens.is_empty() {
-            file.bootstrap_enroll_tokens.unwrap_or_default()
+            file.bootstrap_enroll_tokens
+                .unwrap_or_else(|| defaults.bootstrap_enroll_tokens.clone())
         } else {
             args.bootstrap_enroll_tokens.clone()
         };
@@ -131,6 +134,7 @@ pub fn resolve_path(data_dir: &Path, candidate: PathBuf) -> PathBuf {
 
 pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<IssueTokenSettings> {
     let file = load_file_config(&args.config_file)?;
+    let defaults = &*DEFAULT_CONFIG;
     let state = resolve_state_access(
         &args.config_file,
         args.data_dir.clone(),
@@ -142,7 +146,7 @@ pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<Issue
     let ttl = Duration::from_secs(
         args.ttl_seconds
             .or(file.enroll_token_ttl_seconds)
-            .unwrap_or(86_400)
+            .unwrap_or(defaults.enroll_token_ttl_seconds)
             .max(1),
     );
 
@@ -254,16 +258,17 @@ fn resolve_state_access(
     mode: &AdminTargetArgs,
 ) -> Result<StateAccessSettings> {
     let file = load_file_config(config_file)?;
+    let defaults = &*DEFAULT_CONFIG;
 
     let data_dir = cli_data_dir
         .or(file.data_dir)
-        .unwrap_or_else(|| PathBuf::from(crate::cli::DEFAULT_DATA_DIR));
+        .unwrap_or_else(|| defaults.data_dir.clone());
 
     let state_file = resolve_path(
         &data_dir,
         cli_state_file
             .or(file.state_file)
-            .unwrap_or_else(|| PathBuf::from("state.sqlite3")),
+            .unwrap_or_else(|| defaults.state_file.clone()),
     );
 
     let resolved_public_url = cli_public_url
@@ -280,7 +285,9 @@ fn resolve_state_access(
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_public_url, resolve_path};
+    use super::{DaemonConfig, normalize_public_url, resolve_path};
+    use crate::cli::ServeArgs;
+    use crate::config::types::DEFAULT_CONFIG;
     use std::path::Path;
     use std::path::PathBuf;
 
@@ -301,6 +308,45 @@ mod tests {
         assert_eq!(
             out,
             PathBuf::from("/var/lib/wakey-control-plane/state.sqlite3")
+        );
+    }
+
+    #[test]
+    fn daemon_config_uses_shared_default_template() {
+        let config_file = std::env::temp_dir().join(format!(
+            "wakey-cc-missing-config-{}.toml",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&config_file);
+        let resolved = DaemonConfig::from_serve_args(&ServeArgs {
+            data_dir: None,
+            bind: None,
+            public_url: None,
+            state_file: None,
+            bootstrap_enroll_tokens: Vec::new(),
+            command_timeout_ms: None,
+            enroll_token_ttl_seconds: None,
+            observation_retention_seconds: None,
+            pid_file: None,
+            ui_dist_dir: None,
+            config_file,
+            bootstrap_config: false,
+        })
+        .expect("resolve default config");
+        let defaults = &*DEFAULT_CONFIG;
+
+        assert_eq!(resolved.data_dir, defaults.data_dir);
+        assert_eq!(
+            resolved.state_file,
+            defaults.data_dir.join(&defaults.state_file)
+        );
+        assert_eq!(
+            resolved.command_timeout,
+            std::time::Duration::from_millis(defaults.command_timeout_ms)
+        );
+        assert_eq!(
+            resolved.telemetry.service_name,
+            defaults.telemetry.service_name
         );
     }
 }
