@@ -118,6 +118,16 @@ fn endpoint(
     ip: Option<&str>,
     last_seen_unix: u64,
 ) -> DeviceEndpoint {
+    endpoint_with_presence(source, mac, ip, Presence::LikelyOnline, last_seen_unix)
+}
+
+fn endpoint_with_presence(
+    source: EndpointSource,
+    mac: Option<&str>,
+    ip: Option<&str>,
+    presence: Presence,
+    last_seen_unix: u64,
+) -> DeviceEndpoint {
     DeviceEndpoint {
         key: EndpointKey::new(
             source,
@@ -127,7 +137,7 @@ fn endpoint(
         .expect("endpoint key"),
         hostname: Some("lda".into()),
         interface: Some("br-lan".into()),
-        presence: Presence::LikelyOnline,
+        presence,
         first_seen_unix: Some(1),
         last_seen_unix: Some(last_seen_unix),
     }
@@ -201,6 +211,112 @@ fn fleet_routes_use_endpoint_mac_ip_pairs() {
             .and_then(|route| route.ip),
         Some("192.168.1.3".parse().unwrap())
     );
+}
+
+#[test]
+fn fleet_summary_keeps_current_dhcp_ip_when_neighbor_endpoint_is_offline() {
+    let mac = "aa:bb:cc:dd:ee:ff";
+    let mut row = offline_agent_device(
+        "agent-a",
+        "mac:aa:bb:cc:dd:ee:ff",
+        Some(mac),
+        Some("192.168.1.99"),
+        20,
+    );
+    row.ips = vec![
+        "192.168.1.10".parse().unwrap(),
+        "192.168.1.99".parse().unwrap(),
+    ];
+    row.endpoints = vec![
+        endpoint_with_presence(
+            EndpointSource::Neighbor,
+            Some(mac),
+            Some("192.168.1.99"),
+            Presence::Offline,
+            20,
+        ),
+        endpoint_with_presence(
+            EndpointSource::DhcpLease,
+            Some(mac),
+            Some("192.168.1.10"),
+            Presence::Unknown,
+            20,
+        ),
+    ];
+
+    let devices = build_fleet_devices(Vec::new(), vec![row], &context(&["agent-a"]));
+
+    assert_eq!(devices.len(), 1);
+    assert_eq!(
+        devices[0].ips,
+        vec!["192.168.1.10".parse::<IpAddr>().unwrap()]
+    );
+}
+
+#[test]
+fn known_ip_identifier_matches_endpoint_that_is_not_in_summary_ips() {
+    let known = KnownDevice {
+        device_id: "dev-1".into(),
+        display_name: "lda remembered".into(),
+        pinned: true,
+        created_at_unix: 1,
+        updated_at_unix: 1,
+        notes: None,
+        identifiers: vec![DeviceIdentifier {
+            identifier_key: "ip:192.168.1.99".into(),
+            device_id: "dev-1".into(),
+            kind: "ip".into(),
+            value: "192.168.1.99".into(),
+            created_at_unix: 1,
+        }],
+    };
+    let mut ctx = context(&["agent-a"]);
+    ctx.identifier_map
+        .insert("ip:192.168.1.99".into(), known_device_summary(&known));
+    let mut row = agent_device("agent-a", "ip:192.168.1.99", None, None, 20);
+    row.endpoints = vec![endpoint_with_presence(
+        EndpointSource::HookNeighbor,
+        None,
+        Some("192.168.1.99"),
+        Presence::Offline,
+        20,
+    )];
+
+    let devices = build_fleet_devices(vec![known], vec![row], &ctx);
+
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].device_key, "known:dev-1");
+    assert_eq!(devices[0].endpoints.len(), 1);
+}
+
+#[test]
+fn equivalent_endpoint_routes_collapse_to_best_source() {
+    let mac = "aa:bb:cc:dd:ee:ff";
+    let ip = "192.168.1.2";
+    let mut row = agent_device("agent-a", "mac:aa:bb:cc:dd:ee:ff", Some(mac), Some(ip), 20);
+    row.endpoints = vec![
+        endpoint_with_presence(
+            EndpointSource::HookNeighbor,
+            Some(mac),
+            Some(ip),
+            Presence::LikelyOnline,
+            20,
+        ),
+        endpoint_with_presence(
+            EndpointSource::Neighbor,
+            Some(mac),
+            Some(ip),
+            Presence::Online,
+            20,
+        ),
+    ];
+
+    let devices = build_fleet_devices(Vec::new(), vec![row], &context(&["agent-a"]));
+
+    assert_eq!(devices[0].endpoints.len(), 2);
+    assert_eq!(devices[0].route_candidates.len(), 1);
+    assert_eq!(devices[0].route_candidates[0].source, "neighbor");
+    assert_eq!(devices[0].route_candidates[0].presence, Presence::Online);
 }
 
 #[test]
