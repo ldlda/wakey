@@ -117,7 +117,7 @@ _Avoid_: Endpoint state, device presence
 - API arrays should be domain-sorted by default; UI may sort top-level fleet rows for presentation, but route ranking and recommended route selection are backend-owned.
 - The main fleet API embeds **Endpoints** in each **Device** response; a separate endpoint API is unnecessary until payload size or access patterns require it.
 - The control plane stores current per-agent endpoint snapshots, not endpoint event history.
-- Agent-local hook memory is retained by local last-seen age policy, not by control-plane acknowledgement; default retention is 30 days unless configured otherwise.
+- Agent-local hook memory is retained by local last-seen age policy, not by control-plane acknowledgement; default retention is 7 days unless configured otherwise.
 - Live-source **Endpoints** use snapshot time as their observed time; hook-derived **Endpoints** use the hook row's recorded last-seen time.
 - **DeviceId**, **Endpoint Key**, and **Agent Endpoint Key** are typed concepts; string keys are boundary serialization only.
 - **DeviceId** is derived from a device's **Endpoints**: canonical MAC if any endpoint has a MAC, otherwise canonical IP, otherwise absent.

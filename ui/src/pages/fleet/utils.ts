@@ -14,8 +14,8 @@ export const presenceFilters = [
   "all",
   "online",
   "likely_online",
-  "unknown",
   "offline",
+  "unknown",
 ] as const;
 
 export const knownFilters: KnownFilter[] = ["all", "known", "unknown"];
@@ -40,8 +40,8 @@ export function formatSeen(value: number | null): string {
 export function presenceRank(presence: string): number {
   if (presence === "online") return 4;
   if (presence === "likely_online") return 3;
-  if (presence === "unknown") return 2;
-  if (presence === "offline") return 1;
+  if (presence === "offline") return 2;
+  if (presence === "unknown") return 1;
   return 0;
 }
 
@@ -60,7 +60,7 @@ export function agentLabel(agentId: string, nickname?: string | null): string {
 }
 
 export function routeLabel(route: FleetWakeRoute): string {
-  const status = route.connected ? "connected" : "offline";
+  const status = route.connected ? "connected" : "agent offline";
   const target = route.mac
     ? `${route.mac}${route.ip ? ` / ${route.ip}` : ""}`
     : (route.ip ?? "-");

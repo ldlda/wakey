@@ -11,7 +11,7 @@ const WAKEY_OBSERVATION_STORE_ENV: &str = "WAKEY_OBSERVATION_STORE";
 const DEFAULT_DHCP_LEASES_PATH: &str = "/tmp/dhcp.leases";
 const DEFAULT_MAC_NAME_CACHE_PATH: &str = "/tmp/wakey_mac_names.json";
 const DEFAULT_OBSERVATION_STORE_PATH: &str = "/tmp/wakey_observations.json";
-pub const DEFAULT_OBSERVATION_RETENTION_DAYS: u64 = 30;
+pub const DEFAULT_OBSERVATION_RETENTION_DAYS: u64 = 7;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentConfig {
@@ -213,5 +213,19 @@ mod tests {
         );
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn config_without_retention_uses_current_default() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+server_url = "https://example.com"
+agent_id = "agent-1"
+agent_token = "secret"
+"#,
+        )
+        .expect("config should parse");
+
+        assert_eq!(config.observation_retention_days, 7);
     }
 }

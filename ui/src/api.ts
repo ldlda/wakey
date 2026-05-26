@@ -103,6 +103,20 @@ export type FleetDeviceAgent = {
   last_seen_unix: number;
 };
 
+export type FleetDeviceEndpoint = {
+  agent_id: string;
+  nickname?: string | null;
+  connected: boolean;
+  source: string;
+  mac: string | null;
+  ip: string | null;
+  hostname: string | null;
+  interface: string | null;
+  presence: string;
+  first_seen_unix: number | null;
+  last_seen_unix: number | null;
+};
+
 export type FleetWakeRoute = {
   route_id: string;
   agent_id: string;
@@ -111,7 +125,9 @@ export type FleetWakeRoute = {
   mac: string | null;
   ip: string | null;
   hostname: string | null;
+  interface: string | null;
   source: string;
+  presence: string;
   last_seen_unix: number;
   wakeable: boolean;
 };
@@ -126,6 +142,7 @@ export type FleetDevice = {
   hostnames: string[];
   agents: FleetDeviceAgent[];
   sources: string[];
+  endpoints: FleetDeviceEndpoint[];
   first_seen_unix: number | null;
   last_seen_unix: number | null;
   presence: string;

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Minus, Plus, Zap } from "lucide-react";
+import { Copy, Minus, Plus, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -8,6 +8,7 @@ import {
   detachDeviceIdentifier,
   mergeKnownDevice,
   type FleetDevice,
+  type FleetDeviceEndpoint,
   type KnownDevice,
 } from "@/api";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +30,12 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { DetailBlock, PresenceBadge } from "@/pages/fleet/FleetComponents";
-import { agentLabel, identifiersFor, routeLabel } from "@/pages/fleet/utils";
+import {
+  agentLabel,
+  formatSeen,
+  identifiersFor,
+  routeLabel,
+} from "@/pages/fleet/utils";
 
 type Props = {
   device: FleetDevice | null;
@@ -221,6 +227,30 @@ export function FleetDeviceDetailsDialog({
             )}
             onCopy={onCopy}
           />
+        </div>
+
+        <Separator />
+
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium">Endpoints</h3>
+            <Badge variant="outline">{device.endpoints.length}</Badge>
+          </div>
+          {device.endpoints.length ? (
+            <div className="divide-y overflow-hidden rounded-md border">
+              {device.endpoints.map((endpoint, index) => (
+                <EndpointRow
+                  key={`${endpoint.agent_id}:${endpoint.source}:${endpoint.mac ?? ""}:${endpoint.ip ?? ""}:${index}`}
+                  endpoint={endpoint}
+                  onCopy={onCopy}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+              No endpoint evidence reported.
+            </p>
+          )}
         </div>
 
         <Separator />
@@ -511,5 +541,54 @@ export function FleetDeviceDetailsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function EndpointRow({
+  endpoint,
+  onCopy,
+}: {
+  endpoint: FleetDeviceEndpoint;
+  onCopy: (label: string, value: string) => void;
+}) {
+  const target = [endpoint.mac, endpoint.ip].filter(Boolean).join(" / ");
+  const location = [endpoint.interface, endpoint.hostname]
+    .filter(Boolean)
+    .join(" / ");
+
+  return (
+    <div className="grid gap-2 p-3 text-sm sm:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_auto] sm:items-center">
+      <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <PresenceBadge presence={endpoint.presence} />
+          <Badge variant="secondary">{endpoint.source.replace("_", " ")}</Badge>
+        </div>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {agentLabel(endpoint.agent_id, endpoint.nickname)}
+          {endpoint.connected ? " (connected)" : " (offline)"}
+        </p>
+      </div>
+      <div className="min-w-0">
+        <p className="truncate font-mono text-xs">{target || "-"}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {location || "No interface or hostname"}
+        </p>
+      </div>
+      <div className="flex items-center justify-between gap-2 sm:justify-end">
+        <span className="text-xs text-muted-foreground">
+          {formatSeen(endpoint.last_seen_unix)}
+        </span>
+        {target && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => onCopy("Endpoint", target)}
+            aria-label={`Copy endpoint ${target}`}
+          >
+            <Copy className="size-3.5" />
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }

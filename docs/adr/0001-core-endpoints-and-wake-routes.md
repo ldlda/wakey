@@ -138,7 +138,7 @@ Known-device identifiers are source-independent ownership claims over MAC or per
 
 The control plane stores current per-agent endpoint snapshots as structured columns, not opaque `Device` JSON and not endpoint event history. Summary MAC/IP collections are derived from endpoints; separate MAC/IP storage should be removed or represented as views rather than maintained as independent truth.
 
-Agent-local hook memory is retained by local last-seen age policy, not by control-plane acknowledgement. The default retention is 30 days unless configured otherwise. Live-source endpoints use snapshot time as their observed time; hook-derived endpoints use the hook row's recorded last-seen time.
+Agent-local hook memory is retained by local last-seen age policy, not by control-plane acknowledgement. The default retention is 7 days unless configured otherwise. Live-source endpoints use snapshot time as their observed time; hook-derived endpoints use the hook row's recorded last-seen time.
 
 ## Consequences
 
