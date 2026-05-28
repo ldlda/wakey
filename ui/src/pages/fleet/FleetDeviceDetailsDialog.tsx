@@ -34,6 +34,7 @@ import {
   agentLabel,
   formatSeen,
   identifiersFor,
+  presenceRank,
   routeLabel,
 } from "@/pages/fleet/utils";
 
@@ -189,7 +190,7 @@ export function FleetDeviceDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[92vh] overflow-auto sm:max-w-4xl">
         <DialogHeader>
           <div className="flex min-w-0 items-start justify-between gap-3 pr-8">
             <div className="min-w-0">
@@ -237,14 +238,26 @@ export function FleetDeviceDetailsDialog({
             <Badge variant="outline">{device.endpoints.length}</Badge>
           </div>
           {device.endpoints.length ? (
-            <div className="divide-y overflow-hidden rounded-md border">
-              {device.endpoints.map((endpoint, index) => (
-                <EndpointRow
-                  key={`${endpoint.agent_id}:${endpoint.source}:${endpoint.mac ?? ""}:${endpoint.ip ?? ""}:${index}`}
-                  endpoint={endpoint}
-                  onCopy={onCopy}
-                />
-              ))}
+            <div className="grid gap-1.5">
+              <div className="hidden grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_8rem_2rem] items-center gap-2 px-3 py-1.5 text-xs font-medium text-muted-foreground sm:grid">
+                <span>Source</span>
+                <span>Target</span>
+                <span className="text-right">Last seen</span>
+                <span />
+              </div>
+              {[...device.endpoints]
+                .sort((a, b) => {
+                  const p = presenceRank(b.presence) - presenceRank(a.presence);
+                  if (p !== 0) return p;
+                  return (b.last_seen_unix ?? 0) - (a.last_seen_unix ?? 0);
+                })
+                .map((endpoint, index) => (
+                  <EndpointRow
+                    key={`${endpoint.agent_id}:${endpoint.source}:${endpoint.mac ?? ""}:${endpoint.ip ?? ""}:${index}`}
+                    endpoint={endpoint}
+                    onCopy={onCopy}
+                  />
+                ))}
             </div>
           ) : (
             <p className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
@@ -557,7 +570,7 @@ function EndpointRow({
     .join(" / ");
 
   return (
-    <div className="grid gap-2 p-3 text-sm sm:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_auto] sm:items-center">
+    <div className="grid gap-3 rounded-md border bg-card px-3 py-2.5 text-sm sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_8rem_2rem] sm:items-center sm:gap-2">
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <PresenceBadge presence={endpoint.presence} />
@@ -570,14 +583,14 @@ function EndpointRow({
       </div>
       <div className="min-w-0">
         <p className="truncate font-mono text-xs">{target || "-"}</p>
-        <p className="truncate text-xs text-muted-foreground">
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
           {location || "No interface or hostname"}
         </p>
       </div>
-      <div className="flex items-center justify-between gap-2 sm:justify-end">
-        <span className="text-xs text-muted-foreground">
-          {formatSeen(endpoint.last_seen_unix)}
-        </span>
+      <span className="whitespace-nowrap text-right text-xs text-muted-foreground">
+        {formatSeen(endpoint.last_seen_unix)}
+      </span>
+      <div className="flex justify-end">
         {target && (
           <Button
             variant="ghost"
