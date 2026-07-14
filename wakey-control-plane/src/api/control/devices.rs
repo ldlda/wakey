@@ -111,6 +111,28 @@ pub async fn list_known_devices(
     }
 }
 
+pub async fn get_known_device(
+    State(state): State<AppState>,
+    AxumPath(device_id): AxumPath<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    match state.store.get_known_device(&device_id).await {
+        Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
+        Ok(None) => Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "known_device_not_found",
+            "known device not found",
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to get known device");
+            Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "get_known_device_failed",
+                err.to_string(),
+            ))
+        }
+    }
+}
+
 pub async fn forget_known_device(
     State(state): State<AppState>,
     AxumPath(device_id): AxumPath<String>,

@@ -216,7 +216,7 @@ impl Store {
         input: DeviceIdentifierInput,
     ) -> Result<Option<KnownDevice>> {
         let identifier = normalize_device_identifier(input)?;
-        let identifier_key = normalized_identifier_key_owned(identifier);
+        let identifier_key = identifier.identifier_key;
         let device_id = sqlx::query_scalar!(
             "SELECT device_id FROM device_identifiers WHERE identifier_key = ?1",
             identifier_key

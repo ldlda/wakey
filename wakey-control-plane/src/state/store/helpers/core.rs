@@ -70,11 +70,6 @@ pub fn normalize_device_identifier(
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn normalized_identifier_key_owned(identifier: NormalizedDeviceIdentifier) -> String {
-    identifier.identifier_key
-}
-
 pub async fn list_enroll_token_rows(pool: &SqlitePool) -> Result<Vec<EnrollTokenRow>> {
     sqlx::query_as!(
         EnrollTokenRow,

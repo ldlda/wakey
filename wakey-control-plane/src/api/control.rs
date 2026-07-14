@@ -5,7 +5,7 @@ mod stats;
 
 pub use devices::{
     attach_device_identifier, create_known_device, detach_device_identifier, forget_known_device,
-    list_known_devices, merge_known_device,
+    get_known_device, list_known_devices, merge_known_device,
 };
 pub use enroll::{
     EnrollTokenStatus, IssueEnrollTokenResponse, RevokeAgentResponse, RevokeEnrollTokenResponse,
