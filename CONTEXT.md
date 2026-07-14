@@ -60,6 +60,18 @@ _Avoid_: Device when referring to the agent machine
 Something an agent host can observe or do on the network.
 _Avoid_: Router flag
 
+**Terminal Capability**:
+An explicitly enabled agent capability that allows the agent host to create remote PTY sessions.
+_Avoid_: Command runner, implicit root access
+
+**Terminal Session**:
+One operator attachment to one PTY process hosted by an agent.
+_Avoid_: Command, SSH session, stored shell
+
+**Terminal Relay**:
+The control plane's in-memory pairing of one operator terminal socket with one outbound agent terminal socket.
+_Avoid_: Terminal session storage, terminal emulator
+
 **Interface Telemetry**:
 Current operational measurements for a network interface visible to an agent.
 _Avoid_: Endpoint state, device presence
@@ -84,6 +96,9 @@ _Avoid_: Endpoint state, device presence
 - An **Identifier** can link observed **Devices** or **Endpoints** to one **Known Device**.
 - An **Agent** runs on one **Agent Host**.
 - An **Agent Capability** describes what an **Agent Host** can observe or do.
+- **Terminal Capability** is an **Agent Capability** and must be explicitly enabled before an agent can host a **Terminal Session**.
+- A **Terminal Session** owns one PTY and is independent of one-shot agent commands.
+- A **Terminal Relay** pairs exactly one operator socket with exactly one agent socket for a **Terminal Session**.
 - **Interface Telemetry** describes an **Agent Host** interface, not a **Device Endpoint**.
 
 ## Example dialogue
@@ -126,3 +141,6 @@ _Avoid_: Endpoint state, device presence
 - An **Endpoint Key** must contain at least one network address value: MAC, IP, or both. Facts without MAC or IP remain **Observation Facts** only.
 - **Identifiers** are source-independent ownership claims over MAC or permanent IP values, not claims over endpoint sources.
 - IP **Identifiers** are explicit operator claims; Wakey does not infer whether an IP is permanent, static, or reserved.
+- **Terminal Sessions** are not agent commands — resolved: command dispatch remains request/result, while terminals use dedicated streaming sockets.
+- **Terminal Relay** is ephemeral control-plane state — resolved: terminal bytes and scrollback are not stored or audited.
+- Terminal input, output, and terminal-generated control sequences are byte streams; only lifecycle and resize operations are structured terminal protocol messages.

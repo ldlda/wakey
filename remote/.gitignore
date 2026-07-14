@@ -1,3 +1,4 @@
 *
 !.gitignore
 !copy.ps1
+!wslfix.sh
