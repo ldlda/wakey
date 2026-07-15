@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { Eraser, PlugZap, RotateCcw, Square, Terminal } from "lucide-react";
 import { toast } from "sonner";
@@ -274,7 +277,12 @@ export function TerminalPage({
         scrollbarSliderHoverBackground: "#6b7c8dcc",
         scrollbarSliderActiveBackground: "#8294a6",
       },
+      allowProposedApi: true, // this for unicode11 addon. FOR SOME reason xtermjs doesnt tell me this in the readme.
     });
+    terminal.loadAddon(new Unicode11Addon());
+    terminal.unicode.activeVersion = "11";
+    terminal.loadAddon(new UnicodeGraphemesAddon());
+    terminal.loadAddon(new WebLinksAddon());
     const fit = new FitAddon();
     terminal.loadAddon(new ClipboardAddon());
     terminal.loadAddon(fit);

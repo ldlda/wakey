@@ -56,7 +56,7 @@ impl TerminalState {
             let contents = screen.rows(0, cols).next().unwrap_or_default();
             physical_rows.push((
                 screen.rows_formatted(0, cols).next().unwrap_or_default(),
-                UnicodeWidthStr::width(contents.as_str()).min(usize::from(cols)),
+                UnicodeWidthStr::width_cjk(contents.as_str()).min(usize::from(cols)),
                 screen.row_wrapped(0),
             ));
         }
@@ -71,7 +71,7 @@ impl TerminalState {
                     .rows_formatted(0, cols)
                     .nth(usize::from(row))
                     .unwrap_or_default(),
-                UnicodeWidthStr::width(contents.as_str()).min(usize::from(cols)),
+                UnicodeWidthStr::width_cjk(contents.as_str()).min(usize::from(cols)),
                 screen.row_wrapped(row),
             )
         }));
@@ -173,16 +173,17 @@ impl TerminalManager {
         let active = Arc::downgrade(&self.active);
         let events = self.events.clone();
         tokio::spawn(async move {
-            if let Err(err) =
-                run_terminal(&config, &terminal_id, rows, cols, cancel_rx, relay_rx).await
-            {
+            let result = run_terminal(&config, &terminal_id, rows, cols, cancel_rx, relay_rx).await;
+            // Inventory is authoritative. Remove the stopped worker before
+            // notifying the control session, which may immediately resync it.
+            remove_completed(&active, terminal_id.as_str());
+            if let Err(err) = result {
                 warn!(terminal_id = %terminal_id, error = %err, "terminal worker failed");
                 let _ = events.send(TerminalManagerEvent {
                     terminal_id: terminal_id.clone(),
                     error: err.to_string(),
                 });
             }
-            remove_completed(&active, terminal_id.as_str());
         });
         Ok(())
     }
@@ -196,20 +197,21 @@ impl TerminalManager {
     }
 
     pub fn resume(&self, terminal_id: &TerminalId, relay_token: String) -> Result<()> {
-        let active = self.active.lock().expect("terminal manager poisoned");
+        let mut active = self.active.lock().expect("terminal manager poisoned");
         let session = active
             .get(terminal_id.as_str())
             .with_context(|| format!("terminal session {terminal_id} is not active"))?;
-        session
-            .relay_credentials
-            .send(relay_token)
-            .map_err(|_| anyhow::anyhow!("terminal session {terminal_id} has stopped"))
+        if session.relay_credentials.send(relay_token).is_err() {
+            active.remove(terminal_id.as_str());
+            anyhow::bail!("terminal session {terminal_id} has stopped");
+        }
+        Ok(())
     }
 
     pub fn sessions(&self) -> Vec<AgentTerminalSession> {
-        self.active
-            .lock()
-            .expect("terminal manager poisoned")
+        let mut active = self.active.lock().expect("terminal manager poisoned");
+        active.retain(|_, terminal| !terminal.relay_credentials.is_closed());
+        active
             .iter()
             .filter_map(|(terminal_id, active)| {
                 TerminalId::new(terminal_id.clone())
@@ -605,6 +607,27 @@ fn validate_size(rows: u16, cols: u16) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn manager_with_stopped_terminal(terminal_id: &str) -> TerminalManager {
+        let (cancel, cancel_rx) = oneshot::channel();
+        drop(cancel_rx);
+        let (relay_credentials, relay_rx) = mpsc::unbounded_channel();
+        drop(relay_rx);
+        let (events, event_rx) = mpsc::unbounded_channel();
+        drop(event_rx);
+        TerminalManager {
+            active: Arc::new(Mutex::new(HashMap::from([(
+                terminal_id.to_string(),
+                ActiveTerminal {
+                    cancel,
+                    relay_credentials,
+                    created_at_unix: 42,
+                },
+            )]))),
+            max_sessions: 2,
+            events,
+        }
+    }
+
     #[test]
     fn terminal_url_uses_dedicated_agent_path() {
         let id = TerminalId::new("term-1").expect("terminal id");
@@ -613,6 +636,22 @@ mod tests {
             url.as_str(),
             "wss://example.com/api/v1/agent/terminals/term-1/ws"
         );
+    }
+
+    #[test]
+    fn failed_resume_removes_stopped_terminal_from_inventory() {
+        let manager = manager_with_stopped_terminal("stopped-terminal");
+        let terminal_id = TerminalId::new("stopped-terminal").expect("terminal id");
+
+        assert!(manager.resume(&terminal_id, "replacement".into()).is_err());
+        assert!(manager.sessions().is_empty());
+    }
+
+    #[test]
+    fn inventory_prunes_terminal_with_stopped_worker() {
+        let manager = manager_with_stopped_terminal("stopped-terminal");
+
+        assert!(manager.sessions().is_empty());
     }
 
     #[test]

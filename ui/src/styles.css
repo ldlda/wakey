@@ -545,6 +545,7 @@
      fitted canvas, so keep it on the same surface as the terminal theme. */
   background-color: #0b1117;
   overscroll-behavior: contain;
+  scrollbar-width: none;
 }
 
 .terminal-surface .xterm-scrollable-element > .scrollbar,
