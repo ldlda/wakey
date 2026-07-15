@@ -274,6 +274,7 @@ async fn handle_agent_terminal_socket(state: AppState, terminal_id: String, mut 
     }
     loop {
         tokio::select! {
+            biased;
             outbound_frame = outbound.recv() => {
                 let Some(frame) = outbound_frame else { break; };
                 if send_relay_frame(&mut write, frame).await.is_err() { break; }
@@ -332,6 +333,15 @@ async fn handle_operator_terminal_socket(
         }
     };
     info!(terminal_id, "operator terminal socket attached");
+    let refresh = serde_json::to_string(&TerminalControl::Refresh)
+        .expect("terminal refresh control serializes");
+    if let Err(code) = state
+        .terminals
+        .relay_to_agent(&terminal_id, TerminalRelayFrame::Text(refresh))
+        .await
+    {
+        warn!(terminal_id, code, "failed to request terminal redraw");
+    }
     let summary = state.terminals.summary(&terminal_id).await;
     if let Some((agent_id, _, _, _)) = &summary {
         append_terminal_audit(
@@ -370,10 +380,7 @@ async fn handle_operator_terminal_socket(
     let mut explicit_close = false;
     loop {
         tokio::select! {
-            outbound_frame = outbound.recv() => {
-                let Some(frame) = outbound_frame else { break; };
-                if send_relay_frame(&mut write, frame).await.is_err() { break; }
-            }
+            biased;
             incoming = read.next() => {
                 let Some(Ok(message)) = incoming else { break; };
                 match operator_relay_frame(message) {
@@ -388,6 +395,10 @@ async fn handle_operator_terminal_socket(
                         break;
                     }
                 }
+            }
+            outbound_frame = outbound.recv() => {
+                let Some(frame) = outbound_frame else { break; };
+                if send_relay_frame(&mut write, frame).await.is_err() { break; }
             }
         }
     }
@@ -645,5 +656,8 @@ mod tests {
 
         let ready = serde_json::to_string(&TerminalControl::Ready).expect("ready json");
         assert!(operator_relay_frame(Message::Text(ready.into())).is_err());
+
+        let refresh = serde_json::to_string(&TerminalControl::Refresh).expect("refresh json");
+        assert!(operator_relay_frame(Message::Text(refresh.into())).is_err());
     }
 }

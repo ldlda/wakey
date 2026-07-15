@@ -54,12 +54,13 @@ The terminal control vocabulary is deliberately small:
 
 ```text
 operator -> agent: resize, close
+control plane -> agent: refresh
 agent -> operator: ready, exited, error
 ```
 
 Initial terminal dimensions are part of session attachment. Resize carries rows and columns; pixel dimensions may be added later if a demonstrated program requires them.
 
-Terminal behavior such as Ctrl-C, Ctrl-Z, Ctrl-D, cursor keys, mouse reporting, bracketed paste, colors, and terminal-title changes remains in the byte stream. The control plane does not parse ANSI escape sequences. The browser terminal emulator renders output and owns connected-session scrollback.
+Terminal behavior such as Ctrl-C, Ctrl-Z, Ctrl-D, cursor keys, mouse reporting, bracketed paste, colors, and terminal-title changes remains in the byte stream. The control plane does not parse ANSI escape sequences. The browser terminal emulator renders output and owns connected-session scrollback. Agent PTYs advertise `TERM=xterm-256color` and `COLORTERM=truecolor` because xterm.js is the actual frontend; applications may therefore negotiate xterm mouse reporting without a Wakey-specific mouse protocol.
 
 WebSockets already provide ordered, reliable delivery, so terminal frames do not carry sequence numbers in the initial protocol.
 
@@ -68,6 +69,8 @@ WebSockets already provide ordered, reliable delivery, so terminal frames do not
 Terminal sessions allow only one attached operator. Their lifetime belongs to the agent process, not to a browser route or a particular control-plane connection.
 
 When the operator socket disconnects, the session becomes detached. Navigation, browser closure, and network loss do not terminate the PTY. A protected operator request may discover the live session and obtain a fresh, single-use attachment credential. The control plane retains only a bounded in-memory output buffer during the gap and replays it before live output on reattachment.
+
+After operator attachment, the control plane sends a `refresh` hint. The agent queries the PTY's current foreground process group and sends it `SIGWINCH`, allowing full-screen applications to redraw without assuming that the original shell remains in the foreground. Refresh failure is logged but never terminates the session.
 
 The agent keeps its terminal manager outside the control-WebSocket reconnect loop. If a dedicated terminal relay disconnects, the PTY continues draining output into a bounded local replay buffer while waiting for replacement relay credentials. On every authenticated control connection, the agent reports its in-memory live terminal IDs and creation times. The control plane reconciles that inventory, adopts sessions missing from its volatile registry, and issues fresh relay credentials. This allows sessions to survive control-plane restart without persisting terminal state in SQLite.
 
@@ -82,6 +85,8 @@ The agent reports a normal exit status or terminating signal when available. The
 Terminal transport must not use unbounded queues.
 
 Every queue between PTY, agent socket, control-plane relay, and browser socket is bounded. Agent and control-plane replay buffers are bounded as well. The agent keeps draining the PTY while detached so a noisy child cannot stall the agent; output older than the replay bound is discarded.
+
+When input/control and output are ready simultaneously, relay loops prioritize input and control. This keeps interrupt, resize, close, and refresh traffic responsive while commands produce sustained output.
 
 The implementation also enforces:
 

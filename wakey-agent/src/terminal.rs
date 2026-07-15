@@ -178,11 +178,7 @@ async fn run_terminal(
             return Err(err);
         }
     };
-    let wakey::wakey_linux::terminal::TerminalPty {
-        mut reader,
-        mut writer,
-        mut child,
-    } = terminal;
+    let (mut reader, mut writer, mut child) = terminal.into_parts();
     let process_group = child.id();
     info!(terminal_id = %terminal_id, shell = %config.terminal.shell.display(), "terminal PTY ready");
 
@@ -197,6 +193,7 @@ async fn run_terminal(
     let mut observed_status = None;
     loop {
         tokio::select! {
+            biased;
             _ = &mut cancel => {
                 requested_close = true;
                 break;
@@ -205,18 +202,42 @@ async fn run_terminal(
                 observed_status = Some(status.context("failed waiting for terminal child")?);
                 break;
             }
-            read = reader.read(&mut output) => {
-                match read {
-                    Ok(0) => break,
-                    Ok(count) => send_terminal_output(
-                        Message::Binary(output[..count].to_vec().into()),
-                        &mut relay_output,
-                        &mut replay,
-                        &mut replay_bytes,
-                    ).await,
-                    // Linux PTY masters commonly report EIO after the slave closes.
-                    Err(err) if err.raw_os_error() == Some(5) => break,
-                    Err(err) => return Err(err).context("failed to read PTY output"),
+            incoming = relay_input_rx.recv() => {
+                let Some(message) = incoming else { break; };
+                match message {
+                    RelayInput::Binary { generation, bytes } if generation == relay_generation => {
+                        if bytes.len() > MAX_TERMINAL_FRAME_BYTES {
+                            anyhow::bail!("terminal input frame exceeds size limit");
+                        }
+                        writer.write_all(&bytes).await.context("failed to write PTY input")?;
+                    }
+                    RelayInput::Resize { generation, rows, cols } if generation == relay_generation => {
+                        validate_size(rows, cols)?;
+                        writer.resize(rows, cols)?;
+                    }
+                    RelayInput::Refresh { generation } if generation == relay_generation => {
+                        if let Err(err) = writer.refresh() {
+                            warn!(terminal_id = %terminal_id, error = %err, "terminal redraw signal failed");
+                        }
+                    }
+                    RelayInput::Close { generation } if generation == relay_generation => {
+                        requested_close = true;
+                        break;
+                    }
+                    RelayInput::Connected { generation, output } if generation == relay_generation => {
+                        relay_output = Some(output.clone());
+                        while let Some(frame) = replay.pop_front() {
+                            replay_bytes = replay_bytes.saturating_sub(message_size(&frame));
+                            if output.send(frame).await.is_err() {
+                                relay_output = None;
+                                break;
+                            }
+                        }
+                    }
+                    RelayInput::Disconnected { generation } if generation == relay_generation => {
+                        relay_output = None;
+                    }
+                    _ => {}
                 }
             }
             credential = relay_credentials.recv() => {
@@ -249,37 +270,18 @@ async fn run_terminal(
                     let _ = relay_input_tx.send(RelayInput::Disconnected { generation });
                 }));
             }
-            incoming = relay_input_rx.recv() => {
-                let Some(message) = incoming else { break; };
-                match message {
-                    RelayInput::Binary { generation, bytes } if generation == relay_generation => {
-                        if bytes.len() > MAX_TERMINAL_FRAME_BYTES {
-                            anyhow::bail!("terminal input frame exceeds size limit");
-                        }
-                        writer.write_all(&bytes).await.context("failed to write PTY input")?;
-                    }
-                    RelayInput::Resize { generation, rows, cols } if generation == relay_generation => {
-                        validate_size(rows, cols)?;
-                        wakey::wakey_linux::terminal::resize_terminal(&writer, rows, cols)?;
-                    }
-                    RelayInput::Close { generation } if generation == relay_generation => {
-                        requested_close = true;
-                        break;
-                    }
-                    RelayInput::Connected { generation, output } if generation == relay_generation => {
-                        relay_output = Some(output.clone());
-                        while let Some(frame) = replay.pop_front() {
-                            replay_bytes = replay_bytes.saturating_sub(message_size(&frame));
-                            if output.send(frame).await.is_err() {
-                                relay_output = None;
-                                break;
-                            }
-                        }
-                    }
-                    RelayInput::Disconnected { generation } if generation == relay_generation => {
-                        relay_output = None;
-                    }
-                    _ => {}
+            read = reader.read(&mut output) => {
+                match read {
+                    Ok(0) => break,
+                    Ok(count) => send_terminal_output(
+                        Message::Binary(output[..count].to_vec().into()),
+                        &mut relay_output,
+                        &mut replay,
+                        &mut replay_bytes,
+                    ).await,
+                    // Linux PTY masters commonly report EIO after the slave closes.
+                    Err(err) if err.raw_os_error() == Some(5) => break,
+                    Err(err) => return Err(err).context("failed to read PTY output"),
                 }
             }
         }
@@ -314,6 +316,9 @@ enum RelayInput {
         generation: u64,
         rows: u16,
         cols: u16,
+    },
+    Refresh {
+        generation: u64,
     },
     Close {
         generation: u64,
@@ -367,10 +372,7 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
     let mut output = relay.output_rx;
     loop {
         tokio::select! {
-            outgoing = output.recv() => {
-                let Some(message) = outgoing else { break; };
-                sink.send(message).await.context("failed to send terminal relay output")?;
-            }
+            biased;
             incoming = source.next() => {
                 let Some(message) = incoming else { break; };
                 match message.context("terminal relay websocket receive failed")? {
@@ -391,6 +393,11 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
                             })
                                 .map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
                         }
+                        TerminalControl::Refresh => {
+                            relay.input.send(RelayInput::Refresh {
+                                generation: relay.generation,
+                            }).map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
+                        }
                         TerminalControl::Close => {
                             let _ = relay.input.send(RelayInput::Close {
                                 generation: relay.generation,
@@ -406,6 +413,10 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
                     Message::Close(_) => break,
                     Message::Frame(_) => {}
                 }
+            }
+            outgoing = output.recv() => {
+                let Some(message) = outgoing else { break; };
+                sink.send(message).await.context("failed to send terminal relay output")?;
             }
         }
     }

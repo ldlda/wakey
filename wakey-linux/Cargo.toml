@@ -23,4 +23,9 @@ version = "0"
 features = ["experimental-nl"]
 
 [target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", default-features = false, features = [
+    "signal",
+    "process",
+    "term",
+] }
 pty-process = { version = "0.5", features = ["async"] }

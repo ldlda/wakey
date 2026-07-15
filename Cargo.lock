@@ -3700,6 +3700,7 @@ dependencies = [
  "futures",
  "lda-ipjs",
  "macaddr",
+ "nix 0.31.2",
  "pty-process",
  "serde",
  "serde_json",
