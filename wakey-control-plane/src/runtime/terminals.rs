@@ -35,10 +35,13 @@ struct TerminalSession {
     agent_confirmed: bool,
     relay_token: Option<String>,
     attachment_token: Option<String>,
+    attachment_operator_id: Option<String>,
     agent_tx: Option<mpsc::Sender<TerminalRelayFrame>>,
     pending_agent: VecDeque<TerminalRelayFrame>,
     pending_agent_bytes: usize,
     operator_tx: Option<mpsc::Sender<TerminalRelayFrame>>,
+    operator_id: Option<String>,
+    operator_connection_id: Option<String>,
     operator_detached_at: Option<Instant>,
 }
 
@@ -99,10 +102,13 @@ impl TerminalRegistry {
                 agent_confirmed: false,
                 relay_token: Some(relay_token.clone()),
                 attachment_token: Some(attachment_token.clone()),
+                attachment_operator_id: None,
                 agent_tx: None,
                 pending_agent: VecDeque::new(),
                 pending_agent_bytes: 0,
                 operator_tx: None,
+                operator_id: None,
+                operator_connection_id: None,
                 operator_detached_at: None,
             },
         );
@@ -193,10 +199,13 @@ impl TerminalRegistry {
                     agent_confirmed: true,
                     relay_token: None,
                     attachment_token: None,
+                    attachment_operator_id: None,
                     agent_tx: None,
                     pending_agent: VecDeque::new(),
                     pending_agent_bytes: 0,
                     operator_tx: None,
+                    operator_id: None,
+                    operator_connection_id: None,
                     operator_detached_at: Some(Instant::now()),
                 });
             if session.agent_id != agent_id || session.agent_tx.is_some() {
@@ -217,14 +226,27 @@ impl TerminalRegistry {
         Some(session.agent_id.clone())
     }
 
-    pub async fn issue_attachment_token(&self, terminal_id: &str) -> Result<String, &'static str> {
+    /// Issues a token while atomically handing this operator's attachment to
+    /// the target. A different operator remains protected by the single-viewer
+    /// rule, while a stale socket owned by this operator can be replaced.
+    pub async fn issue_attachment_token_for_operator(
+        &self,
+        terminal_id: &str,
+        operator_id: &str,
+    ) -> Result<String, &'static str> {
+        validate_operator_id(operator_id)?;
         let mut sessions = self.inner.lock().await;
-        let session = active_session(&mut sessions, terminal_id)?;
-        if session.operator_tx.is_some() {
+        let target = active_session(&mut sessions, terminal_id)?;
+        if target.operator_tx.is_some() && target.operator_id.as_deref() != Some(operator_id) {
             return Err("terminal_operator_already_attached");
         }
+
+        detach_operator_sessions(&mut sessions, operator_id);
+
+        let session = active_session(&mut sessions, terminal_id)?;
         let token = new_token();
         session.attachment_token = Some(token.clone());
+        session.attachment_operator_id = Some(operator_id.to_string());
         Ok(token)
     }
 
@@ -258,7 +280,9 @@ impl TerminalRegistry {
         &self,
         terminal_id: &str,
         attachment_token: &str,
+        operator_id: &str,
     ) -> Result<mpsc::Receiver<TerminalRelayFrame>, &'static str> {
+        validate_operator_id(operator_id)?;
         let mut sessions = self.inner.lock().await;
         let session = active_session(&mut sessions, terminal_id)?;
         if session.operator_tx.is_some() {
@@ -267,10 +291,26 @@ impl TerminalRegistry {
         if session.attachment_token.as_deref() != Some(attachment_token) {
             return Err("terminal_attachment_token_invalid");
         }
+        if session
+            .attachment_operator_id
+            .as_deref()
+            .is_some_and(|expected| expected != operator_id)
+        {
+            return Err("terminal_operator_mismatch");
+        }
+
+        // Initial create tokens are not yet bound to an operator. Once the
+        // WebSocket presents that token, it still atomically releases any
+        // older session held by the same browser tab.
+        detach_operator_sessions(&mut sessions, operator_id);
+        let session = active_session(&mut sessions, terminal_id)?;
         session.attachment_token = None;
+        session.attachment_operator_id = None;
         session.operator_detached_at = None;
         let (tx, rx) = mpsc::channel(TERMINAL_RELAY_QUEUE);
         session.operator_tx = Some(tx);
+        session.operator_id = Some(operator_id.to_string());
+        session.operator_connection_id = Some(attachment_token.to_string());
         Ok(rx)
     }
 
@@ -326,10 +366,13 @@ impl TerminalRegistry {
                     // authoritative and will reconstruct the next attachment.
                     let mut sessions = self.inner.lock().await;
                     let session = active_session(&mut sessions, terminal_id)?;
-                    session.operator_tx = None;
-                    session
-                        .operator_detached_at
-                        .get_or_insert_with(Instant::now);
+                    if session
+                        .operator_tx
+                        .as_ref()
+                        .is_some_and(|current| current.same_channel(&tx))
+                    {
+                        clear_operator_attachment(session);
+                    }
                     return Ok(());
                 }
             }
@@ -360,12 +403,16 @@ impl TerminalRegistry {
             .ok_or("terminal_not_found")
     }
 
-    pub async fn detach_operator(&self, terminal_id: &str) -> Option<Instant> {
+    /// Detaches only the socket identified by this attachment token. Delayed
+    /// cleanup from an older socket must not clear its replacement.
+    pub async fn detach_operator(&self, terminal_id: &str, connection_id: &str) -> Option<Instant> {
         let mut sessions = self.inner.lock().await;
         let session = sessions.get_mut(terminal_id)?;
-        session.operator_tx = None;
+        if session.operator_connection_id.as_deref() != Some(connection_id) {
+            return None;
+        }
         let detached_at = Instant::now();
-        session.operator_detached_at = Some(detached_at);
+        clear_operator_attachment(session);
         Some(detached_at)
     }
 
@@ -408,6 +455,28 @@ fn active_session<'a>(
     Ok(session)
 }
 
+fn validate_operator_id(operator_id: &str) -> Result<(), &'static str> {
+    if operator_id.is_empty() || operator_id.len() > 128 {
+        return Err("terminal_operator_id_invalid");
+    }
+    Ok(())
+}
+
+fn detach_operator_sessions(sessions: &mut HashMap<String, TerminalSession>, operator_id: &str) {
+    for session in sessions.values_mut() {
+        if session.operator_id.as_deref() == Some(operator_id) {
+            clear_operator_attachment(session);
+        }
+    }
+}
+
+fn clear_operator_attachment(session: &mut TerminalSession) {
+    session.operator_tx = None;
+    session.operator_id = None;
+    session.operator_connection_id = None;
+    session.operator_detached_at = Some(Instant::now());
+}
+
 fn new_token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
@@ -427,6 +496,9 @@ fn relay_frame_size(frame: &TerminalRelayFrame) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const OPERATOR_A: &str = "browser-tab-a";
+    const OPERATOR_B: &str = "browser-tab-b";
 
     #[tokio::test]
     async fn credentials_are_scoped_and_single_use() {
@@ -452,12 +524,12 @@ mod tests {
         );
 
         registry
-            .attach_operator(&created.terminal_id, &created.attachment_token)
+            .attach_operator(&created.terminal_id, &created.attachment_token, OPERATOR_A)
             .await
             .expect("attach operator");
         assert!(
             registry
-                .attach_operator(&created.terminal_id, &created.attachment_token)
+                .attach_operator(&created.terminal_id, &created.attachment_token, OPERATOR_A,)
                 .await
                 .is_err()
         );
@@ -476,7 +548,7 @@ mod tests {
             .expect("ignore detached output");
 
         let mut outbound = registry
-            .attach_operator(&created.terminal_id, &created.attachment_token)
+            .attach_operator(&created.terminal_id, &created.attachment_token, OPERATOR_A)
             .await
             .expect("attach operator");
         assert!(outbound.try_recv().is_err());
@@ -487,7 +559,7 @@ mod tests {
         let registry = TerminalRegistry::new();
         let created = registry.create("router".into()).await.expect("create");
         let mut outbound = registry
-            .attach_operator(&created.terminal_id, &created.attachment_token)
+            .attach_operator(&created.terminal_id, &created.attachment_token, OPERATOR_A)
             .await
             .expect("attach operator");
         let frame = TerminalRelayFrame::Binary(b"recent prompt".to_vec());
@@ -496,14 +568,16 @@ mod tests {
             .await
             .expect("relay output");
         outbound.recv().await.expect("live output");
-        registry.detach_operator(&created.terminal_id).await;
+        registry
+            .detach_operator(&created.terminal_id, &created.attachment_token)
+            .await;
 
         let token = registry
-            .issue_attachment_token(&created.terminal_id)
+            .issue_attachment_token_for_operator(&created.terminal_id, OPERATOR_A)
             .await
             .expect("reattach token");
         let mut remounted = registry
-            .attach_operator(&created.terminal_id, &token)
+            .attach_operator(&created.terminal_id, &token, OPERATOR_A)
             .await
             .expect("reattach operator");
 
@@ -582,11 +656,13 @@ mod tests {
         let registry = TerminalRegistry::new();
         let created = registry.create("router".into()).await.expect("create");
         registry
-            .attach_operator(&created.terminal_id, &created.attachment_token)
+            .attach_operator(&created.terminal_id, &created.attachment_token, OPERATOR_A)
             .await
             .expect("attach operator");
 
-        registry.detach_operator(&created.terminal_id).await;
+        registry
+            .detach_operator(&created.terminal_id, &created.attachment_token)
+            .await;
 
         let summary = registry
             .summary(&created.terminal_id)
@@ -594,9 +670,95 @@ mod tests {
             .expect("session remains after detach");
         assert!(!summary.3);
         registry
-            .issue_attachment_token(&created.terminal_id)
+            .issue_attachment_token_for_operator(&created.terminal_id, OPERATOR_A)
             .await
             .expect("detached session can be reattached");
+    }
+
+    #[tokio::test]
+    async fn attachment_handoff_releases_previous_operator_atomically() {
+        let registry = TerminalRegistry::new();
+        let previous = registry.create("router".into()).await.expect("previous");
+        let next = registry.create("router".into()).await.expect("next");
+        registry
+            .attach_operator(
+                &previous.terminal_id,
+                &previous.attachment_token,
+                OPERATOR_A,
+            )
+            .await
+            .expect("attach previous");
+
+        let next_token = registry
+            .issue_attachment_token_for_operator(&next.terminal_id, OPERATOR_A)
+            .await
+            .expect("handoff token");
+
+        assert!(!registry.summary(&previous.terminal_id).await.unwrap().3);
+        registry
+            .attach_operator(&next.terminal_id, &next_token, OPERATOR_A)
+            .await
+            .expect("attach next");
+    }
+
+    #[tokio::test]
+    async fn attachment_handoff_does_not_evict_unrelated_operator() {
+        let registry = TerminalRegistry::new();
+        let previous = registry.create("router".into()).await.expect("previous");
+        let occupied = registry.create("router".into()).await.expect("occupied");
+        registry
+            .attach_operator(
+                &previous.terminal_id,
+                &previous.attachment_token,
+                OPERATOR_A,
+            )
+            .await
+            .expect("attach previous");
+        registry
+            .attach_operator(
+                &occupied.terminal_id,
+                &occupied.attachment_token,
+                OPERATOR_B,
+            )
+            .await
+            .expect("attach occupied");
+
+        let error = registry
+            .issue_attachment_token_for_operator(&occupied.terminal_id, OPERATOR_A)
+            .await
+            .expect_err("occupied target remains protected");
+
+        assert_eq!(error, "terminal_operator_already_attached");
+        assert!(registry.summary(&previous.terminal_id).await.unwrap().3);
+        assert!(registry.summary(&occupied.terminal_id).await.unwrap().3);
+    }
+
+    #[tokio::test]
+    async fn stale_socket_cleanup_does_not_detach_replacement() {
+        let registry = TerminalRegistry::new();
+        let created = registry.create("router".into()).await.expect("create");
+        let old_connection_id = created.attachment_token.clone();
+        let _old_outbound = registry
+            .attach_operator(&created.terminal_id, &created.attachment_token, OPERATOR_A)
+            .await
+            .expect("attach old socket");
+
+        let replacement_token = registry
+            .issue_attachment_token_for_operator(&created.terminal_id, OPERATOR_A)
+            .await
+            .expect("replace own socket");
+        let _replacement_outbound = registry
+            .attach_operator(&created.terminal_id, &replacement_token, OPERATOR_A)
+            .await
+            .expect("attach replacement socket");
+
+        assert!(
+            registry
+                .detach_operator(&created.terminal_id, &old_connection_id)
+                .await
+                .is_none()
+        );
+        assert!(registry.summary(&created.terminal_id).await.unwrap().3);
     }
 
     #[tokio::test]

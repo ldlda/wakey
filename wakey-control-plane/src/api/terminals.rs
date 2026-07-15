@@ -28,6 +28,13 @@ pub struct CreateTerminalRequest {
     pub cols: u16,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AttachTerminalRequest {
+    /// Stable for one browser tab, allowing CC to distinguish a stale socket
+    /// owned by this tab from a session open in another browser.
+    pub operator_id: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct TerminalSessionResponse {
     pub terminal_id: String,
@@ -157,10 +164,11 @@ pub async fn list_terminals(State(state): State<AppState>) -> Json<Vec<TerminalS
 pub async fn attach_terminal(
     State(state): State<AppState>,
     Path(terminal_id): Path<String>,
+    Json(request): Json<AttachTerminalRequest>,
 ) -> Result<Json<TerminalSessionResponse>, ApiError> {
     let attachment_token = state
         .terminals
-        .issue_attachment_token(&terminal_id)
+        .issue_attachment_token_for_operator(&terminal_id, &request.operator_id)
         .await
         .map_err(registry_error)?;
     let (agent_id, created_at_unix, agent_attached, operator_attached) = state
@@ -312,10 +320,13 @@ async fn handle_operator_terminal_socket(
     terminal_id: String,
     mut socket: WebSocket,
 ) {
-    let attachment_token = match receive_text_handshake(&mut socket).await.and_then(|text| {
+    let auth = match receive_text_handshake(&mut socket).await.and_then(|text| {
         serde_json::from_str::<TerminalOperatorHandshake>(&text).map_err(|_| "invalid handshake")
     }) {
-        Ok(TerminalOperatorHandshake::Attach { attachment_token }) => attachment_token,
+        Ok(TerminalOperatorHandshake::Attach {
+            attachment_token,
+            operator_id,
+        }) => (attachment_token, operator_id),
         Err(code) => {
             close_socket(&mut socket, code).await;
             return;
@@ -323,7 +334,7 @@ async fn handle_operator_terminal_socket(
     };
     let mut outbound = match state
         .terminals
-        .attach_operator(&terminal_id, &attachment_token)
+        .attach_operator(&terminal_id, &auth.0, &auth.1)
         .await
     {
         Ok(attached) => attached,
@@ -367,7 +378,7 @@ async fn handle_operator_terminal_socket(
             .await
             .is_err()
         {
-            state.terminals.detach_operator(&terminal_id).await;
+            state.terminals.detach_operator(&terminal_id, &auth.0).await;
             return;
         }
     }
@@ -400,7 +411,7 @@ async fn handle_operator_terminal_socket(
     if explicit_close {
         close_registered_terminal(&state, &terminal_id).await;
     } else {
-        state.terminals.detach_operator(&terminal_id).await;
+        state.terminals.detach_operator(&terminal_id, &auth.0).await;
     }
     info!(
         terminal_id,
@@ -610,9 +621,10 @@ fn validate_size(rows: u16, cols: u16) -> Result<(), ApiError> {
 fn registry_error(code: &'static str) -> ApiError {
     let status = match code {
         "terminal_not_found" => StatusCode::NOT_FOUND,
-        "terminal_relay_token_invalid" | "terminal_attachment_token_invalid" => {
-            StatusCode::UNAUTHORIZED
-        }
+        "terminal_operator_id_invalid" => StatusCode::BAD_REQUEST,
+        "terminal_relay_token_invalid"
+        | "terminal_attachment_token_invalid"
+        | "terminal_operator_mismatch" => StatusCode::UNAUTHORIZED,
         _ => StatusCode::CONFLICT,
     };
     ApiError::new(status, code, code.replace('_', " "))

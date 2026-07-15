@@ -76,7 +76,10 @@ pub enum TerminalAgentHandshake {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TerminalOperatorHandshake {
-    Attach { attachment_token: String },
+    Attach {
+        attachment_token: String,
+        operator_id: String,
+    },
 }
 
 impl TryFrom<String> for RequestId {
@@ -339,6 +342,15 @@ mod tests {
         let snapshot =
             serde_json::to_string(&TerminalControl::Snapshot).expect("serialize snapshot");
         assert_eq!(snapshot, r#"{"type":"snapshot"}"#);
+        let operator = TerminalOperatorHandshake::Attach {
+            attachment_token: "attach-secret".into(),
+            operator_id: "browser-tab".into(),
+        };
+        let json = serde_json::to_string(&operator).expect("serialize operator handshake");
+        assert_eq!(
+            json,
+            r#"{"type":"attach","attachment_token":"attach-secret","operator_id":"browser-tab"}"#
+        );
 
         let inventory = ClientMessage::TerminalSessions {
             sessions: vec![AgentTerminalSession {

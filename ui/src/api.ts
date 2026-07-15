@@ -251,10 +251,16 @@ export function listTerminals(): Promise<TerminalSession[]> {
   return request<TerminalSession[]>("/api/v1/control/terminals");
 }
 
-export function attachTerminal(terminalId: string): Promise<TerminalSession> {
+export function attachTerminal(
+  terminalId: string,
+  operatorId: string,
+): Promise<TerminalSession> {
   return request<TerminalSession>(
     `/api/v1/control/terminals/${encodeURIComponent(terminalId)}/attach`,
-    { method: "POST" },
+    {
+      method: "POST",
+      body: JSON.stringify({ operator_id: operatorId }),
+    },
   );
 }
 

@@ -5,7 +5,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
-import { Eraser, PlugZap, RotateCcw, Square, Terminal } from "lucide-react";
+import { Eraser, Plus, RotateCcw, Terminal, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -40,7 +40,28 @@ type ConnectionState =
   | "exited";
 
 const REMEMBERED_TERMINAL_KEY = "wakey.active-terminal-id";
-const ATTACH_RETRY_DELAY_MS = 150;
+const TERMINAL_OPERATOR_KEY = "wakey.terminal-operator-id";
+
+// polyfill for testing in browsers that don't support crypto.randomUUID()
+const thing = () =>
+  (String(1e7) + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c: string) => {
+    const num = Number(c);
+    return (
+      num ^
+      (window.crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (num / 4)))
+    ).toString(16);
+  });
+
+function terminalOperatorId(): string {
+  // Session storage survives route unmounts but remains scoped to this browser
+  // tab. The ID coordinates attachment ownership; API authentication remains
+  // the security boundary.
+  const remembered = window.sessionStorage.getItem(TERMINAL_OPERATOR_KEY);
+  if (remembered) return remembered;
+  const created = window.crypto.randomUUID?.() ?? thing();
+  window.sessionStorage.setItem(TERMINAL_OPERATOR_KEY, created);
+  return created;
+}
 
 function mergeTerminalSession(
   sessions: TerminalSession[],
@@ -49,9 +70,29 @@ function mergeTerminalSession(
   const remaining = sessions.filter(
     (item) => item.terminal_id !== next.terminal_id,
   );
-  return [next, ...remaining].sort(
-    (left, right) => right.created_at_unix - left.created_at_unix,
+  return [...remaining, next].sort(
+    (left, right) => left.created_at_unix - right.created_at_unix,
   );
+}
+
+function orderTerminalSessions(sessions: TerminalSession[]): TerminalSession[] {
+  return [...sessions].sort(
+    (left, right) => left.created_at_unix - right.created_at_unix,
+  );
+}
+
+function reconcileTerminalSessions(
+  current: TerminalSession[],
+  listed: TerminalSession[],
+): TerminalSession[] {
+  const listedById = new Map(listed.map((item) => [item.terminal_id, item]));
+  const retained = current.flatMap((item) => {
+    const updated = listedById.get(item.terminal_id);
+    if (!updated) return [];
+    listedById.delete(item.terminal_id);
+    return [updated];
+  });
+  return [...retained, ...orderTerminalSessions([...listedById.values()])];
 }
 
 function restoreCandidates(
@@ -72,25 +113,6 @@ function restoreCandidates(
     );
   });
   return remembered ? [remembered, ...available] : available;
-}
-
-async function attachWhenAvailable(
-  terminalId: string,
-  attempts: number,
-): Promise<TerminalSession> {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await attachTerminal(terminalId);
-    } catch (error) {
-      const attachmentBusy =
-        error instanceof APIError &&
-        error.code === "terminal_operator_already_attached";
-      if (!attachmentBusy || attempt + 1 >= attempts) throw error;
-      await new Promise((resolve) =>
-        window.setTimeout(resolve, ATTACH_RETRY_DELAY_MS),
-      );
-    }
-  }
 }
 
 function websocketUrl(path: string): string {
@@ -120,6 +142,10 @@ export function TerminalPage({
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [session, setSession] = useState<TerminalSession | null>(null);
   const [connection, setConnection] = useState<ConnectionState>("idle");
+  const [sessionTitles, setSessionTitles] = useState<Record<string, string>>(
+    {},
+  );
+  const [operatorId] = useState(terminalOperatorId);
 
   activeSessionRef.current = session;
   selectedAgentIdRef.current = selectedAgentId;
@@ -127,11 +153,14 @@ export function TerminalPage({
   const selectedAgent = agents.find(
     (agent) => agent.agent_id === selectedAgentId,
   );
-  const canStart =
+  const selectedAgentSessionCount = sessions.filter(
+    (item) => item.agent_id === selectedAgentId,
+  ).length;
+  const agentAtSessionLimit = selectedAgentSessionCount >= 2;
+  const canRequestStart =
     selectedAgent?.connected &&
     selectedAgent.capabilities.includes("terminal") &&
-    connection !== "connecting" &&
-    sessions.filter((item) => item.agent_id === selectedAgentId).length < 2;
+    connection !== "connecting";
 
   const detachTransport = useCallback(() => {
     const socket = socketRef.current;
@@ -192,6 +221,7 @@ export function TerminalPage({
           JSON.stringify({
             type: "attach",
             attachment_token: nextSession.attachment_token,
+            operator_id: operatorId,
           }),
         );
         fitRef.current?.fit();
@@ -252,7 +282,7 @@ export function TerminalPage({
         });
       };
     },
-    [detachTransport, sendResize],
+    [detachTransport, operatorId, sendResize],
   );
 
   useEffect(() => {
@@ -314,6 +344,20 @@ export function TerminalPage({
       }
       return false;
     });
+    const titleChange = terminal.onTitleChange((title) => {
+      const terminalId = activeSessionRef.current?.terminal_id;
+      if (!terminalId) return;
+      const normalized = title.trim();
+      setSessionTitles((current) => {
+        if (current[terminalId] === normalized) return current;
+        if (!normalized) {
+          const next = { ...current };
+          delete next[terminalId];
+          return next;
+        }
+        return { ...current, [terminalId]: normalized };
+      });
+    });
     fit.fit();
     terminalRef.current = terminal;
     fitRef.current = fit;
@@ -322,7 +366,7 @@ export function TerminalPage({
       try {
         const listed = await listTerminals();
         if (cancelled) return;
-        setSessions(listed);
+        setSessions(orderTerminalSessions(listed));
         const rememberedId = window.sessionStorage.getItem(
           REMEMBERED_TERMINAL_KEY,
         );
@@ -335,12 +379,9 @@ export function TerminalPage({
         for (const candidate of candidates) {
           setConnection("connecting");
           try {
-            // A remembered session may still belong to this page's previous
-            // WebSocket while its close handshake reaches the control plane.
-            const attempts = candidate.terminal_id === rememberedId ? 8 : 1;
-            const attached = await attachWhenAvailable(
+            const attached = await attachTerminal(
               candidate.terminal_id,
-              attempts,
+              operatorId,
             );
             if (cancelled) return;
             terminal.reset();
@@ -399,7 +440,11 @@ export function TerminalPage({
     const sessionRefresh = window.setInterval(() => {
       void listTerminals()
         .then((listed) => {
-          if (!cancelled) setSessions(listed);
+          if (!cancelled) {
+            setSessions((current) =>
+              reconcileTerminalSessions(current, listed),
+            );
+          }
         })
         .catch(() => {
           // The attached terminal transport remains authoritative while a
@@ -410,6 +455,7 @@ export function TerminalPage({
     return () => {
       cancelled = true;
       input.dispose();
+      titleChange.dispose();
       resizeObserver.disconnect();
       window.cancelAnimationFrame(resizeFrame);
       window.clearInterval(sessionRefresh);
@@ -422,6 +468,12 @@ export function TerminalPage({
 
   async function start() {
     if (!selectedAgentId || !terminalRef.current) return;
+    if (agentAtSessionLimit) {
+      toast.error("Terminal session limit reached", {
+        description: `${selectedAgent ? displayAgentLabel(selectedAgent) : selectedAgentId} already reached the active session limit. Close one before opening another.`,
+      });
+      return;
+    }
     const previousSession = activeSessionRef.current;
     detachTransport();
     if (previousSession) {
@@ -476,7 +528,10 @@ export function TerminalPage({
     );
 
     try {
-      const attached = await attachWhenAvailable(nextSession.terminal_id, 4);
+      const attached = await attachTerminal(
+        nextSession.terminal_id,
+        operatorId,
+      );
       connect(attached);
     } catch (error) {
       setConnection("idle");
@@ -484,7 +539,9 @@ export function TerminalPage({
         description: String(error),
       });
       void listTerminals()
-        .then(setSessions)
+        .then((listed) =>
+          setSessions((current) => reconcileTerminalSessions(current, listed)),
+        )
         .catch(() => undefined);
     }
   }
@@ -495,7 +552,7 @@ export function TerminalPage({
     try {
       terminalRef.current?.reset();
       setConnection("connecting");
-      const attached = await attachWhenAvailable(session.terminal_id, 8);
+      const attached = await attachTerminal(session.terminal_id, operatorId);
       connect(attached);
     } catch (error) {
       setConnection("disconnected");
@@ -505,30 +562,42 @@ export function TerminalPage({
     }
   }
 
-  async function close() {
-    if (!session) return;
-    const closingId = session.terminal_id;
-    socketRef.current?.send(JSON.stringify({ type: "close" }));
-    detachTransport();
+  async function closeSession(closingSession: TerminalSession) {
+    const closingId = closingSession.terminal_id;
+    const closesActiveSession =
+      closingId === activeSessionRef.current?.terminal_id;
+    const remaining = sessions.filter((item) => item.terminal_id !== closingId);
+    const fallback = remaining.find((item) => !item.operator_attached);
+
+    if (closesActiveSession) {
+      socketRef.current?.send(JSON.stringify({ type: "close" }));
+      detachTransport();
+    }
     try {
       await closeTerminal(closingId);
     } catch (error) {
       toast.error("Terminal cleanup failed", { description: String(error) });
     } finally {
-      setSession(null);
-      activeSessionRef.current = null;
-      setSessions((current) =>
-        current.filter((item) => item.terminal_id !== closingId),
-      );
+      setSessions(remaining);
+      setSessionTitles((current) => {
+        const next = { ...current };
+        delete next[closingId];
+        return next;
+      });
       if (
         window.sessionStorage.getItem(REMEMBERED_TERMINAL_KEY) === closingId
       ) {
         window.sessionStorage.removeItem(REMEMBERED_TERMINAL_KEY);
       }
-      setConnection("idle");
-      // xterm.clear() deliberately preserves the active cursor line. Closing
-      // a session should discard its complete screen and terminal modes.
-      terminalRef.current?.reset();
+      if (closesActiveSession) {
+        setSession(null);
+        activeSessionRef.current = null;
+        setConnection("idle");
+        // xterm.clear() deliberately preserves the active cursor line. Closing
+        // a session should discard its complete screen and terminal modes.
+        terminalRef.current?.reset();
+        if (fallback) void activateSession(fallback);
+      }
     }
   }
 
@@ -551,10 +620,6 @@ export function TerminalPage({
             disabled={connection === "connecting"}
             className="w-full min-w-0 sm:w-64"
           />
-          <Button type="button" onClick={start} disabled={!canStart}>
-            <PlugZap className="size-4" aria-hidden />
-            {sessions.length === 0 ? "Connect" : "New session"}
-          </Button>
         </div>
       </header>
 
@@ -570,67 +635,111 @@ export function TerminalPage({
 
       <div className="terminal-frame">
         <div className="terminal-framebar">
-          <div
-            className="terminal-tabs"
-            role="tablist"
-            aria-label="Terminal sessions"
-          >
-            {sessions.length === 0 ? (
-              <div className="terminal-session-label">
-                <Terminal className="size-4" aria-hidden />
-                <span>No active session</span>
-              </div>
-            ) : (
-              sessions.map((item) => {
-                const agent = agents.find(
-                  (candidate) => candidate.agent_id === item.agent_id,
-                );
-                const active = item.terminal_id === session?.terminal_id;
-                const locked = item.operator_attached && !active;
-                return (
-                  <button
-                    key={item.terminal_id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    className="terminal-tab"
-                    data-active={active || undefined}
-                    data-locked={locked || undefined}
-                    disabled={locked || connection === "connecting"}
-                    title={
-                      locked
-                        ? "Attached in another browser"
-                        : `Open ${agent ? displayAgentLabel(agent) : item.agent_id}`
-                    }
-                    onClick={() => void activateSession(item)}
-                  >
-                    <span
-                      className="terminal-tab-dot"
-                      data-state={
-                        active
-                          ? connection
-                          : locked
-                            ? "attached"
-                            : item.agent_attached
-                              ? "detached"
-                              : "disconnected"
-                      }
-                      aria-hidden
-                    />
-                    <span>
-                      {agent ? displayAgentLabel(agent) : item.agent_id}
-                    </span>
-                    <time
-                      dateTime={new Date(
-                        item.created_at_unix * 1000,
-                      ).toISOString()}
+          <div className="terminal-tabs">
+            <div
+              className="terminal-tab-list"
+              role="tablist"
+              aria-label="Terminal sessions"
+            >
+              {sessions.length === 0 ? (
+                <div className="terminal-session-label">
+                  <Terminal className="size-4" aria-hidden />
+                  <span>No active session</span>
+                </div>
+              ) : (
+                sessions.map((item) => {
+                  const agent = agents.find(
+                    (candidate) => candidate.agent_id === item.agent_id,
+                  );
+                  const active = item.terminal_id === session?.terminal_id;
+                  const locked = item.operator_attached && !active;
+                  const agentLabel = agent
+                    ? displayAgentLabel(agent)
+                    : item.agent_id;
+                  const sessionTitle = sessionTitles[item.terminal_id];
+                  const tabLabel = sessionTitle
+                    ? `${agentLabel} · ${sessionTitle}`
+                    : agentLabel;
+                  return (
+                    <div
+                      key={item.terminal_id}
+                      role="presentation"
+                      className="terminal-tab"
+                      data-active={active || undefined}
+                      data-locked={locked || undefined}
                     >
-                      {terminalCreatedTime(item.created_at_unix)}
-                    </time>
-                  </button>
-                );
-              })
-            )}
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        className="terminal-tab-select"
+                        disabled={locked || connection === "connecting"}
+                        title={
+                          locked ? "Attached in another browser" : tabLabel
+                        }
+                        onClick={() => void activateSession(item)}
+                      >
+                        <span
+                          className="terminal-tab-dot"
+                          data-state={
+                            active
+                              ? connection
+                              : locked
+                                ? "attached"
+                                : item.agent_attached
+                                  ? "detached"
+                                  : "disconnected"
+                          }
+                          aria-hidden
+                        />
+                        <span className="terminal-tab-label">{tabLabel}</span>
+                        <time
+                          dateTime={new Date(
+                            item.created_at_unix * 1000,
+                          ).toISOString()}
+                        >
+                          {terminalCreatedTime(item.created_at_unix)}
+                        </time>
+                      </button>
+                      <button
+                        type="button"
+                        className="terminal-tab-close"
+                        disabled={locked}
+                        aria-label={`Close ${agentLabel} terminal session`}
+                        title={
+                          locked
+                            ? "Attached in another browser"
+                            : "Close session"
+                        }
+                        onClick={() => void closeSession(item)}
+                      >
+                        <X className="size-3.5" aria-hidden />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <Tooltip>
+              <TooltipTrigger>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="terminal-new-tab"
+                  disabled={!canRequestStart}
+                  aria-label="New terminal session"
+                  onClick={start}
+                >
+                  <Plus className="size-4" aria-hidden />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {agentAtSessionLimit
+                  ? "Two-session limit reached"
+                  : "New session"}
+              </TooltipContent>
+            </Tooltip>
           </div>
 
           <div className="terminal-frame-actions">
@@ -668,23 +777,6 @@ export function TerminalPage({
               </TooltipTrigger>
               <TooltipContent>Clear terminal</TooltipContent>
             </Tooltip>
-            {session ? (
-              <Tooltip>
-                <TooltipTrigger>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
-                    aria-label="Close terminal session"
-                    onClick={close}
-                  >
-                    <Square className="size-3.5 fill-current" aria-hidden />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Close session</TooltipContent>
-              </Tooltip>
-            ) : null}
           </div>
         </div>
         <div className="terminal-surface" ref={hostRef} />
