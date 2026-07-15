@@ -151,6 +151,11 @@ mod tests {
             dhcp_leases_path: "/tmp/custom-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/custom-names.json".into(),
             observation_store_path: "/tmp/custom-observations.json".into(),
+            terminal: crate::config::TerminalConfig {
+                enabled: true,
+                shell: "/bin/ash".into(),
+                max_sessions: 2,
+            },
         };
 
         let outcome = enroll(&server_url, "enroll-abc", &path, Some(&base_config))
@@ -164,6 +169,7 @@ mod tests {
         assert_eq!(config.observation_retention_days, 11);
         assert_eq!(config.pid_file, base_config.pid_file);
         assert_eq!(config.dhcp_leases_path, base_config.dhcp_leases_path);
+        assert_eq!(config.terminal, base_config.terminal);
         assert!(outcome.backup_path.is_none());
 
         let persisted = crate::config::load_config(&path).expect("load persisted config");

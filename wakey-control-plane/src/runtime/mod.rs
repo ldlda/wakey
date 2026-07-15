@@ -16,7 +16,7 @@ use tower_http::services::ServeFile;
 use tracing::info;
 #[cfg(unix)]
 use tracing::warn;
-use wakey_agent::protocol::{ErrorPayload, ServerMessage};
+use wakey_agent::protocol::{AgentCapability, ErrorPayload, ServerMessage};
 
 use crate::api;
 use crate::config;
@@ -25,6 +25,7 @@ use crate::ws;
 
 mod admin;
 mod process;
+pub mod terminals;
 pub use admin::revoke_agent;
 pub use admin::{
     issue_enroll_token, list_enroll_tokens, migrate_sqlite_state, revoke_enroll_token, state_stats,
@@ -41,12 +42,14 @@ pub struct AppState {
     pub public_url: String,
     pub command_timeout: Duration,
     pub enroll_token_ttl: Duration,
+    pub terminals: terminals::TerminalRegistry,
 }
 
 #[derive(Clone)]
 pub struct AgentSession {
     pub connection_id: String,
     pub tx: mpsc::UnboundedSender<SessionEvent>,
+    pub capabilities: Vec<AgentCapability>,
 }
 #[derive(Clone)]
 pub enum SessionEvent {
@@ -72,6 +75,10 @@ fn public_api_routes(ui_dist_dir: std::path::PathBuf) -> Router<AppState> {
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
         .route("/api/v1/agent/ws", get(ws::agent_ws))
+        .route(
+            "/api/v1/agent/terminals/{terminal_id}/ws",
+            get(api::agent_terminal_ws),
+        )
 }
 
 fn control_api_routes() -> Router<AppState> {
@@ -135,6 +142,19 @@ fn control_api_routes() -> Router<AppState> {
             "/api/v1/control/agents/{agent_id}/command",
             post(api::run_command),
         )
+        .route("/api/v1/control/terminals", post(api::create_terminal))
+        .route(
+            "/api/v1/control/terminals/{terminal_id}",
+            get(api::get_terminal).delete(api::close_terminal),
+        )
+        .route(
+            "/api/v1/control/terminals/{terminal_id}/attach",
+            post(api::attach_terminal),
+        )
+        .route(
+            "/api/v1/control/terminals/{terminal_id}/ws",
+            get(api::operator_terminal_ws),
+        )
 }
 
 /// Starts the control-plane HTTP and websocket surfaces and manages daemon lifecycle hooks.
@@ -157,6 +177,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         public_url: daemon.public_url.clone(),
         command_timeout: daemon.command_timeout,
         enroll_token_ttl: daemon.enroll_token_ttl,
+        terminals: terminals::TerminalRegistry::new(),
     };
 
     // Keep route classes explicit so edge policy can map directly:

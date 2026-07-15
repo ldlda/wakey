@@ -2,6 +2,17 @@ export type Agent = {
   agent_id: string;
   connected: boolean;
   nickname?: string | null;
+  capabilities: "terminal"[];
+};
+
+export type TerminalSession = {
+  terminal_id: string;
+  agent_id: string;
+  created_at_unix: number;
+  agent_attached: boolean;
+  operator_attached: boolean;
+  websocket_url: string;
+  attachment_token?: string;
 };
 
 export type Alert = {
@@ -223,6 +234,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchAgents(): Promise<Agent[]> {
   return request<Agent[]>("/api/v1/control/agents");
+}
+
+export function createTerminal(
+  agentId: string,
+  rows: number,
+  cols: number,
+): Promise<TerminalSession> {
+  return request<TerminalSession>("/api/v1/control/terminals", {
+    method: "POST",
+    body: JSON.stringify({ agent_id: agentId, rows, cols }),
+  });
+}
+
+export function attachTerminal(terminalId: string): Promise<TerminalSession> {
+  return request<TerminalSession>(
+    `/api/v1/control/terminals/${encodeURIComponent(terminalId)}/attach`,
+    { method: "POST" },
+  );
+}
+
+export async function closeTerminal(terminalId: string): Promise<void> {
+  const response = await fetch(
+    `/api/v1/control/terminals/${encodeURIComponent(terminalId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to close terminal: ${response.status}`);
+  }
 }
 
 export function fetchAlerts(): Promise<Alert[]> {

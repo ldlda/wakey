@@ -17,6 +17,61 @@ impl RequestId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct TerminalId(String);
+
+impl TerminalId {
+    pub fn new(value: impl Into<String>) -> Result<Self, String> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err("terminal_id must not be empty".into());
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for TerminalId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentCapability {
+    Terminal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TerminalControl {
+    Resize { rows: u16, cols: u16 },
+    Ready,
+    Exited { exit_code: Option<i32> },
+    Error { code: String, message: String },
+    Close,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TerminalAgentHandshake {
+    Auth {
+        agent_id: String,
+        relay_token: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TerminalOperatorHandshake {
+    Attach { attachment_token: String },
+}
+
 impl TryFrom<String> for RequestId {
     type Error = String;
 
@@ -153,6 +208,8 @@ pub enum CommandResult {
 pub enum ClientMessage {
     Hello {
         agent_id: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        capabilities: Vec<AgentCapability>,
     },
     Auth {
         agent_id: String,
@@ -173,6 +230,10 @@ pub enum ClientMessage {
         request_id: RequestId,
         error: ErrorPayload,
     },
+    TerminalRejected {
+        terminal_id: TerminalId,
+        error: ErrorPayload,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -183,6 +244,15 @@ pub enum ServerMessage {
         command: AgentCommand,
     },
     SyncDeviceSnapshot,
+    OpenTerminal {
+        terminal_id: TerminalId,
+        relay_token: String,
+        rows: u16,
+        cols: u16,
+    },
+    CloseTerminal {
+        terminal_id: TerminalId,
+    },
 }
 
 #[cfg(test)]
@@ -231,5 +301,25 @@ mod tests {
         let json = serde_json::to_string(&msg).expect("serialize");
         assert!(json.contains("\"type\":\"device_snapshot\""));
         assert!(json.contains("\"devices\""));
+    }
+
+    #[test]
+    fn terminal_messages_serialize_with_explicit_frame_types() {
+        let message = ServerMessage::OpenTerminal {
+            terminal_id: TerminalId::new("term-1").expect("terminal id"),
+            relay_token: "secret".into(),
+            rows: 30,
+            cols: 120,
+        };
+        let json = serde_json::to_string(&message).expect("serialize open terminal");
+        assert!(json.contains("\"type\":\"open_terminal\""));
+        assert!(json.contains("\"terminal_id\":\"term-1\""));
+
+        let resize = TerminalControl::Resize {
+            rows: 40,
+            cols: 160,
+        };
+        let json = serde_json::to_string(&resize).expect("serialize resize");
+        assert_eq!(json, r#"{"type":"resize","rows":40,"cols":160}"#);
     }
 }

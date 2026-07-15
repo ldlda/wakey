@@ -35,6 +35,28 @@ pub struct AgentConfig {
     pub mac_name_cache_path: PathBuf,
     #[serde(default = "default_observation_store_path")]
     pub observation_store_path: PathBuf,
+    #[serde(default)]
+    pub terminal: TerminalConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TerminalConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_terminal_shell")]
+    pub shell: PathBuf,
+    #[serde(default = "default_terminal_max_sessions")]
+    pub max_sessions: usize,
+}
+
+impl Default for TerminalConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            shell: default_terminal_shell(),
+            max_sessions: default_terminal_max_sessions(),
+        }
+    }
 }
 
 pub static DEFAULT_CONFIG: LazyLock<AgentConfig> = LazyLock::new(|| AgentConfig {
@@ -49,6 +71,7 @@ pub static DEFAULT_CONFIG: LazyLock<AgentConfig> = LazyLock::new(|| AgentConfig 
     dhcp_leases_path: default_dhcp_leases_path(),
     mac_name_cache_path: default_mac_name_cache_path(),
     observation_store_path: default_observation_store_path(),
+    terminal: TerminalConfig::default(),
 });
 
 impl fmt::Debug for AgentConfig {
@@ -71,6 +94,7 @@ impl fmt::Debug for AgentConfig {
             .field("dhcp_leases_path", &self.dhcp_leases_path)
             .field("mac_name_cache_path", &self.mac_name_cache_path)
             .field("observation_store_path", &self.observation_store_path)
+            .field("terminal", &self.terminal)
             .finish()
     }
 }
@@ -105,6 +129,14 @@ fn default_mac_name_cache_path() -> PathBuf {
 
 fn default_observation_store_path() -> PathBuf {
     DEFAULT_OBSERVATION_STORE_PATH.into()
+}
+
+fn default_terminal_shell() -> PathBuf {
+    "/bin/ash".into()
+}
+
+const fn default_terminal_max_sessions() -> usize {
+    2
 }
 
 impl AgentConfig {
@@ -214,6 +246,11 @@ mod tests {
             dhcp_leases_path: "/tmp/test-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/test-names.json".into(),
             observation_store_path: "/tmp/test-observations.json".into(),
+            terminal: TerminalConfig {
+                enabled: true,
+                shell: "/bin/sh".into(),
+                max_sessions: 2,
+            },
         };
 
         save_config(&path, &config).expect("save");
@@ -245,5 +282,6 @@ agent_token = "secret"
             config.observation_retention_days,
             DEFAULT_OBSERVATION_RETENTION_DAYS
         );
+        assert_eq!(config.terminal, TerminalConfig::default());
     }
 }

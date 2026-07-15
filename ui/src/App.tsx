@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -15,6 +15,7 @@ import {
   setAgentNickname,
 } from "@/api";
 import { Toaster } from "@/components/ui/sonner";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AppLayout } from "@/layout/AppLayout";
 import { AgentsPage } from "@/pages/AgentsPage";
 import { AlertsPage } from "@/pages/AlertsPage";
@@ -23,6 +24,12 @@ import { CommandsPage } from "@/pages/CommandsPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { DevicesPage } from "@/pages/DevicesPage";
 import { TokensPage } from "@/pages/TokensPage";
+
+const TerminalPage = lazy(() =>
+  import("@/pages/TerminalPage").then((module) => ({
+    default: module.TerminalPage,
+  })),
+);
 import { WakeToolsPage } from "@/pages/WakeToolsPage";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -215,6 +222,22 @@ export function App() {
             }
           />
           <Route path="tokens" element={<TokensPage />} />
+          <Route
+            path="terminal"
+            element={
+              <Suspense
+                fallback={
+                  <Skeleton className="h-[calc(100dvh-2.5rem)] w-full" />
+                }
+              >
+                <TerminalPage
+                  agents={agents}
+                  selectedAgentId={selectedAgentId}
+                  onSelectAgent={setSelectedAgentId}
+                />
+              </Suspense>
+            }
+          />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

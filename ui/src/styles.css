@@ -192,6 +192,12 @@
   transition: background 100ms ease-in-out;
 }
 
+/* xterm focuses an input near the active row. Keep that focus operation from
+   scrolling the page shell and moving the terminal toolbar off-screen. */
+.app-main:has(.terminal-page) {
+  overflow: hidden;
+}
+
 /* ── Sidebar internals ────────────────────────────────────────────────── */
 
 .sidebar-brand {
@@ -314,6 +320,172 @@
 .sidebar--collapsed .sidebar-footer-btn {
   justify-content: center;
   padding: 0.5rem;
+}
+
+/* ── Remote terminal ─────────────────────────────────────────────────── */
+
+.terminal-page {
+  display: flex;
+  height: calc(100dvh - 2.5rem);
+  min-height: 0;
+  flex-direction: column;
+  gap: 1rem;
+  overflow: hidden;
+}
+
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.terminal-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.terminal-heading h1 {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 650;
+}
+
+.terminal-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.terminal-status {
+  gap: 0.4rem;
+  height: 1.4rem;
+  padding-inline: 0.45rem;
+  font-size: 0.6875rem;
+  text-transform: capitalize;
+}
+
+.terminal-status > span {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--presence-unknown);
+}
+
+.terminal-status[data-state="ready"] > span {
+  background: var(--presence-online);
+}
+
+.terminal-status[data-state="connecting"] > span {
+  background: var(--presence-likely);
+}
+
+.terminal-status[data-state="disconnected"] > span,
+.terminal-status[data-state="exited"] > span {
+  background: var(--presence-offline);
+}
+
+.terminal-notice {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.terminal-frame {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #0b1117;
+}
+
+.terminal-framebar {
+  display: flex;
+  min-height: 2.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0.45rem 0.35rem 0.75rem;
+  border-bottom: 1px solid color-mix(in oklab, white 9%, transparent);
+  background: #101820;
+  color: #cbd5e1;
+}
+
+.terminal-session-label,
+.terminal-frame-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.terminal-session-label > span:not(.terminal-status) {
+  overflow: hidden;
+  color: #dbe4ee;
+  font-size: 0.75rem;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-framebar button {
+  color: #aab7c4;
+}
+
+.terminal-framebar button:hover {
+  color: #f1f5f9;
+  background: rgb(255 255 255 / 7%);
+}
+
+.terminal-surface {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #0b1117;
+  padding: 0;
+}
+
+.terminal-surface .xterm {
+  height: 100%;
+  box-sizing: border-box;
+  background: #0b1117;
+  padding: 0.75rem;
+}
+
+.terminal-surface .xterm-viewport {
+  /* xterm defaults this element to pure black. It remains visible around the
+     fitted canvas, so keep it on the same surface as the terminal theme. */
+  background-color: #0b1117;
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in oklab, white 28%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+@media (max-width: 640px) {
+  .terminal-page {
+    height: calc(100dvh - 2.5rem);
+  }
+
+  .terminal-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .terminal-surface {
+    min-height: 0;
+  }
+
+  .terminal-surface .xterm {
+    padding: 0.5rem;
+  }
 }
 
 /* ── Presence badges ──────────────────────────────────────────────────── */

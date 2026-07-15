@@ -1,7 +1,7 @@
 # Caddy template for wakey-control-plane with Cloudflare Access.
 #
 # Security model:
-# - Public endpoints for agents: /healthz, /api/v1/agents/enroll, /api/v1/agent/ws
+# - Public endpoints for agents: health, enrollment, control WS, and scoped terminal relay WS
 # - Private admin surface: /ui/* and /api/v1/control/* (requires CF Access headers)
 #
 # Replace cp.example.com with your public control-plane domain.
@@ -10,7 +10,7 @@ wakey.ldlda.com {
     encode zstd gzip
 
     # Public agent-facing endpoints.
-    @public path /healthz /api/v1/agents/enroll /api/v1/agent/ws
+    @public path /healthz /api/v1/agents/enroll /api/v1/agent/ws /api/v1/agent/terminals/*
     handle @public {
         reverse_proxy 127.0.0.1:6767
     }

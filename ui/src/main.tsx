@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { App } from "@/App";
+import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(

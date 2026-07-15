@@ -2,14 +2,15 @@ mod cli;
 mod config;
 mod dispatch;
 mod enroll;
-mod protocol;
 mod serve;
 mod session;
+mod terminal;
 mod tracing;
 
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Command, InitConfigArgs, ObserveCommand};
+use wakey_agent::protocol;
 
 #[tokio::main]
 async fn main() -> Result<()> {

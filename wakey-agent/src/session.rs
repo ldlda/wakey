@@ -8,7 +8,8 @@ use tracing::{debug, error, info, info_span, warn};
 
 use crate::config::AgentConfig;
 use crate::dispatch::{dispatch_command, inventory_for_config};
-use crate::protocol::{AgentCommand, ClientMessage, ErrorPayload, ServerMessage};
+use crate::protocol::{AgentCapability, AgentCommand, ClientMessage, ErrorPayload, ServerMessage};
+use crate::terminal::TerminalManager;
 
 pub async fn run(config: AgentConfig) -> Result<()> {
     let mut backoff = config.reconnect_base_ms.max(100);
@@ -71,6 +72,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
         &mut sink,
         &ClientMessage::Hello {
             agent_id: config.agent_id.clone(),
+            capabilities: agent_capabilities(config),
         },
     )
     .await?;
@@ -91,9 +93,23 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
     ));
     snapshot_sync.set_missed_tick_behavior(MissedTickBehavior::Skip);
     snapshot_sync.reset();
+    let (terminal_manager, mut terminal_events) = TerminalManager::new(config);
 
     loop {
         tokio::select! {
+            Some(event) = terminal_events.recv() => {
+                send_json(
+                    &mut sink,
+                    &ClientMessage::TerminalRejected {
+                        terminal_id: event.terminal_id,
+                        error: ErrorPayload {
+                            code: "terminal_worker_failed".into(),
+                            message: event.error,
+                            retryable: Some(false),
+                        },
+                    },
+                ).await?;
+            }
             _ = heartbeat.tick() => {
                 send_json(&mut sink, &ClientMessage::Heartbeat {
                     agent_id: config.agent_id.clone(),
@@ -118,7 +134,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                     Message::Text(text) => {
                         match serde_json::from_str::<ServerMessage>(&text) {
                             Ok(message) => {
-                                handle_server_message(config, &mut sink, &mut snapshot_sync, message).await?;
+                                handle_server_message(config, &terminal_manager, &mut sink, &mut snapshot_sync, message).await?;
                             }
                             Err(err) => {
                                 // Allow the server to introduce extra frame types without
@@ -181,6 +197,7 @@ pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
 
 async fn handle_server_message<S>(
     config: &AgentConfig,
+    terminal_manager: &TerminalManager,
     sink: &mut S,
     snapshot_sync: &mut tokio::time::Interval,
     message: ServerMessage,
@@ -222,6 +239,35 @@ where
             info!("received device snapshot sync request from control-plane");
             send_device_snapshot_ws(sink, config).await?;
             snapshot_sync.reset();
+        }
+        ServerMessage::OpenTerminal {
+            terminal_id,
+            relay_token,
+            rows,
+            cols,
+        } => {
+            info!(terminal_id = %terminal_id, rows, cols, "received terminal open request");
+            if let Err(err) =
+                terminal_manager.open(config, terminal_id.clone(), relay_token, rows, cols)
+            {
+                error!(terminal_id = %terminal_id, error = %err, "terminal open request rejected");
+                send_json(
+                    sink,
+                    &ClientMessage::TerminalRejected {
+                        terminal_id,
+                        error: ErrorPayload {
+                            code: "terminal_open_rejected".into(),
+                            message: err.to_string(),
+                            retryable: Some(false),
+                        },
+                    },
+                )
+                .await?;
+            }
+        }
+        ServerMessage::CloseTerminal { terminal_id } => {
+            info!(terminal_id = %terminal_id, "received terminal close request");
+            terminal_manager.close(&terminal_id);
         }
     }
     Ok(())
@@ -301,7 +347,17 @@ fn client_message_kind(message: &ClientMessage) -> &'static str {
         ClientMessage::DeviceSnapshot { .. } => "device_snapshot",
         ClientMessage::Result { .. } => "result",
         ClientMessage::Error { .. } => "error",
+        ClientMessage::TerminalRejected { .. } => "terminal_rejected",
     }
+}
+
+fn agent_capabilities(config: &AgentConfig) -> Vec<AgentCapability> {
+    #[cfg(unix)]
+    if config.terminal.enabled {
+        return vec![AgentCapability::Terminal];
+    }
+
+    Vec::new()
 }
 
 pub fn websocket_url(server_url: &str) -> Result<url::Url> {

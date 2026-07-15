@@ -12,6 +12,7 @@ import {
   FileText,
   Key,
   Terminal,
+  SquareTerminal,
   PanelLeftClose,
   PanelLeft,
 } from "lucide-react";
@@ -57,6 +58,7 @@ const navSections: NavSection[] = [
       { to: "/audit", label: "Audit", icon: FileText },
       { to: "/tokens", label: "Tokens", icon: Key },
       { to: "/commands", label: "Commands", icon: Terminal },
+      { to: "/terminal", label: "Terminal", icon: SquareTerminal },
     ],
   },
 ];

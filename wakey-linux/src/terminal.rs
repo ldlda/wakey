@@ -23,7 +23,7 @@ impl TerminalPty {
         pty.resize(Size::new(rows, cols))
             .context("failed to set initial PTY size")?;
 
-        let command = Command::new(program);
+        let command = Command::new(program).kill_on_drop(true);
         let child = command
             .spawn(pts)
             .with_context(|| format!("failed to spawn {} in PTY", program.display()))?;
@@ -35,6 +35,14 @@ impl TerminalPty {
             child,
         })
     }
+}
+
+/// Resizes an owned PTY writer without exposing `pty-process` protocol types
+/// to higher-level crates.
+pub fn resize_terminal(writer: &OwnedWritePty, rows: u16, cols: u16) -> Result<()> {
+    writer
+        .resize(Size::new(rows, cols))
+        .context("failed to resize PTY")
 }
 
 #[cfg(test)]

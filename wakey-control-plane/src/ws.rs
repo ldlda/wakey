@@ -8,7 +8,9 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
-use wakey_agent::protocol::{ErrorPayload, RequestId, ServerMessage};
+use wakey_agent::protocol::{
+    AgentCapability, ErrorPayload, RequestId, ServerMessage, TerminalControl, TerminalId,
+};
 use wakey_core::Device;
 
 use crate::runtime::{AgentReply, AgentSession, AppState, SessionEvent};
@@ -19,6 +21,8 @@ use crate::state::AuditEventInput;
 enum IncomingClientMessage {
     Hello {
         agent_id: String,
+        #[serde(default)]
+        capabilities: Vec<AgentCapability>,
     },
     Auth {
         agent_id: String,
@@ -39,6 +43,17 @@ enum IncomingClientMessage {
         request_id: RequestId,
         error: ErrorPayload,
     },
+    TerminalRejected {
+        terminal_id: TerminalId,
+        error: ErrorPayload,
+    },
+}
+
+#[derive(Default)]
+struct AgentConnectionState {
+    authed_agent_id: Option<String>,
+    hello_at: Option<Instant>,
+    capabilities: Vec<AgentCapability>,
 }
 
 pub async fn agent_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -80,8 +95,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
         debug!("websocket writer loop ended");
     });
 
-    let mut authed_agent_id: Option<String> = None;
-    let mut hello_at: Option<Instant> = None;
+    let mut connection = AgentConnectionState::default();
 
     loop {
         let frame = read.next().await;
@@ -103,8 +117,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
                     &state,
                     &tx,
                     &connection_id,
-                    &mut authed_agent_id,
-                    &mut hello_at,
+                    &mut connection,
                     connected_at,
                     &text,
                 )
@@ -126,7 +139,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
         }
     }
 
-    if let Some(agent_id) = authed_agent_id {
+    if let Some(agent_id) = connection.authed_agent_id {
         info!(agent_id = %agent_id, "agent disconnected");
         let mut sessions = state.sessions.write().await;
         let should_remove = sessions
@@ -136,6 +149,8 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
         if should_remove {
             sessions.remove(&agent_id);
         }
+        drop(sessions);
+        state.terminals.remove_agent(&agent_id).await;
         if let Err(err) = state
             .store
             .append_audit_event(AuditEventInput {
@@ -163,8 +178,7 @@ async fn process_agent_text(
     state: &AppState,
     tx: &mpsc::UnboundedSender<SessionEvent>,
     connection_id: &str,
-    authed_agent_id: &mut Option<String>,
-    hello_at: &mut Option<Instant>,
+    connection: &mut AgentConnectionState,
     connected_at: Instant,
     text: &str,
 ) -> Result<()> {
@@ -172,20 +186,26 @@ async fn process_agent_text(
         serde_json::from_str(text).context("invalid client websocket payload")?;
 
     match message {
-        IncomingClientMessage::Hello { agent_id } => {
+        IncomingClientMessage::Hello {
+            agent_id,
+            capabilities,
+        } => {
             let now = Instant::now();
-            if hello_at.is_none() {
-                *hello_at = Some(now);
+            if connection.hello_at.is_none() {
+                connection.hello_at = Some(now);
             }
             let connect_to_hello_ms = connected_at.elapsed().as_millis() as u64;
             info!(agent_id = %agent_id, connect_to_hello_ms, "agent hello received");
+            connection.capabilities = capabilities;
         }
         IncomingClientMessage::Auth {
             agent_id,
             agent_token,
         } => {
             let connect_to_auth_ms = connected_at.elapsed().as_millis() as u64;
-            let hello_to_auth_ms = hello_at.map(|t| now_duration_ms(t.elapsed()));
+            let hello_to_auth_ms = connection
+                .hello_at
+                .map(|time| now_duration_ms(time.elapsed()));
             if !state
                 .store
                 .verify_agent_token(&agent_id, &agent_token)
@@ -219,9 +239,10 @@ async fn process_agent_text(
                 AgentSession {
                     connection_id: connection_id.to_string(),
                     tx: tx.clone(),
+                    capabilities: connection.capabilities.clone(),
                 },
             );
-            *authed_agent_id = Some(agent_id.clone());
+            connection.authed_agent_id = Some(agent_id.clone());
             info!(agent_id = %agent_id, connect_to_auth_ms, hello_to_auth_ms = hello_to_auth_ms.unwrap_or(0), "agent authenticated");
             if let Err(err) = state
                 .store
@@ -246,14 +267,14 @@ async fn process_agent_text(
             let _ = tx.send(SessionEvent::Message(ServerMessage::SyncDeviceSnapshot));
         }
         IncomingClientMessage::Heartbeat { agent_id } => {
-            if authed_agent_id.as_deref() != Some(agent_id.as_str()) {
+            if connection.authed_agent_id.as_deref() != Some(agent_id.as_str()) {
                 anyhow::bail!("heartbeat for unauthenticated or mismatched agent");
             }
             ensure_current_session(state, &agent_id, connection_id).await?;
             debug!(agent_id = %agent_id, "heartbeat received");
         }
         IncomingClientMessage::DeviceSnapshot { agent_id, devices } => {
-            if authed_agent_id.as_deref() != Some(agent_id.as_str()) {
+            if connection.authed_agent_id.as_deref() != Some(agent_id.as_str()) {
                 anyhow::bail!("device_snapshot for unauthenticated or mismatched agent");
             }
             ensure_current_session(state, &agent_id, connection_id).await?;
@@ -272,7 +293,8 @@ async fn process_agent_text(
             }
         }
         IncomingClientMessage::Result { request_id, result } => {
-            let agent_id = authed_agent_id
+            let agent_id = connection
+                .authed_agent_id
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("result before auth"))?;
             ensure_current_session(state, agent_id, connection_id).await?;
@@ -284,7 +306,8 @@ async fn process_agent_text(
             }
         }
         IncomingClientMessage::Error { request_id, error } => {
-            let agent_id = authed_agent_id
+            let agent_id = connection
+                .authed_agent_id
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("error before auth"))?;
             ensure_current_session(state, agent_id, connection_id).await?;
@@ -294,6 +317,26 @@ async fn process_agent_text(
             } else {
                 debug!(request_id = %key, "dropping unsolicited error from agent");
             }
+        }
+        IncomingClientMessage::TerminalRejected { terminal_id, error } => {
+            let agent_id = connection
+                .authed_agent_id
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("terminal rejection before auth"))?;
+            ensure_current_session(state, agent_id, connection_id).await?;
+            let error_json = serde_json::to_string(&TerminalControl::Error {
+                code: error.code,
+                message: error.message,
+            })?;
+            if let Err(code) = state
+                .terminals
+                .reject(terminal_id.as_str(), agent_id, error_json)
+                .await
+            {
+                debug!(terminal_id = %terminal_id, agent_id, code, "dropping rejection for inactive terminal");
+                return Ok(());
+            }
+            warn!(terminal_id = %terminal_id, agent_id, "agent rejected terminal request");
         }
     }
 
@@ -349,6 +392,7 @@ mod tests {
             AgentSession {
                 connection_id: "conn-new".to_string(),
                 tx,
+                capabilities: Vec::new(),
             },
         );
 

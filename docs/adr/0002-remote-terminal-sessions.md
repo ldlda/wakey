@@ -39,7 +39,7 @@ Use `pty-process` with its async feature as the initial PTY abstraction because 
 - child session-leader and controlling-terminal setup; and
 - a small implementation built on `rustix`.
 
-Adoption remains gated on successfully cross-compiling for the router target and exercising `/bin/ash` or the configured shell on a real device. Wakey does not call `forkpty` or add its own unsafe PTY implementation.
+The PTY wrapper is cross-compiled for `armv7-unknown-linux-musleabihf` and its input, output, resize, and exit test has passed on the target router. That focused test remains part of the remote compatibility workflow. Wakey does not call `forkpty` or add its own unsafe PTY implementation.
 
 The executable, working directory, environment, UID, and GID are agent-controlled configuration. The browser cannot supply an arbitrary executable or process environment.
 
