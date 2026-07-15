@@ -47,6 +47,12 @@ pub enum AgentCapability {
     Terminal,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTerminalSession {
+    pub terminal_id: TerminalId,
+    pub created_at_unix: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TerminalControl {
@@ -234,6 +240,9 @@ pub enum ClientMessage {
         terminal_id: TerminalId,
         error: ErrorPayload,
     },
+    TerminalSessions {
+        sessions: Vec<AgentTerminalSession>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -244,6 +253,7 @@ pub enum ServerMessage {
         command: AgentCommand,
     },
     SyncDeviceSnapshot,
+    SyncTerminalSessions,
     OpenTerminal {
         terminal_id: TerminalId,
         relay_token: String,
@@ -252,6 +262,10 @@ pub enum ServerMessage {
     },
     CloseTerminal {
         terminal_id: TerminalId,
+    },
+    ResumeTerminal {
+        terminal_id: TerminalId,
+        relay_token: String,
     },
 }
 
@@ -321,5 +335,22 @@ mod tests {
         };
         let json = serde_json::to_string(&resize).expect("serialize resize");
         assert_eq!(json, r#"{"type":"resize","rows":40,"cols":160}"#);
+
+        let inventory = ClientMessage::TerminalSessions {
+            sessions: vec![AgentTerminalSession {
+                terminal_id: TerminalId::new("term-1").expect("terminal id"),
+                created_at_unix: 42,
+            }],
+        };
+        let json = serde_json::to_string(&inventory).expect("serialize terminal inventory");
+        assert!(json.contains("\"type\":\"terminal_sessions\""));
+        assert!(json.contains("\"created_at_unix\":42"));
+
+        let resume = ServerMessage::ResumeTerminal {
+            terminal_id: TerminalId::new("term-1").expect("terminal id"),
+            relay_token: "replacement".into(),
+        };
+        let json = serde_json::to_string(&resume).expect("serialize terminal resume");
+        assert!(json.contains("\"type\":\"resume_terminal\""));
     }
 }

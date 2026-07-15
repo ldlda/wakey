@@ -13,8 +13,8 @@ use wakey_agent::protocol::{
 
 use crate::api::ApiError;
 use crate::runtime::terminals::{
-    TERMINAL_ABSOLUTE_TIMEOUT, TERMINAL_ATTACH_TIMEOUT, TERMINAL_DISCONNECT_GRACE,
-    TERMINAL_MAX_FRAME_BYTES, TerminalRelayFrame,
+    TERMINAL_ABSOLUTE_TIMEOUT, TERMINAL_ATTACH_TIMEOUT, TERMINAL_MAX_FRAME_BYTES,
+    TerminalRelayFrame, TerminalSummary,
 };
 use crate::runtime::{AppState, SessionEvent};
 use crate::state::AuditEventInput;
@@ -140,6 +140,18 @@ pub async fn get_terminal(
         operator_attached,
         attachment_token: None,
     }))
+}
+
+pub async fn list_terminals(State(state): State<AppState>) -> Json<Vec<TerminalSessionResponse>> {
+    Json(
+        state
+            .terminals
+            .summaries()
+            .await
+            .into_iter()
+            .map(terminal_response)
+            .collect(),
+    )
 }
 
 pub async fn attach_terminal(
@@ -284,11 +296,14 @@ async fn handle_agent_terminal_socket(state: AppState, terminal_id: String, mut 
             }
         }
     }
-    state.terminals.remove(&terminal_id).await;
-    info!(
-        terminal_id,
-        "agent terminal socket detached; session closed"
-    );
+    if let Some(agent_id) = state.terminals.detach_agent(&terminal_id).await
+        && let Some(session) = state.sessions.read().await.get(&agent_id)
+    {
+        let _ = session
+            .tx
+            .send(SessionEvent::Message(ServerMessage::SyncTerminalSessions));
+    }
+    info!(terminal_id, "agent terminal relay detached");
 }
 
 async fn handle_operator_terminal_socket(
@@ -317,10 +332,11 @@ async fn handle_operator_terminal_socket(
         }
     };
     info!(terminal_id, "operator terminal socket attached");
-    if let Some((agent_id, _, _, _)) = state.terminals.summary(&terminal_id).await {
+    let summary = state.terminals.summary(&terminal_id).await;
+    if let Some((agent_id, _, _, _)) = &summary {
         append_terminal_audit(
             &state,
-            &agent_id,
+            agent_id,
             &terminal_id,
             TerminalAudit {
                 actor_type: "admin_api",
@@ -334,6 +350,17 @@ async fn handle_operator_terminal_socket(
     }
 
     let (mut write, mut read) = socket.split();
+    if summary.is_some_and(|(_, _, agent_attached, _)| agent_attached) {
+        let ready = serde_json::to_string(&TerminalControl::Ready)
+            .expect("terminal ready control serializes");
+        if send_relay_frame(&mut write, TerminalRelayFrame::Text(ready))
+            .await
+            .is_err()
+        {
+            state.terminals.detach_operator(&terminal_id).await;
+            return;
+        }
+    }
     for frame in replay {
         if send_relay_frame(&mut write, frame).await.is_err() {
             return;
@@ -367,20 +394,25 @@ async fn handle_operator_terminal_socket(
 
     if explicit_close {
         close_registered_terminal(&state, &terminal_id).await;
-    } else if let Some(detached_at) = state.terminals.detach_operator(&terminal_id).await {
-        let terminals = state.terminals.clone();
-        let terminal_id_for_grace = terminal_id.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(TERMINAL_DISCONNECT_GRACE).await;
-            terminals
-                .remove_if_still_detached(&terminal_id_for_grace, detached_at)
-                .await;
-        });
+    } else {
+        state.terminals.detach_operator(&terminal_id).await;
     }
     info!(
         terminal_id,
         explicit_close, "operator terminal socket detached"
     );
+}
+
+fn terminal_response(summary: TerminalSummary) -> TerminalSessionResponse {
+    TerminalSessionResponse {
+        websocket_url: operator_ws_path(&summary.terminal_id),
+        terminal_id: summary.terminal_id,
+        agent_id: summary.agent_id,
+        created_at_unix: summary.created_at_unix,
+        agent_attached: summary.agent_attached,
+        operator_attached: summary.operator_attached,
+        attachment_token: None,
+    }
 }
 
 fn agent_relay_frame(message: Message) -> Result<Option<TerminalRelayFrame>, &'static str> {

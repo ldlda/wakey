@@ -23,7 +23,7 @@ Session establishment follows this sequence:
 3. The control plane sends an open-terminal control message over the existing authenticated agent WebSocket.
 4. The agent opens a new outbound terminal WebSocket to the control plane and authenticates it for that terminal ID.
 5. The browser opens the corresponding protected operator terminal WebSocket.
-6. The control plane pairs the sockets and relays terminal frames until either side exits or disconnects.
+6. The control plane pairs the sockets and relays terminal frames while an operator is attached.
 
 The main agent WebSocket carries terminal creation and cancellation control only. It does not carry PTY input or output.
 
@@ -65,13 +65,15 @@ WebSockets already provide ordered, reliable delivery, so terminal frames do not
 
 ## Lifecycle and Cleanup
 
-Initial terminal sessions are ephemeral and allow only one attached operator.
+Terminal sessions allow only one attached operator. Their lifetime belongs to the agent process, not to a browser route or a particular control-plane connection.
 
-When the operator socket disconnects, the control plane keeps the agent socket and PTY alive for a short grace period. A protected operator request may obtain a fresh, single-use attachment credential for that existing session. The control plane retains only a bounded in-memory output buffer during the gap, replays it before live output on reattachment, and closes the session if no operator returns before the grace period expires.
+When the operator socket disconnects, the session becomes detached. Navigation, browser closure, and network loss do not terminate the PTY. A protected operator request may discover the live session and obtain a fresh, single-use attachment credential. The control plane retains only a bounded in-memory output buffer during the gap and replays it before live output on reattachment.
 
-An agent terminal socket disconnect closes the session immediately because the control plane can no longer control or observe the PTY. Agent reconnect creates a new agent session and cannot adopt an old terminal.
+The agent keeps its terminal manager outside the control-WebSocket reconnect loop. If a dedicated terminal relay disconnects, the PTY continues draining output into a bounded local replay buffer while waiting for replacement relay credentials. On every authenticated control connection, the agent reports its in-memory live terminal IDs and creation times. The control plane reconciles that inventory, adopts sessions missing from its volatile registry, and issues fresh relay credentials. This allows sessions to survive control-plane restart without persisting terminal state in SQLite.
 
-Closing a session must terminate the entire PTY process group, not only the shell process. Cleanup should send a hangup first, then escalate to termination and forced kill after bounded grace periods. Agent reconnect, agent replacement, control-plane restart, token expiry before attachment, and absolute session timeout all close the session.
+Closing a session must terminate the entire PTY process group, not only the shell process. Cleanup should send a hangup first, then escalate to termination and forced kill after bounded grace periods. Explicit operator close, absolute session timeout, agent process exit, and machine reboot close the session.
+
+An agent process restart or machine reboot still ends every terminal session because PTY file descriptors cannot be recovered by a new process. Surviving that boundary would require an external session host such as `tmux` or a separate terminal daemon and is not part of this design.
 
 The agent reports a normal exit status or terminating signal when available. The UI must distinguish an exited shell from a transport failure.
 
@@ -79,14 +81,14 @@ The agent reports a normal exit status or terminating signal when available. The
 
 Terminal transport must not use unbounded queues.
 
-Every queue between PTY, agent socket, control-plane relay, and browser socket is bounded. The brief-disconnect replay buffer is bounded as well. When the downstream consumer is slow, the producer waits rather than accumulating output in memory. Backpressure eventually stops PTY reads and allows the kernel PTY buffer to block an abusive producer.
+Every queue between PTY, agent socket, control-plane relay, and browser socket is bounded. Agent and control-plane replay buffers are bounded as well. The agent keeps draining the PTY while detached so a noisy child cannot stall the agent; output older than the replay bound is discarded.
 
 The implementation also enforces:
 
 - maximum terminal frame size;
 - per-agent concurrent-session limits;
 - idle and absolute session timeouts;
-- bounded disconnect grace;
+- bounded detached-session replay;
 - bounded control-plane relay buffers; and
 - cleanup when any relay task exits unexpectedly.
 
@@ -104,7 +106,7 @@ Terminal capability and session state are separate from device inventory, known-
 
 ## Deferred Work
 
-Durable or long-lived terminal sessions are not part of the initial version. A later design may preserve sessions across longer operator absences or control-plane restart. That design must define durable ownership, reconnect credentials, persisted replay bounds, secret handling, and process reconciliation before adding persistence.
+Persistence across agent restart or machine reboot is not supported. A later design would need an external process owner, reconnectable local IPC, and explicit secret handling; persisted metadata alone cannot recover a PTY.
 
 File transfer, multi-operator attachment, terminal recording, shell-history storage, and arbitrary process launch are also deferred.
 
@@ -130,7 +132,7 @@ Viable, but not selected initially. Its cross-platform abstraction is broader th
 
 - Each active terminal consumes two additional WebSockets and one PTY process on the agent.
 - Terminal traffic cannot delay main agent heartbeat, snapshot, or command messages.
-- Control-plane terminal state is simple and ephemeral; restarting the control plane closes active terminals.
+- Control-plane terminal state remains ephemeral; agents rebuild it from their in-memory live-session inventory after a control-plane restart.
 - The agent session protocol gains terminal-open control and capability advertisement but does not become a terminal-data multiplexer.
 - Browser and agent terminal transports can be tested independently before adding xterm.js.
-- Future resume support can extend terminal-session lifecycle without changing the basic PTY byte protocol.
+- Browser navigation and control-plane restart do not terminate an agent-owned PTY.

@@ -10,6 +10,7 @@ import {
   attachTerminal,
   closeTerminal,
   createTerminal,
+  listTerminals,
 } from "@/api";
 import { AgentSelector, displayAgentLabel } from "@/components/AgentSelector";
 import { Badge } from "@/components/ui/badge";
@@ -174,9 +175,91 @@ export function TerminalPage({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(hostRef.current);
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") return true;
+
+      const copy =
+        (event.ctrlKey && event.shiftKey && event.code === "KeyC") ||
+        (event.metaKey && event.code === "KeyC") ||
+        (event.ctrlKey && event.code === "Insert");
+      if (copy) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (terminal.hasSelection()) {
+          if (!navigator.clipboard) {
+            toast.error("Clipboard access requires HTTPS or localhost");
+          } else {
+            void navigator.clipboard
+              .writeText(terminal.getSelection())
+              .catch((error) =>
+                toast.error("Clipboard access was denied", {
+                  description: String(error),
+                }),
+              );
+          }
+        }
+        return false;
+      }
+
+      const paste =
+        (event.ctrlKey && event.shiftKey && event.code === "KeyV") ||
+        (event.metaKey && event.code === "KeyV") ||
+        (event.shiftKey && event.code === "Insert");
+      if (paste) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!navigator.clipboard) {
+          toast.error("Clipboard access requires HTTPS or localhost");
+          return false;
+        }
+        void navigator.clipboard
+          .readText()
+          .then((text) => terminal.paste(text))
+          .catch((error) =>
+            toast.error("Clipboard access was denied", {
+              description: String(error),
+            }),
+          );
+        return false;
+      }
+
+      return true;
+    });
     fit.fit();
     terminalRef.current = terminal;
     fitRef.current = fit;
+
+    async function restoreDetachedSession() {
+      try {
+        const sessions = await listTerminals();
+        if (cancelled || sessions.length === 0) return;
+        const candidate =
+          sessions.find((item) => item.agent_id === selectedAgentId) ??
+          sessions[0];
+        setConnection("connecting");
+
+        // The previous route's websocket may still be completing its close
+        // handshake. Brief retries keep navigation from surfacing that race.
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          try {
+            const attached = await attachTerminal(candidate.terminal_id);
+            if (cancelled) return;
+            setSession(attached);
+            connect(attached);
+            return;
+          } catch (error) {
+            if (attempt === 3) throw error;
+            await new Promise((resolve) => window.setTimeout(resolve, 150));
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setConnection("idle");
+        toast.error("Could not restore terminal session", {
+          description: String(error),
+        });
+      }
+    }
 
     let cancelled = false;
     void document.fonts.ready.then(() => {
@@ -208,6 +291,7 @@ export function TerminalPage({
       });
     });
     resizeObserver.observe(hostRef.current);
+    void restoreDetachedSession();
 
     return () => {
       cancelled = true;
@@ -219,7 +303,7 @@ export function TerminalPage({
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [sendResize]);
+  }, [connect, selectedAgentId, sendResize]);
 
   async function start() {
     if (!selectedAgentId || !terminalRef.current) return;
@@ -243,6 +327,7 @@ export function TerminalPage({
   async function reconnect() {
     if (!session) return;
     try {
+      terminalRef.current?.reset();
       const attached = await attachTerminal(session.terminal_id);
       setSession(attached);
       connect(attached);

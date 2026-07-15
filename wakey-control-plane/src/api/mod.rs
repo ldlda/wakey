@@ -19,7 +19,7 @@ pub use control::{
 };
 pub use terminals::{
     agent_terminal_ws, attach_terminal, close_terminal, create_terminal, get_terminal,
-    operator_terminal_ws,
+    list_terminals, operator_terminal_ws,
 };
 
 use axum::response::{IntoResponse, Response};

@@ -12,9 +12,12 @@ use crate::protocol::{AgentCapability, AgentCommand, ClientMessage, ErrorPayload
 use crate::terminal::TerminalManager;
 
 pub async fn run(config: AgentConfig) -> Result<()> {
+    // Terminal workers belong to the agent process, not a single control socket.
+    // Keeping this manager outside the reconnect loop lets PTYs survive CC loss.
+    let (terminal_manager, mut terminal_events) = TerminalManager::new(&config);
     let mut backoff = config.reconnect_base_ms.max(100);
     loop {
-        match run_once(&config).await {
+        match run_once(&config, &terminal_manager, &mut terminal_events).await {
             Ok(()) => {
                 backoff = config.reconnect_base_ms.max(100);
             }
@@ -27,7 +30,13 @@ pub async fn run(config: AgentConfig) -> Result<()> {
     }
 }
 
-async fn run_once(config: &AgentConfig) -> Result<()> {
+async fn run_once(
+    config: &AgentConfig,
+    terminal_manager: &TerminalManager,
+    terminal_events: &mut tokio::sync::mpsc::UnboundedReceiver<
+        crate::terminal::TerminalManagerEvent,
+    >,
+) -> Result<()> {
     let session_id = format!(
         "{}-{}",
         std::process::id(),
@@ -84,6 +93,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
         },
     )
     .await?;
+    send_terminal_sessions(&mut sink, terminal_manager).await?;
     info!(agent_id = %config.agent_id, "agent websocket session authenticated");
 
     let mut heartbeat = interval(Duration::from_secs(30));
@@ -93,15 +103,13 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
     ));
     snapshot_sync.set_missed_tick_behavior(MissedTickBehavior::Skip);
     snapshot_sync.reset();
-    let (terminal_manager, mut terminal_events) = TerminalManager::new(config);
-
     loop {
         tokio::select! {
             Some(event) = terminal_events.recv() => {
                 send_json(
                     &mut sink,
                     &ClientMessage::TerminalRejected {
-                        terminal_id: event.terminal_id,
+                            terminal_id: event.terminal_id,
                         error: ErrorPayload {
                             code: "terminal_worker_failed".into(),
                             message: event.error,
@@ -134,7 +142,7 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
                     Message::Text(text) => {
                         match serde_json::from_str::<ServerMessage>(&text) {
                             Ok(message) => {
-                                handle_server_message(config, &terminal_manager, &mut sink, &mut snapshot_sync, message).await?;
+                handle_server_message(config, terminal_manager, &mut sink, &mut snapshot_sync, message).await?;
                             }
                             Err(err) => {
                                 // Allow the server to introduce extra frame types without
@@ -159,6 +167,20 @@ async fn run_once(config: &AgentConfig) -> Result<()> {
             }
         }
     }
+}
+
+async fn send_terminal_sessions<S>(sink: &mut S, manager: &TerminalManager) -> Result<()>
+where
+    S: SinkExt<Message> + Unpin,
+    <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
+{
+    send_json(
+        sink,
+        &ClientMessage::TerminalSessions {
+            sessions: manager.sessions(),
+        },
+    )
+    .await
 }
 
 async fn send_device_snapshot_ws<S>(sink: &mut S, config: &AgentConfig) -> Result<usize>
@@ -240,6 +262,9 @@ where
             send_device_snapshot_ws(sink, config).await?;
             snapshot_sync.reset();
         }
+        ServerMessage::SyncTerminalSessions => {
+            send_terminal_sessions(sink, terminal_manager).await?;
+        }
         ServerMessage::OpenTerminal {
             terminal_id,
             relay_token,
@@ -268,6 +293,16 @@ where
         ServerMessage::CloseTerminal { terminal_id } => {
             info!(terminal_id = %terminal_id, "received terminal close request");
             terminal_manager.close(&terminal_id);
+        }
+        ServerMessage::ResumeTerminal {
+            terminal_id,
+            relay_token,
+        } => {
+            info!(terminal_id = %terminal_id, "received terminal relay resume request");
+            if let Err(err) = terminal_manager.resume(&terminal_id, relay_token) {
+                warn!(terminal_id = %terminal_id, error = %err, "terminal relay resume rejected");
+                send_terminal_sessions(sink, terminal_manager).await?;
+            }
         }
     }
     Ok(())
@@ -348,6 +383,7 @@ fn client_message_kind(message: &ClientMessage) -> &'static str {
         ClientMessage::Result { .. } => "result",
         ClientMessage::Error { .. } => "error",
         ClientMessage::TerminalRejected { .. } => "terminal_rejected",
+        ClientMessage::TerminalSessions { .. } => "terminal_sessions",
     }
 }
 

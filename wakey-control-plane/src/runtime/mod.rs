@@ -142,7 +142,10 @@ fn control_api_routes() -> Router<AppState> {
             "/api/v1/control/agents/{agent_id}/command",
             post(api::run_command),
         )
-        .route("/api/v1/control/terminals", post(api::create_terminal))
+        .route(
+            "/api/v1/control/terminals",
+            get(api::list_terminals).post(api::create_terminal),
+        )
         .route(
             "/api/v1/control/terminals/{terminal_id}",
             get(api::get_terminal).delete(api::close_terminal),

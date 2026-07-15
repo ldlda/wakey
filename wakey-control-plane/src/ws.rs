@@ -9,7 +9,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{
-    AgentCapability, ErrorPayload, RequestId, ServerMessage, TerminalControl, TerminalId,
+    AgentCapability, AgentTerminalSession, ErrorPayload, RequestId, ServerMessage, TerminalControl,
+    TerminalId,
 };
 use wakey_core::Device;
 
@@ -46,6 +47,9 @@ enum IncomingClientMessage {
     TerminalRejected {
         terminal_id: TerminalId,
         error: ErrorPayload,
+    },
+    TerminalSessions {
+        sessions: Vec<AgentTerminalSession>,
     },
 }
 
@@ -150,7 +154,6 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
             sessions.remove(&agent_id);
         }
         drop(sessions);
-        state.terminals.remove_agent(&agent_id).await;
         if let Err(err) = state
             .store
             .append_audit_event(AuditEventInput {
@@ -337,6 +340,28 @@ async fn process_agent_text(
                 return Ok(());
             }
             warn!(terminal_id = %terminal_id, agent_id, "agent rejected terminal request");
+        }
+        IncomingClientMessage::TerminalSessions { sessions } => {
+            let agent_id = connection
+                .authed_agent_id
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("terminal inventory before auth"))?;
+            ensure_current_session(state, agent_id, connection_id).await?;
+            let credentials = state
+                .terminals
+                .reconcile_agent_sessions(agent_id, &sessions)
+                .await;
+            for (terminal_id, relay_token) in credentials {
+                let _ = tx.send(SessionEvent::Message(ServerMessage::ResumeTerminal {
+                    terminal_id,
+                    relay_token,
+                }));
+            }
+            info!(
+                agent_id,
+                sessions = sessions.len(),
+                "agent terminal sessions reconciled"
+            );
         }
     }
 
