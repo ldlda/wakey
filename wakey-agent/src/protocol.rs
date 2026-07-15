@@ -57,7 +57,7 @@ pub struct AgentTerminalSession {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TerminalControl {
     Resize { rows: u16, cols: u16 },
-    Refresh,
+    Snapshot,
     Ready,
     Exited { exit_code: Option<i32> },
     Error { code: String, message: String },
@@ -336,8 +336,9 @@ mod tests {
         };
         let json = serde_json::to_string(&resize).expect("serialize resize");
         assert_eq!(json, r#"{"type":"resize","rows":40,"cols":160}"#);
-        let refresh = serde_json::to_string(&TerminalControl::Refresh).expect("serialize refresh");
-        assert_eq!(refresh, r#"{"type":"refresh"}"#);
+        let snapshot =
+            serde_json::to_string(&TerminalControl::Snapshot).expect("serialize snapshot");
+        assert_eq!(snapshot, r#"{"type":"snapshot"}"#);
 
         let inventory = ClientMessage::TerminalSessions {
             sessions: vec![AgentTerminalSession {

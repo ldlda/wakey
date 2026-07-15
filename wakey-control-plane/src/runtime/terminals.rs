@@ -8,7 +8,7 @@ use wakey_agent::protocol::{AgentTerminalSession, TerminalId};
 
 pub const TERMINAL_RELAY_QUEUE: usize = 32;
 pub const TERMINAL_MAX_FRAME_BYTES: usize = 64 * 1024;
-pub const TERMINAL_REPLAY_BYTES: usize = 256 * 1024;
+pub const TERMINAL_PENDING_AGENT_BYTES: usize = 256 * 1024;
 pub const TERMINAL_MAX_SESSIONS_PER_AGENT: usize = 2;
 pub const TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
 pub const TERMINAL_ABSOLUTE_TIMEOUT: Duration = Duration::from_secs(12 * 60 * 60);
@@ -40,8 +40,6 @@ struct TerminalSession {
     pending_agent_bytes: usize,
     operator_tx: Option<mpsc::Sender<TerminalRelayFrame>>,
     operator_detached_at: Option<Instant>,
-    replay: VecDeque<TerminalRelayFrame>,
-    replay_bytes: usize,
 }
 
 pub struct CreatedTerminal {
@@ -106,8 +104,6 @@ impl TerminalRegistry {
                 pending_agent_bytes: 0,
                 operator_tx: None,
                 operator_detached_at: None,
-                replay: VecDeque::new(),
-                replay_bytes: 0,
             },
         );
 
@@ -202,8 +198,6 @@ impl TerminalRegistry {
                     pending_agent_bytes: 0,
                     operator_tx: None,
                     operator_detached_at: Some(Instant::now()),
-                    replay: VecDeque::new(),
-                    replay_bytes: 0,
                 });
             if session.agent_id != agent_id || session.agent_tx.is_some() {
                 continue;
@@ -264,7 +258,7 @@ impl TerminalRegistry {
         &self,
         terminal_id: &str,
         attachment_token: &str,
-    ) -> Result<(mpsc::Receiver<TerminalRelayFrame>, Vec<TerminalRelayFrame>), &'static str> {
+    ) -> Result<mpsc::Receiver<TerminalRelayFrame>, &'static str> {
         let mut sessions = self.inner.lock().await;
         let session = active_session(&mut sessions, terminal_id)?;
         if session.operator_tx.is_some() {
@@ -275,12 +269,9 @@ impl TerminalRegistry {
         }
         session.attachment_token = None;
         session.operator_detached_at = None;
-        // Keep the rolling transcript after attachment so a newly mounted
-        // browser can reconstruct recent terminal state.
-        let replay = session.replay.iter().cloned().collect();
         let (tx, rx) = mpsc::channel(TERMINAL_RELAY_QUEUE);
         session.operator_tx = Some(tx);
-        Ok((rx, replay))
+        Ok(rx)
     }
 
     pub async fn relay_to_agent(
@@ -305,7 +296,7 @@ impl TerminalRegistry {
         let session = active_session(&mut sessions, terminal_id)?;
         session.pending_agent_bytes += relay_frame_size(&frame);
         session.pending_agent.push_back(frame);
-        while session.pending_agent_bytes > TERMINAL_REPLAY_BYTES {
+        while session.pending_agent_bytes > TERMINAL_PENDING_AGENT_BYTES {
             if let Some(dropped) = session.pending_agent.pop_front() {
                 session.pending_agent_bytes -= relay_frame_size(&dropped);
             } else {
@@ -323,7 +314,6 @@ impl TerminalRegistry {
         let operator_tx = {
             let mut sessions = self.inner.lock().await;
             let session = active_session(&mut sessions, terminal_id)?;
-            push_replay(session, frame.clone());
             session.operator_tx.clone()
         };
 
@@ -332,7 +322,8 @@ impl TerminalRegistry {
                 Ok(()) => return Ok(()),
                 Err(_) => {
                     // The browser task may not have marked itself detached yet.
-                    // Preserve this frame so that race does not kill the PTY.
+                    // Detach its stale sender; the agent's parsed screen remains
+                    // authoritative and will reconstruct the next attachment.
                     let mut sessions = self.inner.lock().await;
                     let session = active_session(&mut sessions, terminal_id)?;
                     session.operator_tx = None;
@@ -433,18 +424,6 @@ fn relay_frame_size(frame: &TerminalRelayFrame) -> usize {
     }
 }
 
-fn push_replay(session: &mut TerminalSession, frame: TerminalRelayFrame) {
-    session.replay_bytes += relay_frame_size(&frame);
-    session.replay.push_back(frame);
-    while session.replay_bytes > TERMINAL_REPLAY_BYTES {
-        if let Some(dropped) = session.replay.pop_front() {
-            session.replay_bytes -= relay_frame_size(&dropped);
-        } else {
-            break;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,31 +464,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn detached_output_replay_is_bounded() {
+    async fn detached_output_is_not_transcribed_by_control_plane() {
         let registry = TerminalRegistry::new();
         let created = registry.create("router".into()).await.expect("create");
-        for _ in 0..10 {
-            registry
-                .relay_from_agent(
-                    &created.terminal_id,
-                    TerminalRelayFrame::Binary(vec![0; TERMINAL_REPLAY_BYTES / 4]),
-                )
-                .await
-                .expect("buffer output");
-        }
+        registry
+            .relay_from_agent(
+                &created.terminal_id,
+                TerminalRelayFrame::Binary(b"not retained".to_vec()),
+            )
+            .await
+            .expect("ignore detached output");
 
-        let (_, replay) = registry
+        let mut outbound = registry
             .attach_operator(&created.terminal_id, &created.attachment_token)
             .await
             .expect("attach operator");
-        assert!(replay.iter().map(relay_frame_size).sum::<usize>() <= TERMINAL_REPLAY_BYTES);
+        assert!(outbound.try_recv().is_err());
     }
 
     #[tokio::test]
-    async fn attached_output_remains_available_for_remount() {
+    async fn attached_output_is_delivered_live_only() {
         let registry = TerminalRegistry::new();
         let created = registry.create("router".into()).await.expect("create");
-        let (mut outbound, _) = registry
+        let mut outbound = registry
             .attach_operator(&created.terminal_id, &created.attachment_token)
             .await
             .expect("attach operator");
@@ -525,15 +502,12 @@ mod tests {
             .issue_attachment_token(&created.terminal_id)
             .await
             .expect("reattach token");
-        let (_, replay) = registry
+        let mut remounted = registry
             .attach_operator(&created.terminal_id, &token)
             .await
             .expect("reattach operator");
 
-        assert!(matches!(
-            replay.as_slice(),
-            [TerminalRelayFrame::Binary(bytes)] if bytes == b"recent prompt"
-        ));
+        assert!(remounted.try_recv().is_err());
     }
 
     #[tokio::test]

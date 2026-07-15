@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -11,10 +11,94 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
+use unicode_width::UnicodeWidthStr;
 
 const MAX_TERMINAL_FRAME_BYTES: usize = 64 * 1024;
-const TERMINAL_REPLAY_BYTES: usize = 256 * 1024;
+const TERMINAL_SCROLLBACK_ROWS: usize = 5_000;
 const PROCESS_SIGNAL_GRACE: Duration = Duration::from_secs(1);
+
+/// Tracks the terminal's current rendered state while the browser is detached.
+///
+/// A snapshot is terminal escape output, so the browser can restore the screen
+/// through its normal parser without a second state protocol.
+struct TerminalState {
+    parser: vt100::Parser,
+}
+
+impl TerminalState {
+    fn new(rows: u16, cols: u16) -> Self {
+        Self {
+            parser: vt100::Parser::new(rows, cols, TERMINAL_SCROLLBACK_ROWS),
+        }
+    }
+
+    fn process(&mut self, bytes: &[u8]) {
+        self.parser.process(bytes);
+    }
+
+    fn resize(&mut self, rows: u16, cols: u16) {
+        self.parser.screen_mut().set_size(rows, cols);
+    }
+
+    fn snapshot(&mut self) -> Vec<u8> {
+        let screen = self.parser.screen_mut();
+        let (rows, cols) = screen.size();
+        let alternate_screen = screen.alternate_screen();
+        let mut physical_rows = Vec::new();
+
+        // set_scrollback changes the viewport exposed by Screen. Walking its
+        // top row from the maximum offset down to zero yields every retained
+        // physical row exactly once, oldest first.
+        screen.set_scrollback(usize::MAX);
+        let retained_rows = screen.scrollback();
+        for offset in (1..=retained_rows).rev() {
+            screen.set_scrollback(offset);
+            let contents = screen.rows(0, cols).next().unwrap_or_default();
+            physical_rows.push((
+                screen.rows_formatted(0, cols).next().unwrap_or_default(),
+                UnicodeWidthStr::width(contents.as_str()).min(usize::from(cols)),
+                screen.row_wrapped(0),
+            ));
+        }
+        screen.set_scrollback(0);
+        physical_rows.extend((0..rows).map(|row| {
+            let contents = screen
+                .rows(0, cols)
+                .nth(usize::from(row))
+                .unwrap_or_default();
+            (
+                screen
+                    .rows_formatted(0, cols)
+                    .nth(usize::from(row))
+                    .unwrap_or_default(),
+                UnicodeWidthStr::width(contents.as_str()).min(usize::from(cols)),
+                screen.row_wrapped(row),
+            )
+        }));
+
+        // Replace browser history, then stream physical rows so xterm builds
+        // its own scrollback. The final formatted state restores colors,
+        // cursor position, and input modes for the live screen.
+        let mut snapshot = b"\x1b[?1049l\x1b[3J\x1b[2J\x1b[H".to_vec();
+        for (index, (contents, display_width, wrapped)) in physical_rows.iter().enumerate() {
+            // rows_formatted encodes each row relative to default attributes.
+            // Reset between rows so attributes cannot leak across boundaries.
+            snapshot.extend_from_slice(b"\x1b[0m");
+            snapshot.extend_from_slice(contents);
+            snapshot.extend_from_slice(b"\x1b[0m");
+            if *wrapped {
+                snapshot.resize(snapshot.len() + usize::from(cols) - display_width, b' ');
+            } else if index + 1 < physical_rows.len() {
+                snapshot.extend_from_slice(b"\r\n");
+            }
+        }
+        if alternate_screen {
+            snapshot.extend_from_slice(b"\x1b[?1049h");
+        }
+        snapshot.extend_from_slice(&screen.state_formatted());
+        snapshot
+    }
+}
 
 struct ActiveTerminal {
     cancel: oneshot::Sender<()>,
@@ -186,8 +270,7 @@ async fn run_terminal(
     let mut relay_output: Option<mpsc::Sender<Message>> = None;
     let mut relay_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut relay_generation = 0_u64;
-    let mut replay = VecDeque::new();
-    let mut replay_bytes = 0_usize;
+    let mut terminal_state = TerminalState::new(rows, cols);
     let mut output = [0_u8; 16 * 1024];
     let mut requested_close = false;
     let mut observed_status = None;
@@ -214,8 +297,10 @@ async fn run_terminal(
                     RelayInput::Resize { generation, rows, cols } if generation == relay_generation => {
                         validate_size(rows, cols)?;
                         writer.resize(rows, cols)?;
+                        terminal_state.resize(rows, cols);
                     }
-                    RelayInput::Refresh { generation } if generation == relay_generation => {
+                    RelayInput::Snapshot { generation } if generation == relay_generation => {
+                        send_terminal_snapshot(terminal_state.snapshot(), &mut relay_output).await;
                         if let Err(err) = writer.refresh() {
                             warn!(terminal_id = %terminal_id, error = %err, "terminal redraw signal failed");
                         }
@@ -225,14 +310,7 @@ async fn run_terminal(
                         break;
                     }
                     RelayInput::Connected { generation, output } if generation == relay_generation => {
-                        relay_output = Some(output.clone());
-                        while let Some(frame) = replay.pop_front() {
-                            replay_bytes = replay_bytes.saturating_sub(message_size(&frame));
-                            if output.send(frame).await.is_err() {
-                                relay_output = None;
-                                break;
-                            }
-                        }
+                        relay_output = Some(output);
                     }
                     RelayInput::Disconnected { generation } if generation == relay_generation => {
                         relay_output = None;
@@ -249,8 +327,6 @@ async fn run_terminal(
                 let generation = relay_generation;
                 let (output_tx, output_rx) = mpsc::channel(32);
                 relay_output = None;
-                let initial_replay = replay.drain(..).collect();
-                replay_bytes = 0;
                 let config = config.clone();
                 let terminal_id = terminal_id.clone();
                 let relay_input_tx = relay_input_tx.clone();
@@ -260,7 +336,6 @@ async fn run_terminal(
                         terminal_id: terminal_id.clone(),
                         relay_token,
                         generation,
-                        initial_replay,
                         output_tx,
                         output_rx,
                         input: relay_input_tx.clone(),
@@ -273,12 +348,13 @@ async fn run_terminal(
             read = reader.read(&mut output) => {
                 match read {
                     Ok(0) => break,
-                    Ok(count) => send_terminal_output(
-                        Message::Binary(output[..count].to_vec().into()),
-                        &mut relay_output,
-                        &mut replay,
-                        &mut replay_bytes,
-                    ).await,
+                    Ok(count) => {
+                        terminal_state.process(&output[..count]);
+                        send_terminal_output(
+                            Message::Binary(output[..count].to_vec().into()),
+                            &mut relay_output,
+                        ).await;
+                    }
                     // Linux PTY masters commonly report EIO after the slave closes.
                     Err(err) if err.raw_os_error() == Some(5) => break,
                     Err(err) => return Err(err).context("failed to read PTY output"),
@@ -317,7 +393,7 @@ enum RelayInput {
         rows: u16,
         cols: u16,
     },
-    Refresh {
+    Snapshot {
         generation: u64,
     },
     Close {
@@ -334,7 +410,6 @@ struct RelayConnection {
     terminal_id: TerminalId,
     relay_token: String,
     generation: u64,
-    initial_replay: Vec<Message>,
     output_tx: mpsc::Sender<Message>,
     output_rx: mpsc::Receiver<Message>,
     input: mpsc::UnboundedSender<RelayInput>,
@@ -356,11 +431,6 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
     )
     .await?;
     send_json(&mut sink, &TerminalControl::Ready).await?;
-    for frame in relay.initial_replay {
-        sink.send(frame)
-            .await
-            .context("failed to replay detached terminal output")?;
-    }
     relay
         .input
         .send(RelayInput::Connected {
@@ -393,8 +463,8 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
                             })
                                 .map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
                         }
-                        TerminalControl::Refresh => {
-                            relay.input.send(RelayInput::Refresh {
+                        TerminalControl::Snapshot => {
+                            relay.input.send(RelayInput::Snapshot {
                                 generation: relay.generation,
                             }).map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
                         }
@@ -423,39 +493,27 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
     Ok(())
 }
 
-async fn send_terminal_output(
-    frame: Message,
-    relay: &mut Option<mpsc::Sender<Message>>,
-    replay: &mut VecDeque<Message>,
-    replay_bytes: &mut usize,
-) {
-    if let Some(tx) = relay.as_ref() {
-        if let Err(error) = tx.send(frame).await {
+async fn send_terminal_output(frame: Message, relay: &mut Option<mpsc::Sender<Message>>) {
+    if let Some(tx) = relay.as_ref()
+        && tx.send(frame).await.is_err()
+    {
+        *relay = None;
+    }
+}
+
+async fn send_terminal_snapshot(snapshot: Vec<u8>, relay: &mut Option<mpsc::Sender<Message>>) {
+    let Some(tx) = relay.as_ref() else {
+        return;
+    };
+    for chunk in snapshot.chunks(MAX_TERMINAL_FRAME_BYTES) {
+        if tx
+            .send(Message::Binary(chunk.to_vec().into()))
+            .await
+            .is_err()
+        {
             *relay = None;
-            push_local_replay(error.0, replay, replay_bytes);
+            return;
         }
-    } else {
-        push_local_replay(frame, replay, replay_bytes);
-    }
-}
-
-fn push_local_replay(frame: Message, replay: &mut VecDeque<Message>, replay_bytes: &mut usize) {
-    *replay_bytes += message_size(&frame);
-    replay.push_back(frame);
-    while *replay_bytes > TERMINAL_REPLAY_BYTES {
-        if let Some(dropped) = replay.pop_front() {
-            *replay_bytes = replay_bytes.saturating_sub(message_size(&dropped));
-        } else {
-            break;
-        }
-    }
-}
-
-fn message_size(message: &Message) -> usize {
-    match message {
-        Message::Text(text) => text.len(),
-        Message::Binary(bytes) | Message::Ping(bytes) | Message::Pong(bytes) => bytes.len(),
-        Message::Close(_) | Message::Frame(_) => 0,
     }
 }
 
@@ -558,25 +616,104 @@ mod tests {
     }
 
     #[test]
-    fn detached_replay_drops_oldest_output_at_bound() {
-        let mut replay = VecDeque::new();
-        let mut replay_bytes = 0;
-        for marker in 0_u8..10 {
-            push_local_replay(
-                Message::Binary(vec![marker; TERMINAL_REPLAY_BYTES / 4].into()),
-                &mut replay,
-                &mut replay_bytes,
-            );
-        }
+    fn snapshot_reconstructs_screen_content_and_cursor() {
+        let mut state = TerminalState::new(24, 80);
+        state.process(b"hello\r\n\x1b[31mred\x1b[0m\x1b[10;20Hcursor");
 
-        assert!(replay_bytes <= TERMINAL_REPLAY_BYTES);
-        assert_eq!(replay.len(), 4);
+        let mut restored = vt100::Parser::new(24, 80, 0);
+        restored.process(b"stale browser contents\x1b[24;80Hjunk");
+        restored.process(&state.snapshot());
+
         assert_eq!(
-            replay.front().and_then(|frame| match frame {
-                Message::Binary(bytes) => bytes.first().copied(),
-                _ => None,
-            }),
-            Some(6)
+            restored.screen().contents(),
+            state.parser.screen().contents()
         );
+        assert_eq!(
+            restored.screen().cursor_position(),
+            state.parser.screen().cursor_position()
+        );
+    }
+
+    #[test]
+    fn snapshot_reconstructs_terminal_input_modes() {
+        let mut state = TerminalState::new(24, 80);
+        state.process(b"\x1b[?1h\x1b[?1000h\x1b[?2004h");
+
+        let mut restored = vt100::Parser::new(24, 80, 0);
+        restored.process(&state.snapshot());
+
+        assert!(restored.screen().application_cursor());
+        assert!(restored.screen().bracketed_paste());
+        assert_eq!(
+            restored.screen().mouse_protocol_mode(),
+            state.parser.screen().mouse_protocol_mode()
+        );
+    }
+
+    #[test]
+    fn terminal_state_tracks_resize() {
+        let mut state = TerminalState::new(24, 80);
+        state.resize(40, 120);
+        assert_eq!(state.parser.screen().size(), (40, 120));
+    }
+
+    #[test]
+    fn snapshot_reconstructs_agent_scrollback() {
+        let mut state = TerminalState::new(3, 20);
+        for line in 0..10 {
+            if line == 0 {
+                state.process(b"\x1b[31mhistory 0\x1b[0m\r\n");
+            } else {
+                state.process(format!("history {line}\r\n").as_bytes());
+            }
+        }
+        let expected_screen = state.parser.screen().contents();
+
+        let mut restored = vt100::Parser::new(3, 20, TERMINAL_SCROLLBACK_ROWS);
+        restored.process(&state.snapshot());
+
+        assert_eq!(restored.screen().contents(), expected_screen);
+        restored.screen_mut().set_scrollback(usize::MAX);
+        assert!(restored.screen().scrollback() >= 8);
+        assert!(restored.screen().contents().contains("history 0"));
+        assert_eq!(
+            restored
+                .screen()
+                .cell(0, 0)
+                .expect("first history cell")
+                .fgcolor(),
+            vt100::Color::Idx(1)
+        );
+    }
+
+    #[test]
+    fn snapshot_restores_alternate_screen_mode() {
+        let mut state = TerminalState::new(3, 20);
+        state.process(b"shell\r\n\x1b[?1049hfull-screen");
+
+        let mut restored = vt100::Parser::new(3, 20, TERMINAL_SCROLLBACK_ROWS);
+        restored.process(&state.snapshot());
+
+        assert!(restored.screen().alternate_screen());
+        assert_eq!(restored.screen().contents(), "full-screen");
+    }
+
+    #[tokio::test]
+    async fn snapshot_is_split_at_the_terminal_frame_limit() {
+        let snapshot = vec![7; MAX_TERMINAL_FRAME_BYTES * 2 + 1];
+        let (tx, mut rx) = mpsc::channel(3);
+        let mut relay = Some(tx);
+
+        send_terminal_snapshot(snapshot.clone(), &mut relay).await;
+
+        let mut restored = Vec::new();
+        for _ in 0..3 {
+            let Message::Binary(chunk) = rx.recv().await.expect("snapshot chunk") else {
+                panic!("snapshot chunks must be binary");
+            };
+            assert!(chunk.len() <= MAX_TERMINAL_FRAME_BYTES);
+            restored.extend_from_slice(&chunk);
+        }
+        assert_eq!(restored, snapshot);
     }
 }

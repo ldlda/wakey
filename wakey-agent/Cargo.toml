@@ -39,5 +39,7 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 url = "2"
+unicode-width = "0.2"
+vt100 = "0.16.2"
 wakey = { path = "..", registry = "gitea", version = "0" }
 wakey-core = { path = "../wakey-core", registry = "gitea", version = "0" }
