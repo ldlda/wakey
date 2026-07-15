@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { Eraser, PlugZap, RotateCcw, Square, Terminal } from "lucide-react";
@@ -165,65 +166,51 @@ export function TerminalPage({
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
       fontSize: 14,
       lineHeight: 1.1,
+      // xterm uses this width for its internal scrollbar as well as the
+      // overview ruler. Reserve a larger touch target on coarse pointers.
+      overviewRuler: {
+        width: window.matchMedia("(pointer: coarse)").matches ? 22 : 16,
+      },
       scrollback: 5000,
       theme: {
         background: "#0b1117",
         foreground: "#e5e7eb",
         cursor: "#6ee7a8",
+        scrollbarSliderBackground: "#52617099",
+        scrollbarSliderHoverBackground: "#6b7c8dcc",
+        scrollbarSliderActiveBackground: "#8294a6",
       },
     });
     const fit = new FitAddon();
+    terminal.loadAddon(new ClipboardAddon());
     terminal.loadAddon(fit);
     terminal.open(hostRef.current);
     terminal.attachCustomKeyEventHandler((event) => {
-      if (event.type !== "keydown") return true;
+      const copiesTerminalSelection =
+        event.type === "keydown" &&
+        event.ctrlKey &&
+        event.shiftKey &&
+        event.code === "KeyC";
+      if (!copiesTerminalSelection) return true;
 
-      const copy =
-        (event.ctrlKey && event.shiftKey && event.code === "KeyC") ||
-        (event.metaKey && event.code === "KeyC") ||
-        (event.ctrlKey && event.code === "Insert");
-      if (copy) {
-        event.preventDefault();
-        event.stopPropagation();
-        if (terminal.hasSelection()) {
-          if (!navigator.clipboard) {
-            toast.error("Clipboard access requires HTTPS or localhost");
-          } else {
-            void navigator.clipboard
-              .writeText(terminal.getSelection())
-              .catch((error) =>
-                toast.error("Clipboard access was denied", {
-                  description: String(error),
-                }),
-              );
-          }
-        }
-        return false;
-      }
-
-      const paste =
-        (event.ctrlKey && event.shiftKey && event.code === "KeyV") ||
-        (event.metaKey && event.code === "KeyV") ||
-        (event.shiftKey && event.code === "Insert");
-      if (paste) {
-        event.preventDefault();
-        event.stopPropagation();
+      // Chromium reserves Ctrl+Shift+C for DevTools. Other clipboard shortcuts
+      // fall through to xterm's native copy/paste event handlers.
+      event.preventDefault();
+      event.stopPropagation();
+      if (terminal.hasSelection()) {
         if (!navigator.clipboard) {
           toast.error("Clipboard access requires HTTPS or localhost");
-          return false;
+        } else {
+          void navigator.clipboard
+            .writeText(terminal.getSelection())
+            .catch((error) =>
+              toast.error("Clipboard access was denied", {
+                description: String(error),
+              }),
+            );
         }
-        void navigator.clipboard
-          .readText()
-          .then((text) => terminal.paste(text))
-          .catch((error) =>
-            toast.error("Clipboard access was denied", {
-              description: String(error),
-            }),
-          );
-        return false;
       }
-
-      return true;
+      return false;
     });
     fit.fit();
     terminalRef.current = terminal;
@@ -351,7 +338,9 @@ export function TerminalPage({
     } finally {
       setSession(null);
       setConnection("idle");
-      terminalRef.current?.clear();
+      // xterm.clear() deliberately preserves the active cursor line. Closing
+      // a session should discard its complete screen and terminal modes.
+      terminalRef.current?.reset();
     }
   }
 
