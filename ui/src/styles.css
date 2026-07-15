@@ -427,6 +427,86 @@
   gap: 0.5rem;
 }
 
+.terminal-tabs {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-tab {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 13rem;
+  height: 1.85rem;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 0.6rem;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  font-size: 0.75rem;
+  color: #aab7c4;
+}
+
+.terminal-tab > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-tab time {
+  flex: 0 0 auto;
+  color: #7f8d9a;
+  font-size: 0.6875rem;
+}
+
+.terminal-tab[data-active] {
+  border-color: rgb(255 255 255 / 10%);
+  background: rgb(255 255 255 / 7%);
+  color: #f1f5f9;
+}
+
+.terminal-tab[data-locked] {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.terminal-tab-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--presence-unknown);
+}
+
+.terminal-tab-dot[data-state="ready"],
+.terminal-tab-dot[data-state="attached"] {
+  background: var(--presence-online);
+}
+
+.terminal-tab-dot[data-state="connecting"],
+.terminal-tab-dot[data-state="detached"] {
+  background: var(--presence-likely);
+}
+
+.terminal-tab-dot[data-state="disconnected"],
+.terminal-tab-dot[data-state="exited"] {
+  background: var(--presence-offline);
+}
+
+.terminal-frame-actions {
+  flex: 0 0 auto;
+}
+
 .terminal-session-label > span:not(.terminal-status) {
   overflow: hidden;
   color: #dbe4ee;
