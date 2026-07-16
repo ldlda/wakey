@@ -29,8 +29,7 @@ pub struct TerminalRegistry {
 struct TerminalSession {
     agent_id: String,
     created_at_unix: u64,
-    expires_at: Option<Instant>,
-    expires_at_unix: Option<u64>,
+    expiry: TerminalExpiry,
     agent_confirmed: bool,
     relay_token: Option<String>,
     attachment_token: Option<String>,
@@ -120,8 +119,7 @@ impl TerminalRegistry {
             TerminalSession {
                 agent_id,
                 created_at_unix,
-                expires_at: expiry.deadline,
-                expires_at_unix: expiry.unix,
+                expiry,
                 agent_confirmed: false,
                 relay_token: Some(relay_token.clone()),
                 attachment_token: Some(attachment_token.clone()),
@@ -141,7 +139,7 @@ impl TerminalRegistry {
             relay_token,
             attachment_token,
             created_at_unix,
-            expires_at_unix: expiry.unix,
+            expires_at_unix: expiry.unix(),
         })
     }
 
@@ -230,8 +228,7 @@ impl TerminalRegistry {
                 .or_insert_with(|| TerminalSession {
                     agent_id: agent_id.to_string(),
                     created_at_unix: reported_session.created_at_unix,
-                    expires_at: expiry.deadline,
-                    expires_at_unix: expiry.unix,
+                    expiry,
                     agent_confirmed: true,
                     relay_token: None,
                     attachment_token: None,
@@ -463,7 +460,7 @@ impl TerminalRegistry {
                 session.created_at_unix,
                 session.agent_tx.is_some(),
                 session.operator_tx.is_some(),
-                session.expires_at_unix,
+                session.expiry.unix(),
             )
         })
     }
@@ -477,7 +474,7 @@ impl TerminalRegistry {
                 terminal_id: terminal_id.clone(),
                 agent_id: session.agent_id.clone(),
                 created_at_unix: session.created_at_unix,
-                expires_at_unix: session.expires_at_unix,
+                expires_at_unix: session.expiry.unix(),
                 agent_attached: session.agent_tx.is_some(),
                 operator_attached: session.operator_tx.is_some(),
             })
@@ -493,8 +490,7 @@ fn active_session<'a>(
 ) -> Result<&'a mut TerminalSession, &'static str> {
     if sessions
         .get(terminal_id)
-        .and_then(|session| session.expires_at)
-        .is_some_and(|expires_at| expires_at <= Instant::now())
+        .is_some_and(|session| session.expiry.is_expired(Instant::now()))
     {
         sessions.remove(terminal_id);
         return Err("terminal_expired");
@@ -534,24 +530,34 @@ fn prune_tombstones(closed: &mut HashMap<String, Instant>) {
 
 fn prune_expired_sessions(sessions: &mut HashMap<String, TerminalSession>) {
     let now = Instant::now();
-    sessions.retain(|_, session| session.expires_at.is_none_or(|expires_at| expires_at > now));
+    sessions.retain(|_, session| !session.expiry.is_expired(now));
 }
 
-#[derive(Clone, Copy)]
-struct TerminalExpiry {
-    deadline: Option<Instant>,
-    unix: Option<u64>,
+#[derive(Clone, Copy, Debug)]
+enum TerminalExpiry {
+    Unlimited,
+    Finite { deadline: Instant, unix: u64 },
+}
+
+impl TerminalExpiry {
+    fn unix(self) -> Option<u64> {
+        match self {
+            Self::Unlimited => None,
+            Self::Finite { unix, .. } => Some(unix),
+        }
+    }
+
+    fn is_expired(self, now: Instant) -> bool {
+        matches!(self, Self::Finite { deadline, .. } if deadline <= now)
+    }
 }
 
 /// Converts the agent's creation-time policy into CC's monotonic deadline.
-/// The outer `Option` rejects expired or unrepresentable sessions; an inner
-/// `None` deadline is the explicit zero-TTL (unlimited) policy.
+/// `None` rejects expired or unrepresentable sessions; `Unlimited` is the
+/// explicit zero-TTL policy.
 fn expiry_for_created_at(created_at_unix: u64, session_ttl_seconds: u64) -> Option<TerminalExpiry> {
     if session_ttl_seconds == 0 {
-        return Some(TerminalExpiry {
-            deadline: None,
-            unix: None,
-        });
+        return Some(TerminalExpiry::Unlimited);
     }
     let expires_at_unix = created_at_unix.checked_add(session_ttl_seconds)?;
     let now_unix = SystemTime::now()
@@ -562,9 +568,9 @@ fn expiry_for_created_at(created_at_unix: u64, session_ttl_seconds: u64) -> Opti
         return None;
     }
     let remaining = Duration::from_secs(expires_at_unix - now_unix);
-    Some(TerminalExpiry {
-        deadline: Some(Instant::now().checked_add(remaining)?),
-        unix: Some(expires_at_unix),
+    Some(TerminalExpiry::Finite {
+        deadline: Instant::now().checked_add(remaining)?,
+        unix: expires_at_unix,
     })
 }
 
@@ -815,7 +821,10 @@ mod tests {
             .await
             .get_mut(&first.terminal_id)
             .expect("first session")
-            .expires_at = Some(Instant::now());
+            .expiry = TerminalExpiry::Finite {
+            deadline: Instant::now(),
+            unix: first.created_at_unix,
+        };
 
         registry
             .create("router".into())
