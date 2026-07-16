@@ -3613,15 +3613,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vt100"
-version = "0.16.2"
-dependencies = [
- "itoa",
- "unicode-width",
- "vte",
-]
-
-[[package]]
 name = "vte"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3672,9 +3663,9 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "vt100",
  "wakey",
  "wakey-core",
+ "wakey-vt100",
 ]
 
 [[package]]
@@ -3733,6 +3724,15 @@ dependencies = [
  "serial_test",
  "tokio",
  "wakey-core",
+]
+
+[[package]]
+name = "wakey-vt100"
+version = "0.16.2-wakey.1"
+dependencies = [
+ "itoa",
+ "unicode-width",
+ "vte",
 ]
 
 [[package]]

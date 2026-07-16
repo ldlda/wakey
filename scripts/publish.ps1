@@ -54,17 +54,21 @@ if ($Publish) {
         Write-Host 'No -Registry provided; defaulting publish target to registry: gitea'
     }
 
-    $publishOrder = @(
-        'lda-ipjs',
-        'wakey-core',
-        'wakey-linux',
-        'wakey',
-        'wakey-agent',
-        'wakey-control-plane'
+    # Patched external crates are excluded from the workspace, so publish
+    # them by manifest path before workspace packages that depend on them.
+    $publishTargets = @(
+        @{ Name = 'wakey-vt100'; Args = @('publish', '--manifest-path', 'vendor/vt100/Cargo.toml') },
+        @{ Name = 'lda-ipjs'; Args = @('publish', '-p', 'lda-ipjs') },
+        @{ Name = 'wakey-core'; Args = @('publish', '-p', 'wakey-core') },
+        @{ Name = 'wakey-linux'; Args = @('publish', '-p', 'wakey-linux') },
+        @{ Name = 'wakey'; Args = @('publish', '-p', 'wakey') },
+        @{ Name = 'wakey-agent'; Args = @('publish', '-p', 'wakey-agent') },
+        @{ Name = 'wakey-control-plane'; Args = @('publish', '-p', 'wakey-control-plane') }
     )
 
-    foreach ($pkg in $publishOrder) {
-        $pubArgs = @('publish', '-p', $pkg)
+    foreach ($target in $publishTargets) {
+        $pkg = $target.Name
+        $pubArgs = @($target.Args)
         if ($Registry) { $pubArgs += @('--registry', $Registry) }
 
         Write-Host ("publishing {0}..." -f $pkg)
