@@ -110,6 +110,16 @@ update_existing_repo() {
     git -C "$repo_dir" pull --ff-only origin "$ref" || fail 'git pull --ff-only failed'
 }
 
+update_submodules() {
+    repo_dir=$1
+
+    # Sync first so an updated .gitmodules URL is honored by an existing
+    # checkout, then initialize and pin every nested submodule to the commit
+    # recorded by the parent repository.
+    git -C "$repo_dir" submodule sync --recursive || fail 'git submodule sync failed'
+    git -C "$repo_dir" submodule update --init --recursive || fail 'git submodule update failed'
+}
+
 install_executable_force() {
     src=$1
     dst=$2
@@ -186,6 +196,7 @@ main() {
         git clone --depth 1 --branch "$REF" "$REPO_URL" "$WORKDIR" ||
             fail 'git clone failed'
     fi
+    update_submodules "$WORKDIR"
 
     cd "$WORKDIR"
 
