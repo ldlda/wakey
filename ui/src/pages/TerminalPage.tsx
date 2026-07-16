@@ -169,8 +169,10 @@ export function TerminalPage({
   const selectedAgentSessionCount = sessions.filter(
     (item) => item.agent_id === selectedAgentId,
   ).length;
-  const selectedAgentSessionLimit =
-    selectedAgent?.capability_options?.terminal?.max_sessions ?? 2;
+  const selectedAgentSessionLimit = Math.max(
+    1,
+    selectedAgent?.capability_options?.terminal?.max_sessions ?? 2,
+  );
   const agentAtSessionLimit =
     selectedAgentSessionCount >= selectedAgentSessionLimit;
   const canRequestStart =

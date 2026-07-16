@@ -2,6 +2,7 @@ use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::IpAddr;
+use std::time::{Duration, Instant};
 use wakey_core::parse::mac;
 use wakey_core::{
     Device, DeviceInventory, DhcpLeaseWithState, InterfaceSummary, InventoryQuery,
@@ -67,6 +68,21 @@ pub enum AgentCapability {
 
 pub const DEFAULT_TERMINAL_MAX_SESSIONS: usize = 2;
 pub const DEFAULT_TERMINAL_SESSION_TTL_SECONDS: u64 = 12 * 60 * 60;
+
+/// Validates a terminal TTL against the platform's monotonic timer range.
+/// Zero is the explicit unlimited policy.
+pub fn checked_terminal_session_ttl(
+    session_ttl_seconds: u64,
+) -> Result<Option<Duration>, &'static str> {
+    if session_ttl_seconds == 0 {
+        return Ok(None);
+    }
+    let ttl = Duration::from_secs(session_ttl_seconds);
+    Instant::now()
+        .checked_add(ttl)
+        .ok_or("terminal session TTL is too large for the platform timer")?;
+    Ok(Some(ttl))
+}
 
 const fn default_terminal_session_ttl_seconds() -> u64 {
     DEFAULT_TERMINAL_SESSION_TTL_SECONDS

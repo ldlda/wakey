@@ -153,7 +153,7 @@ pub async fn get_terminal(
     State(state): State<AppState>,
     Path(terminal_id): Path<String>,
 ) -> Result<Json<TerminalSessionResponse>, ApiError> {
-    let (agent_id, created_at_unix, agent_attached, operator_attached, expires_at_unix) = state
+    let summary = state
         .terminals
         .summary(&terminal_id)
         .await
@@ -161,11 +161,11 @@ pub async fn get_terminal(
     Ok(Json(TerminalSessionResponse {
         websocket_url: operator_ws_path(&terminal_id),
         terminal_id,
-        agent_id,
-        created_at_unix,
-        expires_at_unix,
-        agent_attached,
-        operator_attached,
+        agent_id: summary.agent_id,
+        created_at_unix: summary.created_at_unix,
+        expires_at_unix: summary.expires_at_unix,
+        agent_attached: summary.agent_attached,
+        operator_attached: summary.operator_attached,
         attachment_token: None,
     }))
 }
@@ -192,7 +192,7 @@ pub async fn attach_terminal(
         .issue_attachment_token_for_operator(&terminal_id, &request.operator_id)
         .await
         .map_err(registry_error)?;
-    let (agent_id, created_at_unix, agent_attached, operator_attached, expires_at_unix) = state
+    let summary = state
         .terminals
         .summary(&terminal_id)
         .await
@@ -200,11 +200,11 @@ pub async fn attach_terminal(
     Ok(Json(TerminalSessionResponse {
         websocket_url: operator_ws_path(&terminal_id),
         terminal_id,
-        agent_id,
-        created_at_unix,
-        expires_at_unix,
-        agent_attached,
-        operator_attached,
+        agent_id: summary.agent_id,
+        created_at_unix: summary.created_at_unix,
+        expires_at_unix: summary.expires_at_unix,
+        agent_attached: summary.agent_attached,
+        operator_attached: summary.operator_attached,
         attachment_token: Some(attachment_token),
     }))
 }
@@ -365,10 +365,10 @@ async fn handle_operator_terminal_socket(
         warn!(terminal_id, code, "failed to request terminal snapshot");
     }
     let summary = state.terminals.summary(&terminal_id).await;
-    if let Some((agent_id, _, _, _, _)) = &summary {
+    if let Some(summary) = &summary {
         append_terminal_audit(
             &state,
-            agent_id,
+            &summary.agent_id,
             &terminal_id,
             TerminalAudit {
                 actor_type: "admin_api",
@@ -382,7 +382,7 @@ async fn handle_operator_terminal_socket(
     }
 
     let (mut write, mut read) = socket.split();
-    if summary.is_some_and(|(_, _, agent_attached, _, _)| agent_attached) {
+    if summary.is_some_and(|summary| summary.agent_attached) {
         let ready = serde_json::to_string(&TerminalControl::Ready)
             .expect("terminal ready control serializes");
         if send_relay_frame(&mut write, TerminalRelayFrame::Text(ready))

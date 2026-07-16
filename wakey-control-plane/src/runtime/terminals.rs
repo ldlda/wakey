@@ -448,21 +448,12 @@ impl TerminalRegistry {
         Some(detached_at)
     }
 
-    pub async fn summary(
-        &self,
-        terminal_id: &str,
-    ) -> Option<(String, u64, bool, bool, Option<u64>)> {
+    pub async fn summary(&self, terminal_id: &str) -> Option<TerminalSummary> {
         let mut sessions = self.inner.lock().await;
         prune_expired_sessions(&mut sessions);
-        sessions.get(terminal_id).map(|session| {
-            (
-                session.agent_id.clone(),
-                session.created_at_unix,
-                session.agent_tx.is_some(),
-                session.operator_tx.is_some(),
-                session.expiry.unix(),
-            )
-        })
+        sessions
+            .get(terminal_id)
+            .map(|session| terminal_summary(terminal_id, session))
     }
 
     pub async fn summaries(&self) -> Vec<TerminalSummary> {
@@ -470,17 +461,21 @@ impl TerminalRegistry {
         prune_expired_sessions(&mut sessions);
         let mut summaries = sessions
             .iter()
-            .map(|(terminal_id, session)| TerminalSummary {
-                terminal_id: terminal_id.clone(),
-                agent_id: session.agent_id.clone(),
-                created_at_unix: session.created_at_unix,
-                expires_at_unix: session.expiry.unix(),
-                agent_attached: session.agent_tx.is_some(),
-                operator_attached: session.operator_tx.is_some(),
-            })
+            .map(|(terminal_id, session)| terminal_summary(terminal_id, session))
             .collect::<Vec<_>>();
         summaries.sort_by_key(|session| std::cmp::Reverse(session.created_at_unix));
         summaries
+    }
+}
+
+fn terminal_summary(terminal_id: &str, session: &TerminalSession) -> TerminalSummary {
+    TerminalSummary {
+        terminal_id: terminal_id.to_string(),
+        agent_id: session.agent_id.clone(),
+        created_at_unix: session.created_at_unix,
+        expires_at_unix: session.expiry.unix(),
+        agent_attached: session.agent_tx.is_some(),
+        operator_attached: session.operator_tx.is_some(),
     }
 }
 
@@ -739,7 +734,7 @@ mod tests {
                 .summary(&unlimited.terminal_id)
                 .await
                 .expect("unlimited summary")
-                .4,
+                .expires_at_unix,
             None
         );
     }
@@ -763,7 +758,7 @@ mod tests {
                 .summary(terminal_id.as_str())
                 .await
                 .expect("adopted unlimited session")
-                .4,
+                .expires_at_unix,
             None
         );
     }
@@ -805,9 +800,9 @@ mod tests {
             .summary(terminal_id.as_str())
             .await
             .expect("adopted summary");
-        assert_eq!(summary.0, "router");
-        assert_eq!(summary.1, created_at_unix);
-        assert!(summary.2);
+        assert_eq!(summary.agent_id, "router");
+        assert_eq!(summary.created_at_unix, created_at_unix);
+        assert!(summary.agent_attached);
     }
 
     #[tokio::test]
@@ -869,7 +864,7 @@ mod tests {
             .summary(&created.terminal_id)
             .await
             .expect("session remains after detach");
-        assert!(!summary.3);
+        assert!(!summary.operator_attached);
         registry
             .issue_attachment_token_for_operator(&created.terminal_id, OPERATOR_A)
             .await
@@ -895,7 +890,13 @@ mod tests {
             .await
             .expect("handoff token");
 
-        assert!(!registry.summary(&previous.terminal_id).await.unwrap().3);
+        assert!(
+            !registry
+                .summary(&previous.terminal_id)
+                .await
+                .unwrap()
+                .operator_attached
+        );
         registry
             .attach_operator(&next.terminal_id, &next_token, OPERATOR_A)
             .await
@@ -930,8 +931,20 @@ mod tests {
             .expect_err("occupied target remains protected");
 
         assert_eq!(error, "terminal_operator_already_attached");
-        assert!(registry.summary(&previous.terminal_id).await.unwrap().3);
-        assert!(registry.summary(&occupied.terminal_id).await.unwrap().3);
+        assert!(
+            registry
+                .summary(&previous.terminal_id)
+                .await
+                .unwrap()
+                .operator_attached
+        );
+        assert!(
+            registry
+                .summary(&occupied.terminal_id)
+                .await
+                .unwrap()
+                .operator_attached
+        );
     }
 
     #[tokio::test]
@@ -959,7 +972,13 @@ mod tests {
                 .await
                 .is_none()
         );
-        assert!(registry.summary(&created.terminal_id).await.unwrap().3);
+        assert!(
+            registry
+                .summary(&created.terminal_id)
+                .await
+                .unwrap()
+                .operator_attached
+        );
     }
 
     #[tokio::test]

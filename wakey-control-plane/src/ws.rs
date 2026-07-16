@@ -4,14 +4,14 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{
     AgentCapability, AgentCapabilityOptions, AgentTerminalSession, DEFAULT_TERMINAL_MAX_SESSIONS,
     DEFAULT_TERMINAL_SESSION_TTL_SECONDS, ErrorPayload, RequestId, ServerMessage,
-    TerminalCapabilityOptions, TerminalControl, TerminalId,
+    TerminalCapabilityOptions, TerminalControl, TerminalId, checked_terminal_session_ttl,
 };
 use wakey_core::Device;
 
@@ -225,13 +225,7 @@ async fn process_agent_text(
                     .as_ref()
                     .map(|terminal| terminal.session_ttl_seconds)
                     .unwrap_or(DEFAULT_TERMINAL_SESSION_TTL_SECONDS);
-                if session_ttl_seconds != 0
-                    && Instant::now()
-                        .checked_add(Duration::from_secs(session_ttl_seconds))
-                        .is_none()
-                {
-                    anyhow::bail!("terminal session TTL is too large for the platform timer");
-                }
+                checked_terminal_session_ttl(session_ttl_seconds).map_err(anyhow::Error::msg)?;
                 Some(TerminalCapabilityOptions {
                     max_sessions,
                     session_ttl_seconds,

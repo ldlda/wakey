@@ -4,7 +4,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use crate::protocol::{DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS};
+use crate::protocol::{
+    DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
+    checked_terminal_session_ttl,
+};
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/wakey-agent/config.toml";
 pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-agent.pid";
@@ -158,14 +161,7 @@ const fn default_terminal_session_ttl_seconds() -> u64 {
 
 impl TerminalConfig {
     pub(crate) fn session_ttl(&self) -> Result<Option<std::time::Duration>> {
-        if self.session_ttl_seconds == 0 {
-            return Ok(None);
-        }
-        let ttl = std::time::Duration::from_secs(self.session_ttl_seconds);
-        std::time::Instant::now()
-            .checked_add(ttl)
-            .context("terminal.session_ttl_seconds is too large for the platform timer")?;
-        Ok(Some(ttl))
+        checked_terminal_session_ttl(self.session_ttl_seconds).map_err(anyhow::Error::msg)
     }
 }
 
