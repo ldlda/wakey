@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
+import { ImageAddon } from "@xterm/addon-image";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -25,6 +26,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { loadTerminalFontFamily } from "@/terminal/terminalFonts";
 
 type Props = {
   agents: Agent[];
@@ -158,6 +160,7 @@ export function TerminalPage({
   const [sessionTitles, setSessionTitles] = useState<Record<string, string>>(
     {},
   );
+  const [terminalFontFamily, setTerminalFontFamily] = useState<string>();
   const [operatorId] = useState(terminalOperatorId);
 
   activeSessionRef.current = session;
@@ -304,16 +307,26 @@ export function TerminalPage({
   );
 
   useEffect(() => {
-    if (!hostRef.current) return;
+    let cancelled = false;
+    void loadTerminalFontFamily().then((fontFamily) => {
+      if (!cancelled) setTerminalFontFamily(fontFamily);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hostRef.current || !terminalFontFamily) return;
     const terminal = new XTerm({
       cursorBlink: true,
       convertEol: false,
-      fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+      fontFamily: terminalFontFamily,
       fontSize: 14,
       lineHeight: 1.1,
       // xterm uses this width for its internal scrollbar as well as the
       // overview ruler. Reserve a larger touch target on coarse pointers.
-      overviewRuler: {
+      scrollbar: {
         width: window.matchMedia("(pointer: coarse)").matches ? 22 : 16,
       },
       scrollback: 5000,
@@ -331,6 +344,16 @@ export function TerminalPage({
     terminal.unicode.activeVersion = "11";
     terminal.loadAddon(new UnicodeGraphemesAddon());
     terminal.loadAddon(new WebLinksAddon());
+    terminal.loadAddon(
+      new ImageAddon({
+        // // Keep image terminals useful on phones without accepting the addon's
+        // // much larger default decode and retained-canvas memory ceilings.
+        // pixelLimit: 4 * 1024 * 1024,
+        // sixelSizeLimit: 8 * 1024 * 1024,
+        // iipSizeLimit: 8 * 1024 * 1024,
+        // storageLimit: 32,
+      }),
+    );
     const fit = new FitAddon();
     terminal.loadAddon(new ClipboardAddon());
     terminal.loadAddon(fit);
@@ -425,13 +448,6 @@ export function TerminalPage({
     }
 
     let cancelled = false;
-    void document.fonts.ready.then(() => {
-      if (cancelled) return;
-      fit.fit();
-      lastTerminalSizeRef.current = { rows: 0, cols: 0 };
-      sendResize();
-    });
-
     const input = terminal.onData((data) => {
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
@@ -482,7 +498,7 @@ export function TerminalPage({
       terminalRef.current = null;
       fitRef.current = null;
     };
-  }, [connect, detachTransport, sendResize]);
+  }, [connect, detachTransport, sendResize, terminalFontFamily]);
 
   async function start() {
     if (!selectedAgentId || !terminalRef.current) return;
