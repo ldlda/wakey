@@ -45,6 +45,10 @@ pub struct TerminalConfig {
     pub enabled: bool,
     #[serde(default = "default_terminal_shell")]
     pub shell: PathBuf,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub current_dir: Option<PathBuf>,
     #[serde(default = "default_terminal_max_sessions")]
     pub max_sessions: usize,
 }
@@ -54,6 +58,8 @@ impl Default for TerminalConfig {
         Self {
             enabled: false,
             shell: default_terminal_shell(),
+            args: Vec::new(),
+            current_dir: None,
             max_sessions: default_terminal_max_sessions(),
         }
     }
@@ -249,6 +255,8 @@ mod tests {
             terminal: TerminalConfig {
                 enabled: true,
                 shell: "/bin/sh".into(),
+                args: vec!["-l".into()],
+                current_dir: Some("/tmp".into()),
                 max_sessions: 2,
             },
         };
@@ -283,5 +291,25 @@ agent_token = "secret"
             DEFAULT_OBSERVATION_RETENTION_DAYS
         );
         assert_eq!(config.terminal, TerminalConfig::default());
+    }
+
+    #[test]
+    fn existing_terminal_config_defaults_optional_command_fields() {
+        let config: AgentConfig = toml::from_str(
+            r#"
+server_url = "https://example.com"
+agent_id = "agent-1"
+agent_token = "secret"
+
+[terminal]
+enabled = true
+shell = "/bin/sh"
+max_sessions = 2
+"#,
+        )
+        .expect("existing terminal config should parse");
+
+        assert!(config.terminal.args.is_empty());
+        assert!(config.terminal.current_dir.is_none());
     }
 }

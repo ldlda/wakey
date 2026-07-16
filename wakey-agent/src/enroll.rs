@@ -154,6 +154,8 @@ mod tests {
             terminal: crate::config::TerminalConfig {
                 enabled: true,
                 shell: "/bin/ash".into(),
+                args: vec!["-l".into()],
+                current_dir: Some("/root".into()),
                 max_sessions: 2,
             },
         };

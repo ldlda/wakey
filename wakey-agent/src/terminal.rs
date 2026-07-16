@@ -215,6 +215,8 @@ async fn run_terminal(
 ) -> Result<()> {
     let terminal = match wakey::wakey_linux::terminal::TerminalPty::spawn(
         Path::new(&config.terminal.shell),
+        &config.terminal.args,
+        config.terminal.current_dir.as_deref(),
         rows,
         cols,
     ) {
@@ -225,7 +227,13 @@ async fn run_terminal(
     };
     let (mut reader, mut writer, mut child) = terminal.into_parts();
     let process_group = child.id();
-    info!(terminal_id = %terminal_id, shell = %config.terminal.shell.display(), "terminal PTY ready");
+    info!(
+        terminal_id = %terminal_id,
+        program = %config.terminal.shell.display(),
+        args = ?config.terminal.args,
+        current_dir = ?config.terminal.current_dir,
+        "terminal PTY ready"
+    );
 
     let (relay_input_tx, mut relay_input_rx) = mpsc::channel(RELAY_INPUT_QUEUE);
     let mut relay_output: Option<mpsc::Sender<Message>> = None;

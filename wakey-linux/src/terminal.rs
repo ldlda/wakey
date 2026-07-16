@@ -27,8 +27,18 @@ pub struct TerminalWriter {
 }
 
 impl TerminalPty {
-    /// Starts `program` attached to a newly allocated PTY.
-    pub fn spawn(program: &Path, rows: u16, cols: u16) -> Result<Self> {
+    /// Starts a configured program attached to a newly allocated PTY.
+    ///
+    /// Wakey retains control of the PTY streams, terminal environment, and
+    /// kill-on-drop behavior; callers may only select arguments and a working
+    /// directory.
+    pub fn spawn(
+        program: &Path,
+        args: &[String],
+        current_dir: Option<&Path>,
+        rows: u16,
+        cols: u16,
+    ) -> Result<Self> {
         let (pty, pts) = pty_process::open().context("failed to open PTY")?;
         pty.resize(Size::new(rows, cols))
             .context("failed to set initial PTY size")?;
@@ -39,10 +49,14 @@ impl TerminalPty {
 
         // The remote frontend is xterm.js regardless of the daemon's own
         // environment, so advertise the terminal the child actually receives.
-        let command = Command::new(program)
+        let mut command = Command::new(program)
+            .args(args)
             .env("TERM", "xterm-256color")
             .env("COLORTERM", "truecolor")
             .kill_on_drop(true);
+        if let Some(current_dir) = current_dir {
+            command = command.current_dir(current_dir);
+        }
         let child = command
             .spawn(pts)
             .with_context(|| format!("failed to spawn {} in PTY", program.display()))?;
@@ -116,9 +130,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "live system check, requires PTY and shell"]
     async fn pty_round_trip_and_resize() {
-        let (mut reader, mut writer, mut child) = TerminalPty::spawn(Path::new("/bin/sh"), 24, 80)
-            .expect("spawn PTY shell")
-            .into_parts();
+        let (mut reader, mut writer, mut child) =
+            TerminalPty::spawn(Path::new("/bin/sh"), &[], None, 24, 80)
+                .expect("spawn PTY shell")
+                .into_parts();
 
         writer.resize(31, 101).expect("resize owned PTY writer");
         // Print the size from the parent shell after `stty` exits, so observing
