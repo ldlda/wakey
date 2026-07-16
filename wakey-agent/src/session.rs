@@ -8,7 +8,10 @@ use tracing::{debug, error, info, info_span, warn};
 
 use crate::config::AgentConfig;
 use crate::dispatch::{dispatch_command, inventory_for_config};
-use crate::protocol::{AgentCapability, AgentCommand, ClientMessage, ErrorPayload, ServerMessage};
+use crate::protocol::{
+    AgentCapability, AgentCapabilityOptions, AgentCommand, ClientMessage, ErrorPayload,
+    ServerMessage, TerminalCapabilityOptions,
+};
 use crate::terminal::TerminalManager;
 
 pub async fn run(config: AgentConfig) -> Result<()> {
@@ -82,6 +85,14 @@ async fn run_once(
         &ClientMessage::Hello {
             agent_id: config.agent_id.clone(),
             capabilities: agent_capabilities(config),
+            capability_options: AgentCapabilityOptions {
+                terminal: config
+                    .terminal
+                    .enabled
+                    .then_some(TerminalCapabilityOptions {
+                        max_sessions: config.terminal.max_sessions.max(1),
+                    }),
+            },
         },
     )
     .await?;

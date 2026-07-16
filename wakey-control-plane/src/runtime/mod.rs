@@ -16,7 +16,7 @@ use tower_http::services::ServeFile;
 use tracing::info;
 #[cfg(unix)]
 use tracing::warn;
-use wakey_agent::protocol::{AgentCapability, ErrorPayload, ServerMessage};
+use wakey_agent::protocol::{AgentCapability, AgentCapabilityOptions, ErrorPayload, ServerMessage};
 
 use crate::api;
 use crate::config;
@@ -50,6 +50,7 @@ pub struct AgentSession {
     pub connection_id: String,
     pub tx: mpsc::UnboundedSender<SessionEvent>,
     pub capabilities: Vec<AgentCapability>,
+    pub capability_options: AgentCapabilityOptions,
 }
 #[derive(Clone)]
 pub enum SessionEvent {

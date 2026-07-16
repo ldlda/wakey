@@ -9,7 +9,6 @@ use wakey_agent::protocol::{AgentTerminalSession, TerminalId};
 pub const TERMINAL_RELAY_QUEUE: usize = 32;
 pub const TERMINAL_MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const TERMINAL_PENDING_AGENT_BYTES: usize = 256 * 1024;
-pub const TERMINAL_MAX_SESSIONS_PER_AGENT: usize = 2;
 pub const TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
 pub const TERMINAL_ABSOLUTE_TIMEOUT: Duration = Duration::from_secs(12 * 60 * 60);
 const TERMINAL_TOMBSTONE_TTL: Duration = Duration::from_secs(5 * 60);
@@ -75,14 +74,30 @@ impl TerminalRegistry {
         }
     }
 
-    pub async fn create(&self, agent_id: String) -> Result<CreatedTerminal, &'static str> {
+    #[cfg(test)]
+    async fn create(&self, agent_id: String) -> Result<CreatedTerminal, &'static str> {
+        self.create_with_limit(
+            agent_id,
+            wakey_agent::protocol::DEFAULT_TERMINAL_MAX_SESSIONS,
+        )
+        .await
+    }
+
+    /// Creates a session using the limit advertised by the connected agent.
+    /// The caller snapshots the limit with the agent connection so UI hints and
+    /// server-side enforcement use the same value.
+    pub async fn create_with_limit(
+        &self,
+        agent_id: String,
+        max_sessions: usize,
+    ) -> Result<CreatedTerminal, &'static str> {
         let mut sessions = self.inner.lock().await;
         prune_expired_sessions(&mut sessions);
         if sessions
             .values()
             .filter(|session| session.agent_id == agent_id)
             .count()
-            >= TERMINAL_MAX_SESSIONS_PER_AGENT
+            >= max_sessions.max(1)
         {
             return Err("agent_terminal_limit_reached");
         }
@@ -641,6 +656,19 @@ mod tests {
         registry.create("router".into()).await.expect("second");
         let third = registry.create("router".into()).await;
         assert_eq!(third.err(), Some("agent_terminal_limit_reached"));
+    }
+
+    #[tokio::test]
+    async fn advertised_limit_controls_session_capacity() {
+        let registry = TerminalRegistry::new();
+        for _ in 0..3 {
+            registry
+                .create_with_limit("router".into(), 3)
+                .await
+                .expect("within advertised limit");
+        }
+        let fourth = registry.create_with_limit("router".into(), 3).await;
+        assert_eq!(fourth.err(), Some("agent_terminal_limit_reached"));
     }
 
     #[tokio::test]

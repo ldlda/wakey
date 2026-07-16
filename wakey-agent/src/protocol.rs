@@ -65,6 +65,30 @@ pub enum AgentCapability {
     Terminal,
 }
 
+pub const DEFAULT_TERMINAL_MAX_SESSIONS: usize = 2;
+
+/// Optional parameters attached to advertised agent capabilities.
+///
+/// Keep this separate from `AgentCapability`: the capability list remains a
+/// compact, backward-compatible feature check, while this object can grow as
+/// individual capabilities gain configurable limits or modes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentCapabilityOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<TerminalCapabilityOptions>,
+}
+
+impl AgentCapabilityOptions {
+    fn is_empty(&self) -> bool {
+        self.terminal.is_none()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalCapabilityOptions {
+    pub max_sessions: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentTerminalSession {
     pub terminal_id: TerminalId,
@@ -238,6 +262,8 @@ pub enum ClientMessage {
         agent_id: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         capabilities: Vec<AgentCapability>,
+        #[serde(default, skip_serializing_if = "AgentCapabilityOptions::is_empty")]
+        capability_options: AgentCapabilityOptions,
     },
     Auth {
         agent_id: String,
@@ -396,5 +422,19 @@ mod tests {
         };
         let json = serde_json::to_string(&resume).expect("serialize terminal resume");
         assert!(json.contains("\"type\":\"resume_terminal\""));
+    }
+
+    #[test]
+    fn hello_serializes_typed_capability_options() {
+        let message = ClientMessage::Hello {
+            agent_id: "router".into(),
+            capabilities: vec![AgentCapability::Terminal],
+            capability_options: AgentCapabilityOptions {
+                terminal: Some(TerminalCapabilityOptions { max_sessions: 3 }),
+            },
+        };
+
+        let value = serde_json::to_value(message).expect("serialize hello");
+        assert_eq!(value["capability_options"]["terminal"]["max_sessions"], 3);
     }
 }

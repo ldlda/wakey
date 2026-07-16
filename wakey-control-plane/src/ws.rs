@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{
-    AgentCapability, AgentTerminalSession, ErrorPayload, RequestId, ServerMessage, TerminalControl,
-    TerminalId,
+    AgentCapability, AgentCapabilityOptions, AgentTerminalSession, DEFAULT_TERMINAL_MAX_SESSIONS,
+    ErrorPayload, RequestId, ServerMessage, TerminalCapabilityOptions, TerminalControl, TerminalId,
 };
 use wakey_core::Device;
 
@@ -24,6 +24,8 @@ enum IncomingClientMessage {
         agent_id: String,
         #[serde(default)]
         capabilities: Vec<AgentCapability>,
+        #[serde(default)]
+        capability_options: AgentCapabilityOptions,
     },
     Auth {
         agent_id: String,
@@ -59,6 +61,7 @@ struct AgentConnectionState {
     hello_agent_id: Option<String>,
     hello_at: Option<Instant>,
     capabilities: Vec<AgentCapability>,
+    capability_options: AgentCapabilityOptions,
 }
 
 pub async fn agent_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
@@ -193,6 +196,7 @@ async fn process_agent_text(
         IncomingClientMessage::Hello {
             agent_id,
             capabilities,
+            capability_options,
         } => {
             if connection
                 .hello_agent_id
@@ -208,6 +212,17 @@ async fn process_agent_text(
             let connect_to_hello_ms = connected_at.elapsed().as_millis() as u64;
             info!(agent_id = %agent_id, connect_to_hello_ms, "agent hello received");
             connection.hello_agent_id = Some(agent_id);
+            connection.capability_options = AgentCapabilityOptions {
+                terminal: capabilities.contains(&AgentCapability::Terminal).then_some(
+                    TerminalCapabilityOptions {
+                        max_sessions: capability_options
+                            .terminal
+                            .map(|terminal| terminal.max_sessions)
+                            .unwrap_or(DEFAULT_TERMINAL_MAX_SESSIONS)
+                            .max(1),
+                    },
+                ),
+            };
             connection.capabilities = capabilities;
         }
         IncomingClientMessage::Auth {
@@ -253,6 +268,7 @@ async fn process_agent_text(
                     connection_id: connection_id.to_string(),
                     tx: tx.clone(),
                     capabilities: connection.capabilities.clone(),
+                    capability_options: connection.capability_options.clone(),
                 },
             );
             connection.authed_agent_id = Some(agent_id.clone());
@@ -424,10 +440,13 @@ mod tests {
     use std::collections::HashMap;
 
     use tokio::sync::mpsc;
+    use wakey_agent::protocol::AgentCapabilityOptions;
 
     use crate::runtime::AgentSession;
 
-    use super::{AgentConnectionState, is_current_session, validate_auth_identity};
+    use super::{
+        AgentConnectionState, IncomingClientMessage, is_current_session, validate_auth_identity,
+    };
 
     #[test]
     fn current_session_check_rejects_stale_connection_ids() {
@@ -439,6 +458,7 @@ mod tests {
                 connection_id: "conn-new".to_string(),
                 tx,
                 capabilities: Vec::new(),
+                capability_options: AgentCapabilityOptions::default(),
             },
         );
 
@@ -455,5 +475,21 @@ mod tests {
         connection.hello_agent_id = Some("agent-a".into());
         assert!(validate_auth_identity(&connection, "agent-a").is_ok());
         assert!(validate_auth_identity(&connection, "agent-b").is_err());
+    }
+
+    #[test]
+    fn legacy_hello_without_capability_options_deserializes() {
+        let message: IncomingClientMessage = serde_json::from_str(
+            r#"{"type":"hello","agent_id":"agent-a","capabilities":["terminal"]}"#,
+        )
+        .expect("deserialize legacy hello");
+
+        let IncomingClientMessage::Hello {
+            capability_options, ..
+        } = message
+        else {
+            panic!("expected hello");
+        };
+        assert_eq!(capability_options, AgentCapabilityOptions::default());
     }
 }

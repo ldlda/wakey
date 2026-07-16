@@ -3,6 +3,9 @@ export type Agent = {
   connected: boolean;
   nickname?: string | null;
   capabilities: "terminal"[];
+  capability_options?: {
+    terminal?: { max_sessions: number };
+  };
 };
 
 export type TerminalSession = {

@@ -156,7 +156,10 @@ export function TerminalPage({
   const selectedAgentSessionCount = sessions.filter(
     (item) => item.agent_id === selectedAgentId,
   ).length;
-  const agentAtSessionLimit = selectedAgentSessionCount >= 2;
+  const selectedAgentSessionLimit =
+    selectedAgent?.capability_options?.terminal?.max_sessions ?? 2;
+  const agentAtSessionLimit =
+    selectedAgentSessionCount >= selectedAgentSessionLimit;
   const canRequestStart =
     selectedAgent?.connected &&
     selectedAgent.capabilities.includes("terminal") &&
@@ -744,7 +747,7 @@ export function TerminalPage({
               </TooltipTrigger>
               <TooltipContent>
                 {agentAtSessionLimit
-                  ? "Two-session limit reached"
+                  ? `${selectedAgentSessionLimit}-session limit reached`
                   : "New session"}
               </TooltipContent>
             </Tooltip>

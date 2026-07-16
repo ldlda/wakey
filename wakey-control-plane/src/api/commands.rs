@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tracing::{info, info_span, warn};
 use uuid::Uuid;
-use wakey_agent::protocol::AgentCapability;
-use wakey_agent::protocol::{AgentCommand, ErrorPayload, RequestId, ServerMessage};
+use wakey_agent::protocol::{
+    AgentCapability, AgentCapabilityOptions, AgentCommand, ErrorPayload, RequestId, ServerMessage,
+};
 
 use crate::api::ApiError;
 use crate::runtime::{AgentReply, AppState, SessionEvent};
@@ -19,6 +20,7 @@ pub struct AgentStatus {
     pub connected: bool,
     pub nickname: Option<String>,
     pub capabilities: Vec<AgentCapability>,
+    pub capability_options: AgentCapabilityOptions,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +50,10 @@ pub async fn list_agents(State(state): State<AppState>) -> Result<impl IntoRespo
             capabilities: sessions
                 .get(&agent_id)
                 .map(|session| session.capabilities.clone())
+                .unwrap_or_default(),
+            capability_options: sessions
+                .get(&agent_id)
+                .map(|session| session.capability_options.clone())
                 .unwrap_or_default(),
             agent_id,
             nickname,

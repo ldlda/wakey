@@ -7,8 +7,8 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use wakey_agent::protocol::{
-    AgentCapability, ServerMessage, TerminalAgentHandshake, TerminalControl, TerminalId,
-    TerminalOperatorHandshake,
+    AgentCapability, DEFAULT_TERMINAL_MAX_SESSIONS, ServerMessage, TerminalAgentHandshake,
+    TerminalControl, TerminalId, TerminalOperatorHandshake,
 };
 
 use crate::api::ApiError;
@@ -52,7 +52,7 @@ pub async fn create_terminal(
     Json(request): Json<CreateTerminalRequest>,
 ) -> Result<(StatusCode, Json<TerminalSessionResponse>), ApiError> {
     validate_size(request.rows, request.cols)?;
-    let agent_tx = {
+    let (agent_tx, max_sessions) = {
         let sessions = state.sessions.read().await;
         let session = sessions.get(&request.agent_id).ok_or_else(|| {
             ApiError::new(
@@ -68,12 +68,19 @@ pub async fn create_terminal(
                 "agent has not advertised terminal capability",
             ));
         }
-        session.tx.clone()
+        let max_sessions = session
+            .capability_options
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal.max_sessions)
+            .unwrap_or(DEFAULT_TERMINAL_MAX_SESSIONS)
+            .max(1);
+        (session.tx.clone(), max_sessions)
     };
 
     let created = state
         .terminals
-        .create(request.agent_id.clone())
+        .create_with_limit(request.agent_id.clone(), max_sessions)
         .await
         .map_err(registry_error)?;
     let terminal_id = TerminalId::new(created.terminal_id.clone()).map_err(|message| {

@@ -4,6 +4,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use crate::protocol::DEFAULT_TERMINAL_MAX_SESSIONS;
+
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/wakey-agent/config.toml";
 pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-agent.pid";
 const WAKEY_DHCP_LEASES_ENV: &str = "WAKEY_DHCP_LEASES";
@@ -40,6 +42,7 @@ pub struct AgentConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct TerminalConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -142,7 +145,7 @@ fn default_terminal_shell() -> PathBuf {
 }
 
 const fn default_terminal_max_sessions() -> usize {
-    2
+    DEFAULT_TERMINAL_MAX_SESSIONS
 }
 
 impl AgentConfig {
@@ -311,5 +314,23 @@ max_sessions = 2
 
         assert!(config.terminal.args.is_empty());
         assert!(config.terminal.current_dir.is_none());
+    }
+
+    #[test]
+    fn terminal_config_rejects_misspelled_fields() {
+        let error = toml::from_str::<AgentConfig>(
+            r#"
+server_url = "https://example.com"
+agent_id = "agent-1"
+agent_token = "secret"
+
+[terminal]
+enabled = true
+max_session = 67
+"#,
+        )
+        .expect_err("unknown terminal fields must not silently use defaults");
+
+        assert!(error.to_string().contains("max_session"));
     }
 }
