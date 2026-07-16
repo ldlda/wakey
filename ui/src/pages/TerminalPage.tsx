@@ -595,9 +595,7 @@ export function TerminalPage({
       delete next[closingId];
       return next;
     });
-    if (
-      window.sessionStorage.getItem(REMEMBERED_TERMINAL_KEY) === closingId
-    ) {
+    if (window.sessionStorage.getItem(REMEMBERED_TERMINAL_KEY) === closingId) {
       window.sessionStorage.removeItem(REMEMBERED_TERMINAL_KEY);
     }
     if (closesActiveSession) {

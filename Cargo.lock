@@ -3633,7 +3633,7 @@ dependencies = [
 
 [[package]]
 name = "wakey"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3654,7 +3654,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-agent"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -3679,7 +3679,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-control-plane"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -3708,7 +3708,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "macaddr",
  "serde",
@@ -3720,7 +3720,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-linux"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "futures",
