@@ -570,34 +570,44 @@ export function TerminalPage({
     const fallback = remaining.find((item) => !item.operator_attached);
 
     if (closesActiveSession) {
-      socketRef.current?.send(JSON.stringify({ type: "close" }));
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: "close" }));
+      }
       detachTransport();
     }
     try {
       await closeTerminal(closingId);
     } catch (error) {
       toast.error("Terminal cleanup failed", { description: String(error) });
-    } finally {
-      setSessions(remaining);
-      setSessionTitles((current) => {
-        const next = { ...current };
-        delete next[closingId];
-        return next;
-      });
-      if (
-        window.sessionStorage.getItem(REMEMBERED_TERMINAL_KEY) === closingId
-      ) {
-        window.sessionStorage.removeItem(REMEMBERED_TERMINAL_KEY);
-      }
-      if (closesActiveSession) {
-        setSession(null);
-        activeSessionRef.current = null;
-        setConnection("idle");
-        // xterm.clear() deliberately preserves the active cursor line. Closing
-        // a session should discard its complete screen and terminal modes.
-        terminalRef.current?.reset();
-        if (fallback) void activateSession(fallback);
-      }
+      void listTerminals()
+        .then((listed) =>
+          setSessions((current) => reconcileTerminalSessions(current, listed)),
+        )
+        .catch(() => undefined);
+      return;
+    }
+
+    setSessions((current) =>
+      current.filter((item) => item.terminal_id !== closingId),
+    );
+    setSessionTitles((current) => {
+      const next = { ...current };
+      delete next[closingId];
+      return next;
+    });
+    if (
+      window.sessionStorage.getItem(REMEMBERED_TERMINAL_KEY) === closingId
+    ) {
+      window.sessionStorage.removeItem(REMEMBERED_TERMINAL_KEY);
+    }
+    if (closesActiveSession) {
+      setSession(null);
+      activeSessionRef.current = null;
+      setConnection("idle");
+      // xterm.clear() deliberately preserves the active cursor line. Closing
+      // a session should discard its complete screen and terminal modes.
+      terminalRef.current?.reset();
+      if (fallback) void activateSession(fallback);
     }
   }
 

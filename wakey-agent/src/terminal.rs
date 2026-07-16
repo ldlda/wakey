@@ -14,6 +14,8 @@ use tracing::{info, warn};
 
 const MAX_TERMINAL_FRAME_BYTES: usize = 64 * 1024;
 const TERMINAL_SCROLLBACK_ROWS: usize = 5_000;
+const RELAY_INPUT_QUEUE: usize = 32;
+const PTY_EXIT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const PROCESS_SIGNAL_GRACE: Duration = Duration::from_secs(1);
 
 /// Tracks the terminal's current rendered state while the browser is detached.
@@ -47,7 +49,7 @@ impl TerminalState {
 }
 
 struct ActiveTerminal {
-    cancel: oneshot::Sender<()>,
+    cancel: Option<oneshot::Sender<()>>,
     relay_credentials: mpsc::UnboundedSender<String>,
     created_at_unix: u64,
 }
@@ -88,6 +90,7 @@ impl TerminalManager {
         if !config.terminal.enabled {
             anyhow::bail!("terminal capability is disabled");
         }
+        validate_size(rows, cols)?;
 
         let terminal_key = terminal_id.to_string();
         let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -107,7 +110,7 @@ impl TerminalManager {
             active.insert(
                 terminal_key.clone(),
                 ActiveTerminal {
-                    cancel: cancel_tx,
+                    cancel: Some(cancel_tx),
                     relay_credentials: relay_tx.clone(),
                     created_at_unix,
                 },
@@ -135,30 +138,38 @@ impl TerminalManager {
     }
 
     pub fn close(&self, terminal_id: &TerminalId) -> bool {
-        self.active
-            .lock()
-            .expect("terminal manager poisoned")
-            .remove(terminal_id.as_str())
-            .is_some_and(|active| active.cancel.send(()).is_ok())
+        let mut active = self.active.lock().expect("terminal manager poisoned");
+        let Some(terminal) = active.get_mut(terminal_id.as_str()) else {
+            return false;
+        };
+        let Some(cancel) = terminal.cancel.take() else {
+            return true;
+        };
+        // A failed send means the worker has already dropped its receiver.
+        // Its wrapper still owns final registry removal, so this close request
+        // is successful either way.
+        let _ = cancel.send(());
+        true
     }
 
     pub fn resume(&self, terminal_id: &TerminalId, relay_token: String) -> Result<()> {
-        let mut active = self.active.lock().expect("terminal manager poisoned");
+        let active = self.active.lock().expect("terminal manager poisoned");
         let session = active
             .get(terminal_id.as_str())
             .with_context(|| format!("terminal session {terminal_id} is not active"))?;
         if session.relay_credentials.send(relay_token).is_err() {
-            active.remove(terminal_id.as_str());
             anyhow::bail!("terminal session {terminal_id} has stopped");
         }
         Ok(())
     }
 
     pub fn sessions(&self) -> Vec<AgentTerminalSession> {
-        let mut active = self.active.lock().expect("terminal manager poisoned");
-        active.retain(|_, terminal| !terminal.relay_credentials.is_closed());
+        let active = self.active.lock().expect("terminal manager poisoned");
         active
             .iter()
+            .filter(|(_, terminal)| {
+                terminal.cancel.is_some() && !terminal.relay_credentials.is_closed()
+            })
             .filter_map(|(terminal_id, active)| {
                 TerminalId::new(terminal_id.clone())
                     .ok()
@@ -177,7 +188,9 @@ impl Drop for TerminalManager {
             && let Ok(mut active) = self.active.lock()
         {
             for (_, active) in active.drain() {
-                let _ = active.cancel.send(());
+                if let Some(cancel) = active.cancel {
+                    let _ = cancel.send(());
+                }
             }
         }
     }
@@ -214,7 +227,7 @@ async fn run_terminal(
     let process_group = child.id();
     info!(terminal_id = %terminal_id, shell = %config.terminal.shell.display(), "terminal PTY ready");
 
-    let (relay_input_tx, mut relay_input_rx) = mpsc::unbounded_channel();
+    let (relay_input_tx, mut relay_input_rx) = mpsc::channel(RELAY_INPUT_QUEUE);
     let mut relay_output: Option<mpsc::Sender<Message>> = None;
     let mut relay_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut relay_generation = 0_u64;
@@ -222,6 +235,7 @@ async fn run_terminal(
     let mut output = [0_u8; 16 * 1024];
     let mut requested_close = false;
     let mut observed_status = None;
+    let mut drain_deadline: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
     loop {
         tokio::select! {
             biased;
@@ -229,8 +243,16 @@ async fn run_terminal(
                 requested_close = true;
                 break;
             }
-            status = child.wait() => {
+            status = child.wait(), if observed_status.is_none() => {
                 observed_status = Some(status.context("failed waiting for terminal child")?);
+                drain_deadline = Some(Box::pin(tokio::time::sleep(PTY_EXIT_DRAIN_TIMEOUT)));
+            }
+            _ = async {
+                match drain_deadline.as_mut() {
+                    Some(deadline) => deadline.as_mut().await,
+                    None => std::future::pending().await,
+                }
+            } => {
                 break;
             }
             incoming = relay_input_rx.recv() => {
@@ -248,7 +270,12 @@ async fn run_terminal(
                         terminal_state.resize(rows, cols);
                     }
                     RelayInput::Snapshot { generation } if generation == relay_generation => {
-                        send_terminal_snapshot(terminal_state.snapshot(), &mut relay_output).await;
+                        if !send_terminal_snapshot(terminal_state.snapshot(), &mut relay_output) {
+                            if let Some(task) = relay_task.take() {
+                                task.abort();
+                            }
+                            warn!(terminal_id = %terminal_id, "terminal relay output queue saturated during snapshot");
+                        }
                         if let Err(err) = writer.refresh() {
                             warn!(terminal_id = %terminal_id, error = %err, "terminal redraw signal failed");
                         }
@@ -290,7 +317,7 @@ async fn run_terminal(
                     }).await {
                         warn!(terminal_id = %terminal_id, error = %err, "terminal relay disconnected");
                     }
-                    let _ = relay_input_tx.send(RelayInput::Disconnected { generation });
+                    let _ = relay_input_tx.send(RelayInput::Disconnected { generation }).await;
                 }));
             }
             read = reader.read(&mut output) => {
@@ -298,10 +325,15 @@ async fn run_terminal(
                     Ok(0) => break,
                     Ok(count) => {
                         terminal_state.process(&output[..count]);
-                        send_terminal_output(
+                        if !send_terminal_output(
                             Message::Binary(output[..count].to_vec().into()),
                             &mut relay_output,
-                        ).await;
+                        ) {
+                            if let Some(task) = relay_task.take() {
+                                task.abort();
+                            }
+                            warn!(terminal_id = %terminal_id, "terminal relay output queue saturated");
+                        }
                     }
                     // Linux PTY masters commonly report EIO after the slave closes.
                     Err(err) if err.raw_os_error() == Some(5) => break,
@@ -320,7 +352,7 @@ async fn run_terminal(
             exit_code: status.code(),
         };
         if let Ok(text) = serde_json::to_string(&control) {
-            let _ = output.send(Message::Text(text.into())).await;
+            let _ = output.try_send(Message::Text(text.into()));
         }
     }
     info!(terminal_id = %terminal_id, exit_code = ?status.code(), requested_close, "terminal worker exited");
@@ -360,7 +392,7 @@ struct RelayConnection {
     generation: u64,
     output_tx: mpsc::Sender<Message>,
     output_rx: mpsc::Receiver<Message>,
-    input: mpsc::UnboundedSender<RelayInput>,
+    input: mpsc::Sender<RelayInput>,
 }
 
 #[cfg(unix)]
@@ -385,6 +417,7 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
             generation: relay.generation,
             output: relay.output_tx,
         })
+        .await
         .map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
 
     let mut output = relay.output_rx;
@@ -398,7 +431,7 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
                         relay.input.send(RelayInput::Binary {
                             generation: relay.generation,
                             bytes: bytes.to_vec(),
-                        }).map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
+                        }).await.map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
                     }
                     Message::Text(text) => match serde_json::from_str::<TerminalControl>(&text)
                         .context("invalid terminal control frame")?
@@ -408,18 +441,18 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
                                 generation: relay.generation,
                                 rows,
                                 cols,
-                            })
+                            }).await
                                 .map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
                         }
                         TerminalControl::Snapshot => {
                             relay.input.send(RelayInput::Snapshot {
                                 generation: relay.generation,
-                            }).map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
+                            }).await.map_err(|_| anyhow::anyhow!("terminal worker stopped"))?;
                         }
                         TerminalControl::Close => {
                             let _ = relay.input.send(RelayInput::Close {
                                 generation: relay.generation,
-                            });
+                            }).await;
                             break;
                         }
                         _ => anyhow::bail!("terminal control frame has invalid direction"),
@@ -441,28 +474,27 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
     Ok(())
 }
 
-async fn send_terminal_output(frame: Message, relay: &mut Option<mpsc::Sender<Message>>) {
+fn send_terminal_output(frame: Message, relay: &mut Option<mpsc::Sender<Message>>) -> bool {
     if let Some(tx) = relay.as_ref()
-        && tx.send(frame).await.is_err()
+        && tx.try_send(frame).is_err()
     {
         *relay = None;
+        return false;
     }
+    true
 }
 
-async fn send_terminal_snapshot(snapshot: Vec<u8>, relay: &mut Option<mpsc::Sender<Message>>) {
+fn send_terminal_snapshot(snapshot: Vec<u8>, relay: &mut Option<mpsc::Sender<Message>>) -> bool {
     let Some(tx) = relay.as_ref() else {
-        return;
+        return true;
     };
     for chunk in snapshot.chunks(MAX_TERMINAL_FRAME_BYTES) {
-        if tx
-            .send(Message::Binary(chunk.to_vec().into()))
-            .await
-            .is_err()
-        {
+        if tx.try_send(Message::Binary(chunk.to_vec().into())).is_err() {
             *relay = None;
-            return;
+            return false;
         }
     }
+    true
 }
 
 #[cfg(not(unix))]
@@ -564,7 +596,7 @@ mod tests {
             active: Arc::new(Mutex::new(HashMap::from([(
                 terminal_id.to_string(),
                 ActiveTerminal {
-                    cancel,
+                    cancel: Some(cancel),
                     relay_credentials,
                     created_at_unix: 42,
                 },
@@ -585,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_resume_removes_stopped_terminal_from_inventory() {
+    fn failed_resume_hides_stopped_terminal_from_inventory() {
         let manager = manager_with_stopped_terminal("stopped-terminal");
         let terminal_id = TerminalId::new("stopped-terminal").expect("terminal id");
 
@@ -598,6 +630,68 @@ mod tests {
         let manager = manager_with_stopped_terminal("stopped-terminal");
 
         assert!(manager.sessions().is_empty());
+    }
+
+    #[test]
+    fn close_succeeds_when_worker_already_dropped_cancel_receiver() {
+        let manager = manager_with_stopped_terminal("stopped-terminal");
+        let terminal_id = TerminalId::new("stopped-terminal").expect("terminal id");
+
+        assert!(manager.close(&terminal_id));
+        assert!(manager.sessions().is_empty());
+    }
+
+    #[test]
+    fn close_keeps_session_registered_until_worker_completion() {
+        let (cancel, mut cancel_rx) = oneshot::channel();
+        let (relay_credentials, _relay_rx) = mpsc::unbounded_channel();
+        let (events, _event_rx) = mpsc::unbounded_channel();
+        let active = Arc::new(Mutex::new(HashMap::from([(
+            "closing-terminal".to_string(),
+            ActiveTerminal {
+                cancel: Some(cancel),
+                relay_credentials,
+                created_at_unix: 42,
+            },
+        )])));
+        let manager = TerminalManager {
+            active: active.clone(),
+            max_sessions: 2,
+            events,
+        };
+        let terminal_id = TerminalId::new("closing-terminal").expect("terminal id");
+
+        assert!(manager.close(&terminal_id));
+        assert!(cancel_rx.try_recv().is_ok());
+        assert!(
+            active
+                .lock()
+                .expect("terminal manager")
+                .contains_key("closing-terminal")
+        );
+        assert!(manager.sessions().is_empty());
+
+        remove_completed(&Arc::downgrade(&active), terminal_id.as_str());
+        assert!(
+            !active
+                .lock()
+                .expect("terminal manager")
+                .contains_key("closing-terminal")
+        );
+    }
+
+    #[test]
+    fn open_rejects_invalid_initial_size_before_spawning() {
+        let mut config = crate::config::DEFAULT_CONFIG.clone();
+        config.terminal.enabled = true;
+        let (manager, _events) = TerminalManager::new(&config);
+        let terminal_id = TerminalId::new("invalid-size").expect("terminal id");
+
+        let error = manager
+            .open(&config, terminal_id, "relay".into(), 0, 80)
+            .expect_err("invalid rows must fail");
+        assert!(error.to_string().contains("outside supported bounds"));
+        assert!(manager.active.lock().expect("terminal manager").is_empty());
     }
 
     #[test]
@@ -738,7 +832,7 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(3);
         let mut relay = Some(tx);
 
-        send_terminal_snapshot(snapshot.clone(), &mut relay).await;
+        assert!(send_terminal_snapshot(snapshot.clone(), &mut relay));
 
         let mut restored = Vec::new();
         for _ in 0..3 {
@@ -749,5 +843,23 @@ mod tests {
             restored.extend_from_slice(&chunk);
         }
         assert_eq!(restored, snapshot);
+    }
+
+    #[test]
+    fn saturated_relay_output_detaches_without_waiting() {
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send(Message::Binary(vec![1].into()))
+            .expect("prefill relay queue");
+        let mut relay = Some(tx);
+
+        assert!(!send_terminal_output(
+            Message::Binary(vec![2].into()),
+            &mut relay,
+        ));
+        assert!(relay.is_none());
+        assert_eq!(
+            rx.try_recv().expect("original queued frame").into_data(),
+            vec![1]
+        );
     }
 }

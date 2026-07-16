@@ -17,7 +17,7 @@ impl RequestId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct TerminalId(String);
 
@@ -38,6 +38,24 @@ impl TerminalId {
 impl fmt::Display for TerminalId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl TryFrom<String> for TerminalId {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl<'de> Deserialize<'de> for TerminalId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::try_from(raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -295,6 +313,16 @@ mod tests {
     fn request_id_rejects_empty() {
         let err = RequestId::try_from("   ".to_string()).expect_err("must fail");
         assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn terminal_id_deserialization_enforces_validation() {
+        let valid: TerminalId = serde_json::from_str(r#""term-1""#).expect("valid terminal id");
+        assert_eq!(valid.as_str(), "term-1");
+
+        let error = serde_json::from_str::<TerminalId>(r#""   ""#)
+            .expect_err("empty terminal id must fail");
+        assert!(error.to_string().contains("must not be empty"));
     }
 
     #[test]

@@ -132,7 +132,7 @@ fn default_observation_store_path() -> PathBuf {
 }
 
 fn default_terminal_shell() -> PathBuf {
-    "/bin/ash".into()
+    "/bin/sh".into()
 }
 
 const fn default_terminal_max_sessions() -> usize {

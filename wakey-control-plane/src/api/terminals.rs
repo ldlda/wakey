@@ -191,21 +191,10 @@ pub async fn close_terminal(
     State(state): State<AppState>,
     Path(terminal_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    if let Some(agent_id) = close_registered_terminal(&state, &terminal_id).await {
+    if let Some(agent_id) =
+        close_registered_terminal(&state, &terminal_id, TerminalCloseReason::HttpDelete).await
+    {
         info!(terminal_id, agent_id, "terminal session closed by operator");
-        append_terminal_audit(
-            &state,
-            &agent_id,
-            &terminal_id,
-            TerminalAudit {
-                actor_type: "admin_api",
-                event_type: "terminal_close",
-                outcome: "ok",
-                message: "terminal session closed by operator",
-                metadata: serde_json::json!({}),
-            },
-        )
-        .await;
     } else {
         if !state.terminals.was_closed(&terminal_id).await {
             return Err(terminal_not_found(&terminal_id));
@@ -409,7 +398,7 @@ async fn handle_operator_terminal_socket(
     }
 
     if explicit_close {
-        close_registered_terminal(&state, &terminal_id).await;
+        close_registered_terminal(&state, &terminal_id, TerminalCloseReason::BrowserClose).await;
     } else {
         state.terminals.detach_operator(&terminal_id, &auth.0).await;
     }
@@ -510,7 +499,31 @@ where
     write.send(message).await
 }
 
-async fn close_registered_terminal(state: &AppState, terminal_id: &str) -> Option<String> {
+#[derive(Clone, Copy)]
+enum TerminalCloseReason {
+    HttpDelete,
+    BrowserClose,
+    AbsoluteTimeout,
+}
+
+impl TerminalCloseReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::HttpDelete => "http_delete",
+            Self::BrowserClose => "browser_close",
+            Self::AbsoluteTimeout => "absolute_timeout",
+        }
+    }
+}
+
+/// Removes and audits a terminal as one logical operation. Only the caller
+/// that actually removes the session records the close, keeping retries and
+/// simultaneous timeout/operator closes from producing duplicate events.
+async fn close_registered_terminal(
+    state: &AppState,
+    terminal_id: &str,
+    reason: TerminalCloseReason,
+) -> Option<String> {
     let agent_id = state.terminals.remove(terminal_id).await?;
     if let Some(session) = state.sessions.read().await.get(&agent_id) {
         let terminal_id = TerminalId::new(terminal_id.to_string()).ok()?;
@@ -520,15 +533,32 @@ async fn close_registered_terminal(state: &AppState, terminal_id: &str) -> Optio
                 terminal_id,
             }));
     }
+    append_terminal_audit(
+        state,
+        &agent_id,
+        terminal_id,
+        TerminalAudit {
+            actor_type: "admin_api",
+            event_type: "terminal_close",
+            outcome: "ok",
+            message: "terminal session closed",
+            metadata: serde_json::json!({ "reason": reason.as_str() }),
+        },
+    )
+    .await;
     Some(agent_id)
 }
 
 fn spawn_absolute_timeout(state: AppState, terminal_id: TerminalId, agent_id: String) {
     tokio::spawn(async move {
         tokio::time::sleep(TERMINAL_ABSOLUTE_TIMEOUT).await;
-        if close_registered_terminal(&state, terminal_id.as_str())
-            .await
-            .is_some()
+        if close_registered_terminal(
+            &state,
+            terminal_id.as_str(),
+            TerminalCloseReason::AbsoluteTimeout,
+        )
+        .await
+        .is_some()
         {
             info!(terminal_id = %terminal_id, agent_id, "terminal absolute timeout reached");
         }

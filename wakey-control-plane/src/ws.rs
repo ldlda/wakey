@@ -56,6 +56,7 @@ enum IncomingClientMessage {
 #[derive(Default)]
 struct AgentConnectionState {
     authed_agent_id: Option<String>,
+    hello_agent_id: Option<String>,
     hello_at: Option<Instant>,
     capabilities: Vec<AgentCapability>,
 }
@@ -193,18 +194,27 @@ async fn process_agent_text(
             agent_id,
             capabilities,
         } => {
+            if connection
+                .hello_agent_id
+                .as_deref()
+                .is_some_and(|hello_agent_id| hello_agent_id != agent_id)
+            {
+                anyhow::bail!("hello changed agent identity");
+            }
             let now = Instant::now();
             if connection.hello_at.is_none() {
                 connection.hello_at = Some(now);
             }
             let connect_to_hello_ms = connected_at.elapsed().as_millis() as u64;
             info!(agent_id = %agent_id, connect_to_hello_ms, "agent hello received");
+            connection.hello_agent_id = Some(agent_id);
             connection.capabilities = capabilities;
         }
         IncomingClientMessage::Auth {
             agent_id,
             agent_token,
         } => {
+            validate_auth_identity(connection, &agent_id)?;
             let connect_to_auth_ms = connected_at.elapsed().as_millis() as u64;
             let hello_to_auth_ms = connection
                 .hello_at
@@ -372,6 +382,17 @@ fn now_duration_ms(duration: std::time::Duration) -> u64 {
     duration.as_millis() as u64
 }
 
+fn validate_auth_identity(connection: &AgentConnectionState, agent_id: &str) -> Result<()> {
+    let hello_agent_id = connection
+        .hello_agent_id
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("auth before hello"))?;
+    if hello_agent_id != agent_id {
+        anyhow::bail!("auth agent does not match hello agent");
+    }
+    Ok(())
+}
+
 async fn ensure_current_session(
     state: &AppState,
     agent_id: &str,
@@ -406,7 +427,7 @@ mod tests {
 
     use crate::runtime::AgentSession;
 
-    use super::is_current_session;
+    use super::{AgentConnectionState, is_current_session, validate_auth_identity};
 
     #[test]
     fn current_session_check_rejects_stale_connection_ids() {
@@ -424,5 +445,15 @@ mod tests {
         assert!(is_current_session(&sessions, "agent-a", "conn-new"));
         assert!(!is_current_session(&sessions, "agent-a", "conn-old"));
         assert!(!is_current_session(&sessions, "agent-b", "conn-new"));
+    }
+
+    #[test]
+    fn auth_requires_a_matching_hello_identity() {
+        let mut connection = AgentConnectionState::default();
+        assert!(validate_auth_identity(&connection, "agent-a").is_err());
+
+        connection.hello_agent_id = Some("agent-a".into());
+        assert!(validate_auth_identity(&connection, "agent-a").is_ok());
+        assert!(validate_auth_identity(&connection, "agent-b").is_err());
     }
 }

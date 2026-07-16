@@ -120,11 +120,16 @@ mod tests {
             .into_parts();
 
         writer.resize(31, 101).expect("resize owned PTY writer");
+        // Print the size from the parent shell after `stty` exits, so observing
+        // the marker also means foreground control has returned to the shell.
+        // Then wait for the literal probe; WINCH can interrupt a plain `read`.
         writer
             .write_all(
                 b"trap 'printf \"WAKEY_WINCH\\n\"' WINCH; \
                   printf 'WAKEY_ENV:%s:%s\\n' \"$TERM\" \"$COLORTERM\"; \
-                  read line; printf 'WAKEY_PTY_OK:%s\\n' \"$line\"; exit 0\n",
+                  size=$(stty size); printf 'WAKEY_SIZE:%s\\n' \"$size\"; \
+                  line=; while [ \"$line\" != probe ]; do read line || line=; done; \
+                  printf 'WAKEY_PTY_OK:%s\\n' \"$line\"; exit 0\n",
             )
             .await
             .expect("write shell input");
@@ -135,6 +140,7 @@ mod tests {
             "WAKEY_ENV:xterm-256color:truecolor",
         )
         .await;
+        read_until(&mut reader, &mut output, "WAKEY_SIZE:31 101").await;
         writer.refresh().expect("signal foreground process group");
         writer
             .write_all(b"probe\n")
@@ -156,6 +162,10 @@ mod tests {
         assert!(
             output.contains("WAKEY_PTY_OK:probe"),
             "unexpected PTY output: {output:?}"
+        );
+        assert!(
+            output.contains("WAKEY_SIZE:31 101"),
+            "PTY did not report resized dimensions: {output:?}"
         );
         assert!(
             output.contains("WAKEY_WINCH"),
