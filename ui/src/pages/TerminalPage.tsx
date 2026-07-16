@@ -67,18 +67,31 @@ function mergeTerminalSession(
   sessions: TerminalSession[],
   next: TerminalSession,
 ): TerminalSession[] {
-  const remaining = sessions.filter(
-    (item) => item.terminal_id !== next.terminal_id,
+  const existingIndex = sessions.findIndex(
+    (item) => item.terminal_id === next.terminal_id,
   );
-  return [...remaining, next].sort(
-    (left, right) => left.created_at_unix - right.created_at_unix,
+  if (existingIndex >= 0) {
+    // Attaching updates session state, not identity or tab position. Removing
+    // and re-inserting here made same-second sessions swap places on click.
+    return sessions.map((item, index) =>
+      index === existingIndex ? next : item,
+    );
+  }
+  return orderTerminalSessions([...sessions, next]);
+}
+
+function compareTerminalSessions(
+  left: TerminalSession,
+  right: TerminalSession,
+): number {
+  return (
+    left.created_at_unix - right.created_at_unix ||
+    left.terminal_id.localeCompare(right.terminal_id)
   );
 }
 
 function orderTerminalSessions(sessions: TerminalSession[]): TerminalSession[] {
-  return [...sessions].sort(
-    (left, right) => left.created_at_unix - right.created_at_unix,
-  );
+  return [...sessions].sort(compareTerminalSessions);
 }
 
 function reconcileTerminalSessions(
