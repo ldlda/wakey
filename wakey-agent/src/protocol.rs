@@ -66,6 +66,11 @@ pub enum AgentCapability {
 }
 
 pub const DEFAULT_TERMINAL_MAX_SESSIONS: usize = 2;
+pub const DEFAULT_TERMINAL_SESSION_TTL_SECONDS: u64 = 12 * 60 * 60;
+
+const fn default_terminal_session_ttl_seconds() -> u64 {
+    DEFAULT_TERMINAL_SESSION_TTL_SECONDS
+}
 
 /// Optional parameters attached to advertised agent capabilities.
 ///
@@ -87,12 +92,17 @@ impl AgentCapabilityOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalCapabilityOptions {
     pub max_sessions: usize,
+    #[serde(default = "default_terminal_session_ttl_seconds")]
+    pub session_ttl_seconds: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentTerminalSession {
     pub terminal_id: TerminalId,
     pub created_at_unix: u64,
+    /// The policy captured when this PTY was created. Zero means unlimited.
+    #[serde(default = "default_terminal_session_ttl_seconds")]
+    pub session_ttl_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -410,6 +420,7 @@ mod tests {
             sessions: vec![AgentTerminalSession {
                 terminal_id: TerminalId::new("term-1").expect("terminal id"),
                 created_at_unix: 42,
+                session_ttl_seconds: 600,
             }],
         };
         let json = serde_json::to_string(&inventory).expect("serialize terminal inventory");
@@ -430,11 +441,46 @@ mod tests {
             agent_id: "router".into(),
             capabilities: vec![AgentCapability::Terminal],
             capability_options: AgentCapabilityOptions {
-                terminal: Some(TerminalCapabilityOptions { max_sessions: 3 }),
+                terminal: Some(TerminalCapabilityOptions {
+                    max_sessions: 3,
+                    session_ttl_seconds: 600,
+                }),
             },
         };
 
         let value = serde_json::to_value(message).expect("serialize hello");
         assert_eq!(value["capability_options"]["terminal"]["max_sessions"], 3);
+        assert_eq!(
+            value["capability_options"]["terminal"]["session_ttl_seconds"],
+            600
+        );
+    }
+
+    #[test]
+    fn terminal_ttl_defaults_for_old_messages_and_preserves_explicit_zero() {
+        let old_options: TerminalCapabilityOptions =
+            serde_json::from_value(serde_json::json!({ "max_sessions": 2 }))
+                .expect("deserialize old capability options");
+        assert_eq!(
+            old_options.session_ttl_seconds,
+            DEFAULT_TERMINAL_SESSION_TTL_SECONDS
+        );
+
+        let old_session: AgentTerminalSession = serde_json::from_value(serde_json::json!({
+            "terminal_id": "term-old",
+            "created_at_unix": 42
+        }))
+        .expect("deserialize old terminal inventory");
+        assert_eq!(
+            old_session.session_ttl_seconds,
+            DEFAULT_TERMINAL_SESSION_TTL_SECONDS
+        );
+
+        let unlimited: TerminalCapabilityOptions = serde_json::from_value(serde_json::json!({
+            "max_sessions": 2,
+            "session_ttl_seconds": 0
+        }))
+        .expect("deserialize unlimited capability options");
+        assert_eq!(unlimited.session_ttl_seconds, 0);
     }
 }

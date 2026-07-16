@@ -10,7 +10,6 @@ pub const TERMINAL_RELAY_QUEUE: usize = 32;
 pub const TERMINAL_MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const TERMINAL_PENDING_AGENT_BYTES: usize = 256 * 1024;
 pub const TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
-pub const TERMINAL_ABSOLUTE_TIMEOUT: Duration = Duration::from_secs(12 * 60 * 60);
 const TERMINAL_TOMBSTONE_TTL: Duration = Duration::from_secs(5 * 60);
 const TERMINAL_MAX_TOMBSTONES: usize = 1024;
 
@@ -30,7 +29,8 @@ pub struct TerminalRegistry {
 struct TerminalSession {
     agent_id: String,
     created_at_unix: u64,
-    expires_at: Instant,
+    expires_at: Option<Instant>,
+    expires_at_unix: Option<u64>,
     agent_confirmed: bool,
     relay_token: Option<String>,
     attachment_token: Option<String>,
@@ -49,6 +49,7 @@ pub struct CreatedTerminal {
     pub relay_token: String,
     pub attachment_token: String,
     pub created_at_unix: u64,
+    pub expires_at_unix: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -56,6 +57,7 @@ pub struct TerminalSummary {
     pub terminal_id: String,
     pub agent_id: String,
     pub created_at_unix: u64,
+    pub expires_at_unix: Option<u64>,
     pub agent_attached: bool,
     pub operator_attached: bool,
 }
@@ -76,9 +78,10 @@ impl TerminalRegistry {
 
     #[cfg(test)]
     async fn create(&self, agent_id: String) -> Result<CreatedTerminal, &'static str> {
-        self.create_with_limit(
+        self.create_with_limits(
             agent_id,
             wakey_agent::protocol::DEFAULT_TERMINAL_MAX_SESSIONS,
+            wakey_agent::protocol::DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
         )
         .await
     }
@@ -86,10 +89,11 @@ impl TerminalRegistry {
     /// Creates a session using the limit advertised by the connected agent.
     /// The caller snapshots the limit with the agent connection so UI hints and
     /// server-side enforcement use the same value.
-    pub async fn create_with_limit(
+    pub async fn create_with_limits(
         &self,
         agent_id: String,
         max_sessions: usize,
+        session_ttl_seconds: u64,
     ) -> Result<CreatedTerminal, &'static str> {
         let mut sessions = self.inner.lock().await;
         prune_expired_sessions(&mut sessions);
@@ -109,12 +113,15 @@ impl TerminalRegistry {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        let expiry = expiry_for_created_at(created_at_unix, session_ttl_seconds)
+            .ok_or("terminal_ttl_invalid")?;
         sessions.insert(
             terminal_id.clone(),
             TerminalSession {
                 agent_id,
                 created_at_unix,
-                expires_at: Instant::now() + TERMINAL_ABSOLUTE_TIMEOUT,
+                expires_at: expiry.deadline,
+                expires_at_unix: expiry.unix,
                 agent_confirmed: false,
                 relay_token: Some(relay_token.clone()),
                 attachment_token: Some(attachment_token.clone()),
@@ -134,6 +141,7 @@ impl TerminalRegistry {
             relay_token,
             attachment_token,
             created_at_unix,
+            expires_at_unix: expiry.unix,
         })
     }
 
@@ -184,7 +192,10 @@ impl TerminalRegistry {
     ) -> Vec<(TerminalId, String)> {
         let reported_ids = reported
             .iter()
-            .filter(|session| expires_at_for_created_at(session.created_at_unix).is_some())
+            .filter(|session| {
+                expiry_for_created_at(session.created_at_unix, session.session_ttl_seconds)
+                    .is_some()
+            })
             .map(|session| session.terminal_id.as_str())
             .collect::<std::collections::HashSet<_>>();
         let stale_ids = {
@@ -207,8 +218,10 @@ impl TerminalRegistry {
         let mut credentials = Vec::new();
         let mut sessions = self.inner.lock().await;
         for reported_session in reported {
-            let Some(expires_at) = expires_at_for_created_at(reported_session.created_at_unix)
-            else {
+            let Some(expiry) = expiry_for_created_at(
+                reported_session.created_at_unix,
+                reported_session.session_ttl_seconds,
+            ) else {
                 continue;
             };
             let terminal_id = reported_session.terminal_id.as_str().to_string();
@@ -217,7 +230,8 @@ impl TerminalRegistry {
                 .or_insert_with(|| TerminalSession {
                     agent_id: agent_id.to_string(),
                     created_at_unix: reported_session.created_at_unix,
-                    expires_at,
+                    expires_at: expiry.deadline,
+                    expires_at_unix: expiry.unix,
                     agent_confirmed: true,
                     relay_token: None,
                     attachment_token: None,
@@ -437,7 +451,10 @@ impl TerminalRegistry {
         Some(detached_at)
     }
 
-    pub async fn summary(&self, terminal_id: &str) -> Option<(String, u64, bool, bool)> {
+    pub async fn summary(
+        &self,
+        terminal_id: &str,
+    ) -> Option<(String, u64, bool, bool, Option<u64>)> {
         let mut sessions = self.inner.lock().await;
         prune_expired_sessions(&mut sessions);
         sessions.get(terminal_id).map(|session| {
@@ -446,6 +463,7 @@ impl TerminalRegistry {
                 session.created_at_unix,
                 session.agent_tx.is_some(),
                 session.operator_tx.is_some(),
+                session.expires_at_unix,
             )
         })
     }
@@ -459,6 +477,7 @@ impl TerminalRegistry {
                 terminal_id: terminal_id.clone(),
                 agent_id: session.agent_id.clone(),
                 created_at_unix: session.created_at_unix,
+                expires_at_unix: session.expires_at_unix,
                 agent_attached: session.agent_tx.is_some(),
                 operator_attached: session.operator_tx.is_some(),
             })
@@ -474,7 +493,8 @@ fn active_session<'a>(
 ) -> Result<&'a mut TerminalSession, &'static str> {
     if sessions
         .get(terminal_id)
-        .is_some_and(|session| session.expires_at <= Instant::now())
+        .and_then(|session| session.expires_at)
+        .is_some_and(|expires_at| expires_at <= Instant::now())
     {
         sessions.remove(terminal_id);
         return Err("terminal_expired");
@@ -514,22 +534,38 @@ fn prune_tombstones(closed: &mut HashMap<String, Instant>) {
 
 fn prune_expired_sessions(sessions: &mut HashMap<String, TerminalSession>) {
     let now = Instant::now();
-    sessions.retain(|_, session| session.expires_at > now);
+    sessions.retain(|_, session| session.expires_at.is_none_or(|expires_at| expires_at > now));
 }
 
-/// Converts the agent's durable creation timestamp into CC's monotonic
-/// deadline. Reconciliation must not grant an old PTY a fresh twelve hours.
-fn expires_at_for_created_at(created_at_unix: u64) -> Option<Instant> {
+#[derive(Clone, Copy)]
+struct TerminalExpiry {
+    deadline: Option<Instant>,
+    unix: Option<u64>,
+}
+
+/// Converts the agent's creation-time policy into CC's monotonic deadline.
+/// The outer `Option` rejects expired or unrepresentable sessions; an inner
+/// `None` deadline is the explicit zero-TTL (unlimited) policy.
+fn expiry_for_created_at(created_at_unix: u64, session_ttl_seconds: u64) -> Option<TerminalExpiry> {
+    if session_ttl_seconds == 0 {
+        return Some(TerminalExpiry {
+            deadline: None,
+            unix: None,
+        });
+    }
+    let expires_at_unix = created_at_unix.checked_add(session_ttl_seconds)?;
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let age = Duration::from_secs(now_unix.saturating_sub(created_at_unix));
-    if age >= TERMINAL_ABSOLUTE_TIMEOUT {
+    if expires_at_unix <= now_unix {
         return None;
     }
-    let remaining = TERMINAL_ABSOLUTE_TIMEOUT - age;
-    Some(Instant::now() + remaining)
+    let remaining = Duration::from_secs(expires_at_unix - now_unix);
+    Some(TerminalExpiry {
+        deadline: Some(Instant::now().checked_add(remaining)?),
+        unix: Some(expires_at_unix),
+    })
 }
 
 fn relay_frame_size(frame: &TerminalRelayFrame) -> usize {
@@ -543,6 +579,7 @@ fn relay_frame_size(frame: &TerminalRelayFrame) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wakey_agent::protocol::DEFAULT_TERMINAL_SESSION_TTL_SECONDS;
 
     const OPERATOR_A: &str = "browser-tab-a";
     const OPERATOR_B: &str = "browser-tab-b";
@@ -663,12 +700,66 @@ mod tests {
         let registry = TerminalRegistry::new();
         for _ in 0..3 {
             registry
-                .create_with_limit("router".into(), 3)
+                .create_with_limits("router".into(), 3, DEFAULT_TERMINAL_SESSION_TTL_SECONDS)
                 .await
                 .expect("within advertised limit");
         }
-        let fourth = registry.create_with_limit("router".into(), 3).await;
+        let fourth = registry
+            .create_with_limits("router".into(), 3, DEFAULT_TERMINAL_SESSION_TTL_SECONDS)
+            .await;
         assert_eq!(fourth.err(), Some("agent_terminal_limit_reached"));
+    }
+
+    #[tokio::test]
+    async fn session_ttl_is_captured_and_zero_is_unlimited() {
+        let registry = TerminalRegistry::new();
+        let finite = registry
+            .create_with_limits("router".into(), 2, 67)
+            .await
+            .expect("finite session");
+        assert_eq!(
+            finite.expires_at_unix,
+            finite.created_at_unix.checked_add(67)
+        );
+
+        registry.remove(&finite.terminal_id).await;
+        let unlimited = registry
+            .create_with_limits("router".into(), 2, 0)
+            .await
+            .expect("unlimited session");
+        assert_eq!(unlimited.expires_at_unix, None);
+        assert_eq!(
+            registry
+                .summary(&unlimited.terminal_id)
+                .await
+                .expect("unlimited summary")
+                .4,
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn unlimited_inventory_can_adopt_an_old_session() {
+        let registry = TerminalRegistry::new();
+        let terminal_id = TerminalId::new("old-unlimited").expect("terminal id");
+        let reported = AgentTerminalSession {
+            terminal_id: terminal_id.clone(),
+            created_at_unix: 0,
+            session_ttl_seconds: 0,
+        };
+
+        let credentials = registry
+            .reconcile_agent_sessions("router", &[reported])
+            .await;
+        assert_eq!(credentials.len(), 1);
+        assert_eq!(
+            registry
+                .summary(terminal_id.as_str())
+                .await
+                .expect("adopted unlimited session")
+                .4,
+            None
+        );
     }
 
     #[tokio::test]
@@ -691,6 +782,7 @@ mod tests {
         let reported = AgentTerminalSession {
             terminal_id: terminal_id.clone(),
             created_at_unix,
+            session_ttl_seconds: 0,
         };
 
         let credentials = registry
@@ -723,7 +815,7 @@ mod tests {
             .await
             .get_mut(&first.terminal_id)
             .expect("first session")
-            .expires_at = Instant::now();
+            .expires_at = Some(Instant::now());
 
         registry
             .create("router".into())
@@ -739,6 +831,7 @@ mod tests {
         let reported = AgentTerminalSession {
             terminal_id: terminal_id.clone(),
             created_at_unix: 0,
+            session_ttl_seconds: DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
         };
 
         assert!(

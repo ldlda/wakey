@@ -80,6 +80,8 @@ The agent keeps its terminal manager outside the control-WebSocket reconnect loo
 
 Closing a session must terminate the entire PTY process group, not only the shell process. Cleanup should send a hangup first, then escalate to termination and forced kill after bounded grace periods. Explicit operator close, absolute session timeout, agent process exit, and machine reboot close the session.
 
+The agent configuration sets `terminal.session_ttl_seconds` for newly created PTYs. The default is 43,200 seconds (12 hours); explicit zero disables automatic expiry. The agent owns and enforces this deadline locally because PTYs survive browser and control-plane disconnection. It advertises the policy to the control plane and includes the creation-time TTL in terminal inventory, allowing CC to mirror expiry and preserve it across CC restart. Missing fields from older agents retain the 12-hour default. Positive values are exact and values that cannot fit the platform timer are rejected rather than clamped.
+
 An agent process restart or machine reboot still ends every terminal session because PTY file descriptors cannot be recovered by a new process. Surviving that boundary would require an external session host such as `tmux` or a separate terminal daemon and is not part of this design.
 
 The agent reports a normal exit status or terminating signal when available. The UI must distinguish an exited shell from a transport failure.

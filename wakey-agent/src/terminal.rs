@@ -52,6 +52,7 @@ struct ActiveTerminal {
     cancel: Option<oneshot::Sender<()>>,
     relay_credentials: mpsc::UnboundedSender<String>,
     created_at_unix: u64,
+    session_ttl_seconds: u64,
 }
 
 /// Owns PTY workers independently of any individual control-plane connection.
@@ -91,6 +92,7 @@ impl TerminalManager {
             anyhow::bail!("terminal capability is disabled");
         }
         validate_size(rows, cols)?;
+        let session_ttl = config.terminal.session_ttl()?;
 
         let terminal_key = terminal_id.to_string();
         let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -113,6 +115,7 @@ impl TerminalManager {
                     cancel: Some(cancel_tx),
                     relay_credentials: relay_tx.clone(),
                     created_at_unix,
+                    session_ttl_seconds: config.terminal.session_ttl_seconds,
                 },
             );
         }
@@ -122,7 +125,16 @@ impl TerminalManager {
         let active = Arc::downgrade(&self.active);
         let events = self.events.clone();
         tokio::spawn(async move {
-            let result = run_terminal(&config, &terminal_id, rows, cols, cancel_rx, relay_rx).await;
+            let result = run_terminal(
+                &config,
+                &terminal_id,
+                rows,
+                cols,
+                session_ttl,
+                cancel_rx,
+                relay_rx,
+            )
+            .await;
             // Inventory is authoritative. Remove the stopped worker before
             // notifying the control session, which may immediately resync it.
             remove_completed(&active, terminal_id.as_str());
@@ -176,6 +188,7 @@ impl TerminalManager {
                     .map(|terminal_id| AgentTerminalSession {
                         terminal_id,
                         created_at_unix: active.created_at_unix,
+                        session_ttl_seconds: active.session_ttl_seconds,
                     })
             })
             .collect()
@@ -210,6 +223,7 @@ async fn run_terminal(
     terminal_id: &TerminalId,
     rows: u16,
     cols: u16,
+    session_ttl: Option<Duration>,
     mut cancel: oneshot::Receiver<()>,
     mut relay_credentials: mpsc::UnboundedReceiver<String>,
 ) -> Result<()> {
@@ -242,13 +256,24 @@ async fn run_terminal(
     let mut terminal_state = TerminalState::new(rows, cols);
     let mut output = [0_u8; 16 * 1024];
     let mut requested_close = false;
+    let mut ttl_expired = false;
     let mut observed_status = None;
     let mut drain_deadline: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+    let mut ttl_deadline = session_ttl.map(|ttl| Box::pin(tokio::time::sleep(ttl)));
     loop {
         tokio::select! {
             biased;
             _ = &mut cancel => {
                 requested_close = true;
+                break;
+            }
+            _ = async {
+                match ttl_deadline.as_mut() {
+                    Some(deadline) => deadline.as_mut().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                ttl_expired = true;
                 break;
             }
             status = child.wait(), if observed_status.is_none() => {
@@ -363,7 +388,7 @@ async fn run_terminal(
             let _ = output.try_send(Message::Text(text.into()));
         }
     }
-    info!(terminal_id = %terminal_id, exit_code = ?status.code(), requested_close, "terminal worker exited");
+    info!(terminal_id = %terminal_id, exit_code = ?status.code(), requested_close, ttl_expired, "terminal worker exited");
     Ok(())
 }
 
@@ -511,6 +536,7 @@ async fn run_terminal(
     _terminal_id: &TerminalId,
     _rows: u16,
     _cols: u16,
+    _session_ttl: Option<Duration>,
     _cancel: oneshot::Receiver<()>,
     _relay_credentials: mpsc::UnboundedReceiver<String>,
 ) -> Result<()> {
@@ -607,6 +633,7 @@ mod tests {
                     cancel: Some(cancel),
                     relay_credentials,
                     created_at_unix: 42,
+                    session_ttl_seconds: 600,
                 },
             )]))),
             max_sessions: 2,
@@ -660,6 +687,7 @@ mod tests {
                 cancel: Some(cancel),
                 relay_credentials,
                 created_at_unix: 42,
+                session_ttl_seconds: 600,
             },
         )])));
         let manager = TerminalManager {
@@ -700,6 +728,34 @@ mod tests {
             .expect_err("invalid rows must fail");
         assert!(error.to_string().contains("outside supported bounds"));
         assert!(manager.active.lock().expect("terminal manager").is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn local_ttl_terminates_pty_without_control_plane_close() {
+        let mut config = crate::config::DEFAULT_CONFIG.clone();
+        config.terminal.enabled = true;
+        config.terminal.shell = "/bin/sh".into();
+        config.terminal.args = vec!["-c".into(), "sleep 30".into()];
+        let terminal_id = TerminalId::new("ttl-test").expect("terminal id");
+        let (_cancel, cancel_rx) = oneshot::channel();
+        let (_relay, relay_rx) = mpsc::unbounded_channel();
+
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            run_terminal(
+                &config,
+                &terminal_id,
+                24,
+                80,
+                Some(Duration::from_millis(20)),
+                cancel_rx,
+                relay_rx,
+            ),
+        )
+        .await
+        .expect("local TTL should stop the PTY promptly")
+        .expect("TTL cleanup should succeed");
     }
 
     #[test]

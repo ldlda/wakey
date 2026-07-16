@@ -12,6 +12,7 @@ export type TerminalSession = {
   terminal_id: string;
   agent_id: string;
   created_at_unix: number;
+  expires_at_unix?: number | null;
   agent_attached: boolean;
   operator_attached: boolean;
   websocket_url: string;

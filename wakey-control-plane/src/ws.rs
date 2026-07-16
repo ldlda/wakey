@@ -4,13 +4,14 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, info, info_span, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{
     AgentCapability, AgentCapabilityOptions, AgentTerminalSession, DEFAULT_TERMINAL_MAX_SESSIONS,
-    ErrorPayload, RequestId, ServerMessage, TerminalCapabilityOptions, TerminalControl, TerminalId,
+    DEFAULT_TERMINAL_SESSION_TTL_SECONDS, ErrorPayload, RequestId, ServerMessage,
+    TerminalCapabilityOptions, TerminalControl, TerminalId,
 };
 use wakey_core::Device;
 
@@ -212,17 +213,33 @@ async fn process_agent_text(
             let connect_to_hello_ms = connected_at.elapsed().as_millis() as u64;
             info!(agent_id = %agent_id, connect_to_hello_ms, "agent hello received");
             connection.hello_agent_id = Some(agent_id);
-            connection.capability_options = AgentCapabilityOptions {
-                terminal: capabilities.contains(&AgentCapability::Terminal).then_some(
-                    TerminalCapabilityOptions {
-                        max_sessions: capability_options
-                            .terminal
-                            .map(|terminal| terminal.max_sessions)
-                            .unwrap_or(DEFAULT_TERMINAL_MAX_SESSIONS)
-                            .max(1),
-                    },
-                ),
+            let terminal = if capabilities.contains(&AgentCapability::Terminal) {
+                let max_sessions = capability_options
+                    .terminal
+                    .as_ref()
+                    .map(|terminal| terminal.max_sessions)
+                    .unwrap_or(DEFAULT_TERMINAL_MAX_SESSIONS)
+                    .max(1);
+                let session_ttl_seconds = capability_options
+                    .terminal
+                    .as_ref()
+                    .map(|terminal| terminal.session_ttl_seconds)
+                    .unwrap_or(DEFAULT_TERMINAL_SESSION_TTL_SECONDS);
+                if session_ttl_seconds != 0
+                    && Instant::now()
+                        .checked_add(Duration::from_secs(session_ttl_seconds))
+                        .is_none()
+                {
+                    anyhow::bail!("terminal session TTL is too large for the platform timer");
+                }
+                Some(TerminalCapabilityOptions {
+                    max_sessions,
+                    session_ttl_seconds,
+                })
+            } else {
+                None
             };
+            connection.capability_options = AgentCapabilityOptions { terminal };
             connection.capabilities = capabilities;
         }
         IncomingClientMessage::Auth {

@@ -4,7 +4,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use crate::protocol::DEFAULT_TERMINAL_MAX_SESSIONS;
+use crate::protocol::{DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS};
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/wakey-agent/config.toml";
 pub const DEFAULT_PID_FILE: &str = "/var/run/wakey-agent.pid";
@@ -54,6 +54,9 @@ pub struct TerminalConfig {
     pub current_dir: Option<PathBuf>,
     #[serde(default = "default_terminal_max_sessions")]
     pub max_sessions: usize,
+    /// Maximum lifetime of a PTY process. Zero disables automatic expiry.
+    #[serde(default = "default_terminal_session_ttl_seconds")]
+    pub session_ttl_seconds: u64,
 }
 
 impl Default for TerminalConfig {
@@ -64,6 +67,7 @@ impl Default for TerminalConfig {
             args: Vec::new(),
             current_dir: None,
             max_sessions: default_terminal_max_sessions(),
+            session_ttl_seconds: default_terminal_session_ttl_seconds(),
         }
     }
 }
@@ -148,6 +152,23 @@ const fn default_terminal_max_sessions() -> usize {
     DEFAULT_TERMINAL_MAX_SESSIONS
 }
 
+const fn default_terminal_session_ttl_seconds() -> u64 {
+    DEFAULT_TERMINAL_SESSION_TTL_SECONDS
+}
+
+impl TerminalConfig {
+    pub(crate) fn session_ttl(&self) -> Result<Option<std::time::Duration>> {
+        if self.session_ttl_seconds == 0 {
+            return Ok(None);
+        }
+        let ttl = std::time::Duration::from_secs(self.session_ttl_seconds);
+        std::time::Instant::now()
+            .checked_add(ttl)
+            .context("terminal.session_ttl_seconds is too large for the platform timer")?;
+        Ok(Some(ttl))
+    }
+}
+
 impl AgentConfig {
     pub fn local_path_envs(&self) -> Vec<(&'static str, &Path)> {
         vec![
@@ -170,8 +191,10 @@ pub fn apply_local_path_env_to_command(cmd: &mut std::process::Command, config: 
 pub fn load_config(path: &Path) -> Result<AgentConfig> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read agent config {}", path.display()))?;
-    toml::from_str(&content)
-        .with_context(|| format!("failed to parse agent config {}", path.display()))
+    let config: AgentConfig = toml::from_str(&content)
+        .with_context(|| format!("failed to parse agent config {}", path.display()))?;
+    config.terminal.session_ttl()?;
+    Ok(config)
 }
 
 pub fn save_config(path: &Path, config: &AgentConfig) -> Result<()> {
@@ -261,6 +284,7 @@ mod tests {
                 args: vec!["-l".into()],
                 current_dir: Some("/tmp".into()),
                 max_sessions: 2,
+                session_ttl_seconds: 600,
             },
         };
 
@@ -314,6 +338,10 @@ max_sessions = 2
 
         assert!(config.terminal.args.is_empty());
         assert!(config.terminal.current_dir.is_none());
+        assert_eq!(
+            config.terminal.session_ttl_seconds,
+            DEFAULT_TERMINAL_SESSION_TTL_SECONDS
+        );
     }
 
     #[test]
@@ -332,5 +360,23 @@ max_session = 67
         .expect_err("unknown terminal fields must not silently use defaults");
 
         assert!(error.to_string().contains("max_session"));
+    }
+
+    #[test]
+    fn terminal_ttl_zero_is_unlimited_and_positive_is_exact() {
+        let mut terminal = TerminalConfig {
+            session_ttl_seconds: 0,
+            ..TerminalConfig::default()
+        };
+        assert_eq!(terminal.session_ttl().expect("unlimited TTL"), None);
+
+        terminal.session_ttl_seconds = 67;
+        assert_eq!(
+            terminal.session_ttl().expect("finite TTL"),
+            Some(std::time::Duration::from_secs(67))
+        );
+
+        terminal.session_ttl_seconds = u64::MAX;
+        assert!(terminal.session_ttl().is_err());
     }
 }

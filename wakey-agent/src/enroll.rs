@@ -157,6 +157,7 @@ mod tests {
                 args: vec!["-l".into()],
                 current_dir: Some("/root".into()),
                 max_sessions: 2,
+                session_ttl_seconds: 600,
             },
         };
 

@@ -91,6 +91,7 @@ async fn run_once(
                     .enabled
                     .then_some(TerminalCapabilityOptions {
                         max_sessions: config.terminal.max_sessions.max(1),
+                        session_ttl_seconds: config.terminal.session_ttl_seconds,
                     }),
             },
         },

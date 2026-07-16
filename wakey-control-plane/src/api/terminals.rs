@@ -5,16 +5,16 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tracing::{info, warn};
 use wakey_agent::protocol::{
-    AgentCapability, DEFAULT_TERMINAL_MAX_SESSIONS, ServerMessage, TerminalAgentHandshake,
-    TerminalControl, TerminalId, TerminalOperatorHandshake,
+    AgentCapability, DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
+    ServerMessage, TerminalAgentHandshake, TerminalControl, TerminalId, TerminalOperatorHandshake,
 };
 
 use crate::api::ApiError;
 use crate::runtime::terminals::{
-    TERMINAL_ABSOLUTE_TIMEOUT, TERMINAL_ATTACH_TIMEOUT, TERMINAL_MAX_FRAME_BYTES,
-    TerminalRelayFrame, TerminalSummary,
+    TERMINAL_ATTACH_TIMEOUT, TERMINAL_MAX_FRAME_BYTES, TerminalRelayFrame, TerminalSummary,
 };
 use crate::runtime::{AppState, SessionEvent};
 use crate::state::AuditEventInput;
@@ -40,6 +40,7 @@ pub struct TerminalSessionResponse {
     pub terminal_id: String,
     pub agent_id: String,
     pub created_at_unix: u64,
+    pub expires_at_unix: Option<u64>,
     pub agent_attached: bool,
     pub operator_attached: bool,
     pub websocket_url: String,
@@ -52,7 +53,7 @@ pub async fn create_terminal(
     Json(request): Json<CreateTerminalRequest>,
 ) -> Result<(StatusCode, Json<TerminalSessionResponse>), ApiError> {
     validate_size(request.rows, request.cols)?;
-    let (agent_tx, max_sessions) = {
+    let (agent_tx, max_sessions, session_ttl_seconds) = {
         let sessions = state.sessions.read().await;
         let session = sessions.get(&request.agent_id).ok_or_else(|| {
             ApiError::new(
@@ -75,12 +76,18 @@ pub async fn create_terminal(
             .map(|terminal| terminal.max_sessions)
             .unwrap_or(DEFAULT_TERMINAL_MAX_SESSIONS)
             .max(1);
-        (session.tx.clone(), max_sessions)
+        let session_ttl_seconds = session
+            .capability_options
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal.session_ttl_seconds)
+            .unwrap_or(DEFAULT_TERMINAL_SESSION_TTL_SECONDS);
+        (session.tx.clone(), max_sessions, session_ttl_seconds)
     };
 
     let created = state
         .terminals
-        .create_with_limit(request.agent_id.clone(), max_sessions)
+        .create_with_limits(request.agent_id.clone(), max_sessions, session_ttl_seconds)
         .await
         .map_err(registry_error)?;
     let terminal_id = TerminalId::new(created.terminal_id.clone()).map_err(|message| {
@@ -107,7 +114,12 @@ pub async fn create_terminal(
         ));
     }
 
-    spawn_absolute_timeout(state.clone(), terminal_id.clone(), request.agent_id.clone());
+    spawn_session_timeout(
+        state.clone(),
+        terminal_id.clone(),
+        request.agent_id.clone(),
+        session_ttl_seconds,
+    );
     append_terminal_audit(
         &state,
         &request.agent_id,
@@ -129,6 +141,7 @@ pub async fn create_terminal(
             terminal_id: terminal_id.to_string(),
             agent_id: request.agent_id,
             created_at_unix: created.created_at_unix,
+            expires_at_unix: created.expires_at_unix,
             agent_attached: false,
             operator_attached: false,
             attachment_token: Some(created.attachment_token),
@@ -140,7 +153,7 @@ pub async fn get_terminal(
     State(state): State<AppState>,
     Path(terminal_id): Path<String>,
 ) -> Result<Json<TerminalSessionResponse>, ApiError> {
-    let (agent_id, created_at_unix, agent_attached, operator_attached) = state
+    let (agent_id, created_at_unix, agent_attached, operator_attached, expires_at_unix) = state
         .terminals
         .summary(&terminal_id)
         .await
@@ -150,6 +163,7 @@ pub async fn get_terminal(
         terminal_id,
         agent_id,
         created_at_unix,
+        expires_at_unix,
         agent_attached,
         operator_attached,
         attachment_token: None,
@@ -178,7 +192,7 @@ pub async fn attach_terminal(
         .issue_attachment_token_for_operator(&terminal_id, &request.operator_id)
         .await
         .map_err(registry_error)?;
-    let (agent_id, created_at_unix, agent_attached, operator_attached) = state
+    let (agent_id, created_at_unix, agent_attached, operator_attached, expires_at_unix) = state
         .terminals
         .summary(&terminal_id)
         .await
@@ -188,6 +202,7 @@ pub async fn attach_terminal(
         terminal_id,
         agent_id,
         created_at_unix,
+        expires_at_unix,
         agent_attached,
         operator_attached,
         attachment_token: Some(attachment_token),
@@ -350,7 +365,7 @@ async fn handle_operator_terminal_socket(
         warn!(terminal_id, code, "failed to request terminal snapshot");
     }
     let summary = state.terminals.summary(&terminal_id).await;
-    if let Some((agent_id, _, _, _)) = &summary {
+    if let Some((agent_id, _, _, _, _)) = &summary {
         append_terminal_audit(
             &state,
             agent_id,
@@ -367,7 +382,7 @@ async fn handle_operator_terminal_socket(
     }
 
     let (mut write, mut read) = socket.split();
-    if summary.is_some_and(|(_, _, agent_attached, _)| agent_attached) {
+    if summary.is_some_and(|(_, _, agent_attached, _, _)| agent_attached) {
         let ready = serde_json::to_string(&TerminalControl::Ready)
             .expect("terminal ready control serializes");
         if send_relay_frame(&mut write, TerminalRelayFrame::Text(ready))
@@ -421,6 +436,7 @@ fn terminal_response(summary: TerminalSummary) -> TerminalSessionResponse {
         terminal_id: summary.terminal_id,
         agent_id: summary.agent_id,
         created_at_unix: summary.created_at_unix,
+        expires_at_unix: summary.expires_at_unix,
         agent_attached: summary.agent_attached,
         operator_attached: summary.operator_attached,
         attachment_token: None,
@@ -556,9 +572,17 @@ async fn close_registered_terminal(
     Some(agent_id)
 }
 
-fn spawn_absolute_timeout(state: AppState, terminal_id: TerminalId, agent_id: String) {
+fn spawn_session_timeout(
+    state: AppState,
+    terminal_id: TerminalId,
+    agent_id: String,
+    session_ttl_seconds: u64,
+) {
+    if session_ttl_seconds == 0 {
+        return;
+    }
     tokio::spawn(async move {
-        tokio::time::sleep(TERMINAL_ABSOLUTE_TIMEOUT).await;
+        tokio::time::sleep(Duration::from_secs(session_ttl_seconds)).await;
         if close_registered_terminal(
             &state,
             terminal_id.as_str(),
