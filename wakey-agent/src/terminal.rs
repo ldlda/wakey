@@ -11,7 +11,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
-use unicode_width::UnicodeWidthStr;
 
 const MAX_TERMINAL_FRAME_BYTES: usize = 64 * 1024;
 const TERMINAL_SCROLLBACK_ROWS: usize = 5_000;
@@ -40,63 +39,10 @@ impl TerminalState {
         self.parser.screen_mut().set_size(rows, cols);
     }
 
-    fn snapshot(&mut self) -> Vec<u8> {
-        let screen = self.parser.screen_mut();
-        let (rows, cols) = screen.size();
-        let alternate_screen = screen.alternate_screen();
-        let mut physical_rows = Vec::new();
-
-        // set_scrollback changes the viewport exposed by Screen. Walking its
-        // top row from the maximum offset down to zero yields every retained
-        // physical row exactly once, oldest first.
-        screen.set_scrollback(usize::MAX);
-        let retained_rows = screen.scrollback();
-        for offset in (1..=retained_rows).rev() {
-            screen.set_scrollback(offset);
-            let contents = screen.rows(0, cols).next().unwrap_or_default();
-            physical_rows.push((
-                screen.rows_formatted(0, cols).next().unwrap_or_default(),
-                UnicodeWidthStr::width_cjk(contents.as_str()).min(usize::from(cols)),
-                screen.row_wrapped(0),
-            ));
-        }
-        screen.set_scrollback(0);
-        physical_rows.extend((0..rows).map(|row| {
-            let contents = screen
-                .rows(0, cols)
-                .nth(usize::from(row))
-                .unwrap_or_default();
-            (
-                screen
-                    .rows_formatted(0, cols)
-                    .nth(usize::from(row))
-                    .unwrap_or_default(),
-                UnicodeWidthStr::width_cjk(contents.as_str()).min(usize::from(cols)),
-                screen.row_wrapped(row),
-            )
-        }));
-
-        // Replace browser history, then stream physical rows so xterm builds
-        // its own scrollback. The final formatted state restores colors,
-        // cursor position, and input modes for the live screen.
-        let mut snapshot = b"\x1b[?1049l\x1b[3J\x1b[2J\x1b[H".to_vec();
-        for (index, (contents, display_width, wrapped)) in physical_rows.iter().enumerate() {
-            // rows_formatted encodes each row relative to default attributes.
-            // Reset between rows so attributes cannot leak across boundaries.
-            snapshot.extend_from_slice(b"\x1b[0m");
-            snapshot.extend_from_slice(contents);
-            snapshot.extend_from_slice(b"\x1b[0m");
-            if *wrapped {
-                snapshot.resize(snapshot.len() + usize::from(cols) - display_width, b' ');
-            } else if index + 1 < physical_rows.len() {
-                snapshot.extend_from_slice(b"\r\n");
-            }
-        }
-        if alternate_screen {
-            snapshot.extend_from_slice(b"\x1b[?1049h");
-        }
-        snapshot.extend_from_slice(&screen.state_formatted());
-        snapshot
+    fn snapshot(&self) -> Vec<u8> {
+        self.parser
+            .screen()
+            .snapshot_formatted(TERMINAL_SCROLLBACK_ROWS)
     }
 }
 
@@ -735,6 +681,55 @@ mod tests {
 
         assert!(restored.screen().alternate_screen());
         assert_eq!(restored.screen().contents(), "full-screen");
+    }
+
+    #[test]
+    fn alternate_screen_snapshot_restores_hidden_primary_on_exit() {
+        let mut state = TerminalState::new(3, 20);
+        state.process(b"\x1b[31mshell history\r\n$ btop\x1b[?1049h\x1b[34mbtop dashboard");
+
+        let mut restored = vt100::Parser::new(3, 20, TERMINAL_SCROLLBACK_ROWS);
+        restored.process(&state.snapshot());
+
+        assert!(restored.screen().alternate_screen());
+        assert_eq!(restored.screen().contents(), "btop dashboard");
+        assert_eq!(restored.screen().fgcolor(), vt100::Color::Idx(4));
+
+        // Compare the reattached terminal with the original parser after both
+        // receive the application's real alternate-screen exit sequence.
+        state.process(b"\x1b[?1049l");
+        restored.process(b"\x1b[?1049l");
+        assert_eq!(
+            restored.screen().contents(),
+            state.parser.screen().contents()
+        );
+        assert_eq!(
+            restored.screen().cursor_position(),
+            state.parser.screen().cursor_position()
+        );
+        assert_eq!(restored.screen().fgcolor(), vt100::Color::Idx(1));
+
+        restored.screen_mut().set_scrollback(usize::MAX);
+        assert!(restored.screen().contents().contains("shell history"));
+        assert!(!restored.screen().contents().contains("btop dashboard"));
+    }
+
+    #[test]
+    fn snapshot_does_not_change_the_source_viewport_or_state() {
+        let mut state = TerminalState::new(3, 20);
+        for line in 0..10 {
+            state.process(format!("history {line}\r\n").as_bytes());
+        }
+        state.parser.screen_mut().set_scrollback(4);
+
+        let before_contents = state.parser.screen().contents();
+        let before_state = state.parser.screen().state_formatted();
+        let before_scrollback = state.parser.screen().scrollback();
+        let _ = state.snapshot();
+
+        assert_eq!(state.parser.screen().contents(), before_contents);
+        assert_eq!(state.parser.screen().state_formatted(), before_state);
+        assert_eq!(state.parser.screen().scrollback(), before_scrollback);
     }
 
     #[tokio::test]

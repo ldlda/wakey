@@ -31,6 +31,13 @@ strip = true
 
 [workspace]
 members = ["ipjs", "wakey-agent", "wakey-control-plane", "wakey-core", "wakey-linux"]
+exclude = ["vendor/vt100"]
+
+[patch.crates-io]
+# vt100 exposes only its active grid. Wakey's reconnect snapshot needs the
+# retained primary grid while a full-screen application owns the alternate
+# grid, so keep the small read-only extension local and auditable.
+vt100 = { path = "vendor/vt100" }
 
 [workspace.dependencies]
 anyhow = "1"
