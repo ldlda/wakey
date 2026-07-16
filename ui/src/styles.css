@@ -365,6 +365,9 @@
   gap: 0.4rem;
   height: 1.4rem;
   padding-inline: 0.45rem;
+  border-color: rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 5%);
+  color: #cbd5e1;
   font-size: 0.6875rem;
   text-transform: capitalize;
 }
