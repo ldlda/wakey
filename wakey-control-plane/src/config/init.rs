@@ -68,14 +68,14 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         .clone()
         .or(base.state_file)
         .unwrap_or_else(|| defaults.state_file.clone());
-    let state_file = resolve_path(&data_dir, state_file_raw);
+    let state_file = path_for_rendered_config(&data_dir, state_file_raw);
 
     let pid_file_raw = args
         .pid_file
         .clone()
         .or(base.pid_file)
         .unwrap_or_else(|| defaults.pid_file.clone());
-    let pid_file = resolve_path(&data_dir, pid_file_raw);
+    let pid_file = path_for_rendered_config(&data_dir, pid_file_raw);
 
     let ui_dist_dir = args
         .ui_dist_dir
@@ -145,6 +145,18 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
 
     print!("{}", rendered);
     Ok(None)
+}
+
+/// Keep relative paths relative when the rendered config's `data_dir` is also
+/// relative. The daemon resolves relative paths under `data_dir`; embedding
+/// that directory into another relative path here would make it get joined a
+/// second time when the generated config is loaded.
+fn path_for_rendered_config(data_dir: &std::path::Path, candidate: PathBuf) -> PathBuf {
+    if data_dir.is_relative() && candidate.is_relative() {
+        candidate
+    } else {
+        resolve_path(data_dir, candidate)
+    }
 }
 
 pub fn bootstrap_config_if_missing(args: &ServeArgs) -> Result<bool> {
@@ -300,6 +312,53 @@ json_logs = true
             parsed["telemetry"]["service_name"].as_str(),
             Some(defaults.telemetry.service_name.as_str())
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_config_preserves_relative_paths_for_relative_data_dir() {
+        let dir = temp_test_dir("relative-data-dir");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let base = dir.join("base.toml");
+        let out = dir.join("out.toml");
+        std::fs::write(
+            &base,
+            r#"
+data_dir = "test-ddir/wakey-control-plane"
+state_file = "state.sqlite3"
+pid_file = "wakey-control-plane.pid"
+"#,
+        )
+        .expect("write base config");
+
+        write_init_config(&InitConfigArgs {
+            config_file: Some(out.clone()),
+            from_config: Some(base),
+            stdout: false,
+            data_dir: None,
+            bind: None,
+            public_url: None,
+            state_file: None,
+            pid_file: None,
+            ui_dist_dir: None,
+            command_timeout_ms: None,
+            enroll_token_ttl_seconds: None,
+            observation_retention_seconds: None,
+            bootstrap_enroll_tokens: Vec::new(),
+            telemetry_otlp_endpoint: None,
+            telemetry_service_name: None,
+            telemetry_json_logs: None,
+            force: false,
+        })
+        .expect("write derived config");
+
+        let parsed: toml::Value =
+            toml::from_str(&std::fs::read_to_string(&out).expect("read derived config"))
+                .expect("parse derived config");
+        assert_eq!(parsed["state_file"].as_str(), Some("state.sqlite3"));
+        assert_eq!(parsed["pid_file"].as_str(), Some("wakey-control-plane.pid"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

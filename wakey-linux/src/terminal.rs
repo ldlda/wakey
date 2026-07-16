@@ -114,6 +114,7 @@ mod tests {
     ///
     /// `./scripts/test_remote.ps1 -Package wakey-linux -Filter terminal::tests::pty_round_trip_and_resize -Exact -ShowOutput`
     #[tokio::test]
+    #[ignore = "live system check, requires PTY and shell"]
     async fn pty_round_trip_and_resize() {
         let (mut reader, mut writer, mut child) = TerminalPty::spawn(Path::new("/bin/sh"), 24, 80)
             .expect("spawn PTY shell")
