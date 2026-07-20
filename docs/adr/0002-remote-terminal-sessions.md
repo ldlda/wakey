@@ -92,6 +92,8 @@ Terminal transport must not use unbounded queues.
 
 Every queue between PTY, agent socket, control-plane relay, and browser socket is bounded. The agent keeps draining and parsing the PTY while detached so a noisy child cannot stall the agent. Parsed state is bounded by the configured terminal dimensions and a 5,000-row scrollback limit. The control plane retains only a bounded queue of operator controls while an agent relay is reconnecting.
 
+While a relay is attached, saturation applies lossless backpressure instead of dropping terminal bytes or disconnecting the relay. The agent retains the frame that discovered saturation and pauses further PTY reads until bounded relay capacity returns. Input, resize, close, lifecycle, and reconnect handling remain active while output is backpressured. Reconnect snapshots use the same ordered output path and duplicate snapshot requests are coalesced while one is pending. This is required for terminal protocols such as sixel, where dropping one output frame corrupts the rest of the stream.
+
 When input/control and output are ready simultaneously, relay loops prioritize input and control. This keeps interrupt, resize, close, and snapshot traffic responsive while commands produce sustained output.
 
 The implementation also enforces:

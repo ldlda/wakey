@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
@@ -15,6 +15,7 @@ use tracing::{info, warn};
 const MAX_TERMINAL_FRAME_BYTES: usize = 64 * 1024;
 const TERMINAL_SCROLLBACK_ROWS: usize = 5_000;
 const RELAY_INPUT_QUEUE: usize = 32;
+const RELAY_OUTPUT_QUEUE: usize = 32;
 const PTY_EXIT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const PROCESS_SIGNAL_GRACE: Duration = Duration::from_secs(1);
 
@@ -24,6 +25,90 @@ const PROCESS_SIGNAL_GRACE: Duration = Duration::from_secs(1);
 /// through its normal parser without a second state protocol.
 struct TerminalState {
     parser: vt100::Parser,
+}
+
+/// Buffers ordered terminal output without letting a slow relay grow memory
+/// without bound. Once a frame is pending, the PTY read branch is paused until
+/// the relay channel has capacity; control input remains independently active.
+#[derive(Default)]
+struct RelayOutputBuffer {
+    sender: Option<mpsc::Sender<Message>>,
+    pending: VecDeque<Message>,
+    snapshot_pending: bool,
+}
+
+impl RelayOutputBuffer {
+    fn connect(&mut self, sender: mpsc::Sender<Message>) {
+        self.disconnect();
+        self.sender = Some(sender);
+    }
+
+    fn disconnect(&mut self) {
+        self.sender = None;
+        self.pending.clear();
+        self.snapshot_pending = false;
+    }
+
+    fn is_connected(&self) -> bool {
+        self.sender.is_some()
+    }
+
+    fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    fn pending_sender(&self) -> Option<mpsc::Sender<Message>> {
+        self.has_pending().then(|| self.sender.clone()).flatten()
+    }
+
+    fn queue_live(&mut self, frame: Message) {
+        debug_assert!(
+            self.pending.is_empty(),
+            "PTY reads must pause while relay output is pending"
+        );
+        self.queue_frame(frame);
+    }
+
+    fn queue_frame(&mut self, frame: Message) {
+        let Some(sender) = self.sender.as_ref() else {
+            return;
+        };
+        if !self.pending.is_empty() {
+            self.pending.push_back(frame);
+            return;
+        }
+        match sender.try_send(frame) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(frame)) => {
+                self.pending.push_back(frame);
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => self.disconnect(),
+        }
+    }
+
+    fn queue_snapshot(&mut self, snapshot: Vec<u8>) {
+        if self.sender.is_none() || self.snapshot_pending {
+            return;
+        }
+        for chunk in snapshot.chunks(MAX_TERMINAL_FRAME_BYTES) {
+            self.queue_frame(Message::Binary(chunk.to_vec().into()));
+            if self.sender.is_none() {
+                return;
+            }
+        }
+        self.snapshot_pending = self.has_pending();
+    }
+
+    fn send_reserved(&mut self, permit: mpsc::OwnedPermit<Message>) {
+        let frame = self
+            .pending
+            .pop_front()
+            .expect("relay permit requires pending output");
+        permit.send(frame);
+        if self.pending.is_empty() {
+            self.snapshot_pending = false;
+        }
+    }
 }
 
 impl TerminalState {
@@ -250,7 +335,7 @@ async fn run_terminal(
     );
 
     let (relay_input_tx, mut relay_input_rx) = mpsc::channel(RELAY_INPUT_QUEUE);
-    let mut relay_output: Option<mpsc::Sender<Message>> = None;
+    let mut relay_output = RelayOutputBuffer::default();
     let mut relay_task: Option<tokio::task::JoinHandle<()>> = None;
     let mut relay_generation = 0_u64;
     let mut terminal_state = TerminalState::new(rows, cols);
@@ -261,6 +346,7 @@ async fn run_terminal(
     let mut drain_deadline: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
     let mut ttl_deadline = session_ttl.map(|ttl| Box::pin(tokio::time::sleep(ttl)));
     loop {
+        let pending_output_sender = relay_output.pending_sender();
         tokio::select! {
             biased;
             _ = &mut cancel => {
@@ -303,12 +389,7 @@ async fn run_terminal(
                         terminal_state.resize(rows, cols);
                     }
                     RelayInput::Snapshot { generation } if generation == relay_generation => {
-                        if !send_terminal_snapshot(terminal_state.snapshot(), &mut relay_output) {
-                            if let Some(task) = relay_task.take() {
-                                task.abort();
-                            }
-                            warn!(terminal_id = %terminal_id, "terminal relay output queue saturated during snapshot");
-                        }
+                        relay_output.queue_snapshot(terminal_state.snapshot());
                         if let Err(err) = writer.refresh() {
                             warn!(terminal_id = %terminal_id, error = %err, "terminal redraw signal failed");
                         }
@@ -318,10 +399,10 @@ async fn run_terminal(
                         break;
                     }
                     RelayInput::Connected { generation, output } if generation == relay_generation => {
-                        relay_output = Some(output);
+                        relay_output.connect(output);
                     }
                     RelayInput::Disconnected { generation } if generation == relay_generation => {
-                        relay_output = None;
+                        relay_output.disconnect();
                     }
                     _ => {}
                 }
@@ -333,8 +414,8 @@ async fn run_terminal(
                 }
                 relay_generation = relay_generation.wrapping_add(1);
                 let generation = relay_generation;
-                let (output_tx, output_rx) = mpsc::channel(32);
-                relay_output = None;
+                let (output_tx, output_rx) = mpsc::channel(RELAY_OUTPUT_QUEUE);
+                relay_output.disconnect();
                 let config = config.clone();
                 let terminal_id = terminal_id.clone();
                 let relay_input_tx = relay_input_tx.clone();
@@ -353,20 +434,23 @@ async fn run_terminal(
                     let _ = relay_input_tx.send(RelayInput::Disconnected { generation }).await;
                 }));
             }
-            read = reader.read(&mut output) => {
+            permit = reserve_relay_output(pending_output_sender), if relay_output.has_pending() => {
+                match permit {
+                    Ok(permit) => relay_output.send_reserved(permit),
+                    Err(()) => {
+                        relay_output.disconnect();
+                        if let Some(task) = relay_task.take() {
+                            task.abort();
+                        }
+                    }
+                }
+            }
+            read = reader.read(&mut output), if !relay_output.has_pending() => {
                 match read {
                     Ok(0) => break,
                     Ok(count) => {
                         terminal_state.process(&output[..count]);
-                        if !send_terminal_output(
-                            Message::Binary(output[..count].to_vec().into()),
-                            &mut relay_output,
-                        ) {
-                            if let Some(task) = relay_task.take() {
-                                task.abort();
-                            }
-                            warn!(terminal_id = %terminal_id, "terminal relay output queue saturated");
-                        }
+                        relay_output.queue_live(Message::Binary(output[..count].to_vec().into()));
                     }
                     // Linux PTY masters commonly report EIO after the slave closes.
                     Err(err) if err.raw_os_error() == Some(5) => break,
@@ -380,12 +464,12 @@ async fn run_terminal(
         Some(status) => status,
         None => terminate_process_group(&mut child, process_group).await?,
     };
-    if let Some(output) = relay_output {
+    if relay_output.is_connected() {
         let control = TerminalControl::Exited {
             exit_code: status.code(),
         };
         if let Ok(text) = serde_json::to_string(&control) {
-            let _ = output.try_send(Message::Text(text.into()));
+            relay_output.queue_frame(Message::Text(text.into()));
         }
     }
     info!(terminal_id = %terminal_id, exit_code = ?status.code(), requested_close, ttl_expired, "terminal worker exited");
@@ -507,27 +591,13 @@ async fn run_terminal_relay(relay: RelayConnection) -> Result<()> {
     Ok(())
 }
 
-fn send_terminal_output(frame: Message, relay: &mut Option<mpsc::Sender<Message>>) -> bool {
-    if let Some(tx) = relay.as_ref()
-        && tx.try_send(frame).is_err()
-    {
-        *relay = None;
-        return false;
+async fn reserve_relay_output(
+    sender: Option<mpsc::Sender<Message>>,
+) -> Result<mpsc::OwnedPermit<Message>, ()> {
+    match sender {
+        Some(sender) => sender.reserve_owned().await.map_err(|_| ()),
+        None => std::future::pending().await,
     }
-    true
-}
-
-fn send_terminal_snapshot(snapshot: Vec<u8>, relay: &mut Option<mpsc::Sender<Message>>) -> bool {
-    let Some(tx) = relay.as_ref() else {
-        return true;
-    };
-    for chunk in snapshot.chunks(MAX_TERMINAL_FRAME_BYTES) {
-        if tx.try_send(Message::Binary(chunk.to_vec().into())).is_err() {
-            *relay = None;
-            return false;
-        }
-    }
-    true
 }
 
 #[cfg(not(unix))]
@@ -893,13 +963,19 @@ mod tests {
     #[tokio::test]
     async fn snapshot_is_split_at_the_terminal_frame_limit() {
         let snapshot = vec![7; MAX_TERMINAL_FRAME_BYTES * 2 + 1];
-        let (tx, mut rx) = mpsc::channel(3);
-        let mut relay = Some(tx);
-
-        assert!(send_terminal_snapshot(snapshot.clone(), &mut relay));
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut relay = RelayOutputBuffer::default();
+        relay.connect(tx);
+        relay.queue_snapshot(snapshot.clone());
 
         let mut restored = Vec::new();
         for _ in 0..3 {
+            if rx.is_empty() {
+                let permit = reserve_relay_output(relay.pending_sender())
+                    .await
+                    .expect("relay remains connected");
+                relay.send_reserved(permit);
+            }
             let Message::Binary(chunk) = rx.recv().await.expect("snapshot chunk") else {
                 panic!("snapshot chunks must be binary");
             };
@@ -907,23 +983,80 @@ mod tests {
             restored.extend_from_slice(&chunk);
         }
         assert_eq!(restored, snapshot);
+        assert!(!relay.has_pending());
+        assert!(relay.is_connected());
+    }
+
+    #[tokio::test]
+    async fn saturated_relay_output_stays_attached_without_dropping() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut relay = RelayOutputBuffer::default();
+        relay.connect(tx);
+        relay.queue_live(Message::Binary(vec![1].into()));
+        // This read discovers saturation. The worker retains it, then pauses
+        // further PTY reads until relay capacity becomes available.
+        relay.queue_live(Message::Binary(vec![2].into()));
+
+        assert!(relay.is_connected());
+        assert!(relay.has_pending());
+        assert_eq!(
+            rx.recv().await.expect("original queued frame").into_data(),
+            vec![1]
+        );
+        let permit = reserve_relay_output(relay.pending_sender())
+            .await
+            .expect("relay remains connected");
+        relay.send_reserved(permit);
+        assert_eq!(
+            rx.recv().await.expect("backpressured frame").into_data(),
+            vec![2]
+        );
+        assert!(!relay.has_pending());
+    }
+
+    #[tokio::test]
+    async fn snapshot_waits_behind_pending_live_output() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut relay = RelayOutputBuffer::default();
+        relay.connect(tx);
+        relay.queue_live(Message::Binary(vec![1].into()));
+        relay.queue_live(Message::Binary(vec![2].into()));
+        relay.queue_snapshot(vec![3]);
+
+        let mut received = Vec::new();
+        for _ in 0..3 {
+            if rx.is_empty() {
+                let permit = reserve_relay_output(relay.pending_sender())
+                    .await
+                    .expect("relay remains connected");
+                relay.send_reserved(permit);
+            }
+            received.extend(rx.recv().await.expect("ordered relay frame").into_data());
+        }
+        assert_eq!(received, vec![1, 2, 3]);
     }
 
     #[test]
-    fn saturated_relay_output_detaches_without_waiting() {
-        let (tx, mut rx) = mpsc::channel(1);
-        tx.try_send(Message::Binary(vec![1].into()))
-            .expect("prefill relay queue");
-        let mut relay = Some(tx);
+    fn replacement_relay_does_not_receive_old_pending_output() {
+        let (old_tx, mut old_rx) = mpsc::channel(1);
+        let (new_tx, mut new_rx) = mpsc::channel(1);
+        let mut relay = RelayOutputBuffer::default();
+        relay.connect(old_tx);
+        relay.queue_live(Message::Binary(vec![1].into()));
+        relay.queue_live(Message::Binary(vec![2].into()));
 
-        assert!(!send_terminal_output(
-            Message::Binary(vec![2].into()),
-            &mut relay,
-        ));
-        assert!(relay.is_none());
+        relay.connect(new_tx);
+        relay.queue_live(Message::Binary(vec![3].into()));
+
         assert_eq!(
-            rx.try_recv().expect("original queued frame").into_data(),
+            old_rx.try_recv().expect("old queued frame").into_data(),
             vec![1]
         );
+        assert!(old_rx.try_recv().is_err());
+        assert_eq!(
+            new_rx.try_recv().expect("new relay frame").into_data(),
+            vec![3]
+        );
+        assert!(!relay.has_pending());
     }
 }
