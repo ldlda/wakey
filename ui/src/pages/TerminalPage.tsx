@@ -6,22 +6,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal as XTerm } from "@xterm/xterm";
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  ClipboardCopy,
-  ClipboardPaste,
-  Eraser,
-  Keyboard,
-  Plus,
-  RotateCcw,
-  Terminal,
-  X,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { Eraser, Keyboard, RotateCcw, Terminal } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -41,6 +26,23 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  MAX_TERMINAL_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  TerminalAccessoryBar,
+} from "@/pages/terminal/TerminalAccessoryBar";
+import { TerminalSessionTabs } from "@/pages/terminal/TerminalSessionTabs";
+import {
+  NO_TERMINAL_MODIFIERS,
+  applyTerminalModifiers,
+  mergeTerminalSession,
+  orderTerminalSessions,
+  reconcileTerminalSessions,
+  restoreCandidates,
+  visibleTerminalText,
+  type TerminalConnectionState,
+  type TerminalModifiers,
+} from "@/pages/terminal/sessionUtils";
 import { loadTerminalFontFamily } from "@/terminal/terminalFonts";
 
 type Props = {
@@ -49,35 +51,16 @@ type Props = {
   onSelectAgent: (agentId: string) => void;
 };
 
-type ConnectionState =
-  | "idle"
-  | "connecting"
-  | "ready"
-  | "disconnected"
-  | "exited";
-
 const REMEMBERED_TERMINAL_KEY = "wakey.active-terminal-id";
 const TERMINAL_OPERATOR_KEY = "wakey.terminal-operator-id";
 const DEFAULT_TERMINAL_FONT_SIZE = 14;
-const MIN_TERMINAL_FONT_SIZE = 10;
-const MAX_TERMINAL_FONT_SIZE = 22;
 const TERMINAL_TOUCH_SLOP_PX = 8;
-
-type TerminalModifiers = {
-  ctrl: boolean;
-  meta: boolean;
-};
 
 type TerminalTouch = {
   pointerId: number;
   startX: number;
   startY: number;
   moved: boolean;
-};
-
-const NO_TERMINAL_MODIFIERS: TerminalModifiers = {
-  ctrl: false,
-  meta: false,
 };
 
 // polyfill for testing in browsers that don't support crypto.randomUUID()
@@ -101,137 +84,9 @@ function terminalOperatorId(): string {
   return created;
 }
 
-function mergeTerminalSession(
-  sessions: TerminalSession[],
-  next: TerminalSession,
-): TerminalSession[] {
-  const existingIndex = sessions.findIndex(
-    (item) => item.terminal_id === next.terminal_id,
-  );
-  if (existingIndex >= 0) {
-    // Attaching updates session state, not identity or tab position. Removing
-    // and re-inserting here made same-second sessions swap places on click.
-    return sessions.map((item, index) =>
-      index === existingIndex ? next : item,
-    );
-  }
-  return orderTerminalSessions([...sessions, next]);
-}
-
-function compareTerminalSessions(
-  left: TerminalSession,
-  right: TerminalSession,
-): number {
-  return (
-    left.created_at_unix - right.created_at_unix ||
-    left.terminal_id.localeCompare(right.terminal_id)
-  );
-}
-
-function orderTerminalSessions(sessions: TerminalSession[]): TerminalSession[] {
-  return [...sessions].sort(compareTerminalSessions);
-}
-
-function reconcileTerminalSessions(
-  current: TerminalSession[],
-  listed: TerminalSession[],
-): TerminalSession[] {
-  const listedById = new Map(listed.map((item) => [item.terminal_id, item]));
-  const retained = current.flatMap((item) => {
-    const updated = listedById.get(item.terminal_id);
-    if (!updated) return [];
-    listedById.delete(item.terminal_id);
-    return [updated];
-  });
-  return [...retained, ...orderTerminalSessions([...listedById.values()])];
-}
-
-function restoreCandidates(
-  sessions: TerminalSession[],
-  rememberedId: string | null,
-  selectedAgentId: string,
-): TerminalSession[] {
-  const remembered = sessions.find((item) => item.terminal_id === rememberedId);
-  const available = sessions.filter(
-    (item) => !item.operator_attached && item !== remembered,
-  );
-  available.sort((left, right) => {
-    const leftPreferred = left.agent_id === selectedAgentId ? 1 : 0;
-    const rightPreferred = right.agent_id === selectedAgentId ? 1 : 0;
-    return (
-      rightPreferred - leftPreferred ||
-      right.created_at_unix - left.created_at_unix
-    );
-  });
-  return remembered ? [remembered, ...available] : available;
-}
-
 function websocketUrl(path: string): string {
   const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${scheme}//${window.location.host}${path}`;
-}
-
-function terminalCreatedTime(createdAtUnix: number): string {
-  return new Date(createdAtUnix * 1000).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function terminalTimestamp(timestampUnix: number): string {
-  return new Date(timestampUnix * 1000).toLocaleString();
-}
-
-function terminalExpiryDisplay(
-  expiresAtUnix: number | null | undefined,
-  nowUnix: number,
-): { label: string; warning: boolean } | null {
-  if (expiresAtUnix == null) return null;
-  const remainingSeconds = expiresAtUnix - nowUnix;
-  if (remainingSeconds <= 0) return { label: "expired", warning: true };
-  if (remainingSeconds < 60) return { label: "<1m left", warning: true };
-  if (remainingSeconds < 3600) {
-    return {
-      label: `${Math.floor(remainingSeconds / 60)}m left`,
-      warning: remainingSeconds < 10 * 60,
-    };
-  }
-  if (remainingSeconds < 24 * 3600) {
-    return {
-      label: `${Math.floor(remainingSeconds / 3600)}h left`,
-      warning: false,
-    };
-  }
-  return {
-    label: `${Math.floor(remainingSeconds / (24 * 3600))}d left`,
-    warning: false,
-  };
-}
-
-function applyTerminalModifiers(
-  data: string,
-  modifiers: TerminalModifiers,
-): string {
-  let modified = data;
-  if (modifiers.ctrl && modified.length === 1) {
-    const code = modified.toUpperCase().charCodeAt(0);
-    if (code >= 64 && code <= 95) {
-      modified = String.fromCharCode(code & 0x1f);
-    }
-  }
-  return modifiers.meta ? `\x1b${modified}` : modified;
-}
-
-function visibleTerminalText(terminal: XTerm): string {
-  const buffer = terminal.buffer.active;
-  const firstLine = buffer.viewportY;
-  const lastLine = Math.min(buffer.length, firstLine + terminal.rows);
-  const lines: string[] = [];
-  for (let index = firstLine; index < lastLine; index += 1) {
-    lines.push(buffer.getLine(index)?.translateToString(true) ?? "");
-  }
-  while (lines.at(-1) === "") lines.pop();
-  return lines.join("\n");
 }
 
 export function TerminalPage({
@@ -252,7 +107,7 @@ export function TerminalPage({
   const terminalInputFocusedBeforeAccessoryRef = useRef(false);
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [session, setSession] = useState<TerminalSession | null>(null);
-  const [connection, setConnection] = useState<ConnectionState>("idle");
+  const [connection, setConnection] = useState<TerminalConnectionState>("idle");
   const [sessionTitles, setSessionTitles] = useState<Record<string, string>>(
     {},
   );
@@ -292,10 +147,11 @@ export function TerminalPage({
   );
   const agentAtSessionLimit =
     selectedAgentSessionCount >= selectedAgentSessionLimit;
-  const canRequestStart =
+  const canRequestStart = Boolean(
     selectedAgent?.connected &&
     selectedAgent.capabilities.includes("terminal") &&
-    connection !== "connecting";
+    connection !== "connecting",
+  );
   const terminalInputReady = connection === "ready";
 
   const detachTransport = useCallback(() => {
@@ -932,125 +788,20 @@ export function TerminalPage({
 
       <div className="terminal-frame">
         <div className="terminal-framebar">
-          <div className="terminal-tabs">
-            <div
-              className="terminal-tab-list"
-              role="tablist"
-              aria-label="Terminal sessions"
-            >
-              {sessions.length === 0 ? (
-                <div className="terminal-session-label">
-                  <Terminal className="size-4" aria-hidden />
-                  <span>No active session</span>
-                </div>
-              ) : (
-                sessions.map((item) => {
-                  const agent = agents.find(
-                    (candidate) => candidate.agent_id === item.agent_id,
-                  );
-                  const active = item.terminal_id === session?.terminal_id;
-                  const locked = item.operator_attached && !active;
-                  const agentLabel = agent
-                    ? displayAgentLabel(agent)
-                    : item.agent_id;
-                  const sessionTitle = sessionTitles[item.terminal_id];
-                  const tabLabel = sessionTitle
-                    ? `${agentLabel} · ${sessionTitle}`
-                    : agentLabel;
-                  const expiry = terminalExpiryDisplay(
-                    item.expires_at_unix,
-                    nowUnix,
-                  );
-                  const timingTitle =
-                    item.expires_at_unix != null
-                      ? `Expires ${terminalTimestamp(item.expires_at_unix)}`
-                      : "No expiry";
-                  return (
-                    <div
-                      key={item.terminal_id}
-                      role="presentation"
-                      className="terminal-tab"
-                      data-active={active || undefined}
-                      data-locked={locked || undefined}
-                    >
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={active}
-                        className="terminal-tab-select"
-                        disabled={locked || connection === "connecting"}
-                        title={`${locked ? "Attached in another browser\n" : ""}${tabLabel}\nCreated ${terminalTimestamp(item.created_at_unix)}\n${timingTitle}`}
-                        onClick={() => void activateSession(item)}
-                      >
-                        <span
-                          className="terminal-tab-dot"
-                          data-state={
-                            active
-                              ? connection
-                              : locked
-                                ? "attached"
-                                : item.agent_attached
-                                  ? "detached"
-                                  : "disconnected"
-                          }
-                          aria-hidden
-                        />
-                        <span className="terminal-tab-label">{tabLabel}</span>
-                        <time
-                          className={
-                            expiry?.warning
-                              ? "text-amber-400"
-                              : "text-[#7f8d9a]"
-                          }
-                          dateTime={new Date(
-                            (item.expires_at_unix ?? item.created_at_unix) *
-                              1000,
-                          ).toISOString()}
-                        >
-                          {expiry?.label ??
-                            terminalCreatedTime(item.created_at_unix)}
-                        </time>
-                      </button>
-                      <button
-                        type="button"
-                        className="terminal-tab-close"
-                        disabled={locked}
-                        aria-label={`Close ${agentLabel} terminal session`}
-                        title={
-                          locked
-                            ? "Attached in another browser"
-                            : "Close session"
-                        }
-                        onClick={() => void closeSession(item)}
-                      >
-                        <X className="size-3.5" aria-hidden />
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-            <Tooltip>
-              <TooltipTrigger>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="terminal-new-tab"
-                  disabled={!canRequestStart}
-                  aria-label="New terminal session"
-                  onClick={start}
-                >
-                  <Plus className="size-4" aria-hidden />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {agentAtSessionLimit
-                  ? `${selectedAgentSessionLimit}-session limit reached`
-                  : "New session"}
-              </TooltipContent>
-            </Tooltip>
-          </div>
+          <TerminalSessionTabs
+            agents={agents}
+            sessions={sessions}
+            activeTerminalId={session?.terminal_id}
+            connection={connection}
+            sessionTitles={sessionTitles}
+            nowUnix={nowUnix}
+            canRequestStart={canRequestStart}
+            agentAtSessionLimit={agentAtSessionLimit}
+            selectedAgentSessionLimit={selectedAgentSessionLimit}
+            onActivate={(item) => void activateSession(item)}
+            onClose={(item) => void closeSession(item)}
+            onStart={() => void start()}
+          />
 
           <div className="terminal-frame-actions">
             <Badge
@@ -1111,241 +862,23 @@ export function TerminalPage({
           </div>
         </div>
         {accessoriesOpen ? (
-          <div
-            className="terminal-accessories"
-            role="toolbar"
-            aria-label="Terminal controls"
-            onPointerDownCapture={(event) => {
-              // Keep xterm's hidden textarea focused while tapping accessory
-              // buttons so mobile browsers do not dismiss the soft keyboard.
-              if (
-                event.target instanceof Element &&
-                event.target.closest("button")
-              ) {
-                terminalInputFocusedBeforeAccessoryRef.current = Boolean(
-                  hostRef.current?.contains(document.activeElement),
-                );
-                event.preventDefault();
-              }
+          <TerminalAccessoryBar
+            inputReady={terminalInputReady}
+            modifiers={modifiers}
+            fontSize={terminalFontSize}
+            onRememberInputFocus={() => {
+              terminalInputFocusedBeforeAccessoryRef.current = Boolean(
+                hostRef.current?.contains(document.activeElement),
+              );
             }}
-            onMouseDownCapture={(event) => {
-              // Firefox can still take the mouse-event path without emitting
-              // pointerdown, so preserve the same focus state there.
-              if (
-                event.target instanceof Element &&
-                event.target.closest("button")
-              ) {
-                terminalInputFocusedBeforeAccessoryRef.current = Boolean(
-                  hostRef.current?.contains(document.activeElement),
-                );
-                event.preventDefault();
-              }
-            }}
-          >
-            <div className="terminal-accessory-group">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="terminal-key"
-                data-active={modifiers.ctrl || undefined}
-                aria-pressed={modifiers.ctrl}
-                disabled={!terminalInputReady}
-                onClick={() => toggleModifier("ctrl")}
-              >
-                Ctrl
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="terminal-key"
-                data-active={modifiers.meta || undefined}
-                aria-pressed={modifiers.meta}
-                disabled={!terminalInputReady}
-                onClick={() => toggleModifier("meta")}
-              >
-                Meta
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="terminal-key"
-                disabled={!terminalInputReady}
-                onClick={() => writeAccessoryKey("\x1b")}
-              >
-                Esc
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="terminal-key"
-                disabled={!terminalInputReady}
-                onClick={() => writeAccessoryKey("\t")}
-              >
-                Tab
-              </Button>
-            </div>
-
-            <div className="terminal-accessory-group">
-              {[
-                ["^C", "\x03", "Interrupt"],
-                ["^U", "\x15", "Clear input line"],
-                ["^A", "\x01", "Start of line"],
-                ["^E", "\x05", "End of line"],
-              ].map(([label, sequence, title]) => (
-                <Button
-                  key={label}
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  className="terminal-key terminal-key--control"
-                  aria-label={title}
-                  title={title}
-                  disabled={!terminalInputReady}
-                  onClick={() => writeAccessoryKey(sequence)}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-
-            <div className="terminal-accessory-group">
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                aria-label="Left arrow"
-                disabled={!terminalInputReady}
-                onClick={() => writeAccessoryKey("\x1b[D")}
-              >
-                <ArrowLeft className="size-4" aria-hidden />
-              </Button>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                aria-label="Down arrow"
-                disabled={!terminalInputReady}
-                onClick={() => writeAccessoryKey("\x1b[B")}
-              >
-                <ArrowDown className="size-4" aria-hidden />
-              </Button>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                aria-label="Up arrow"
-                disabled={!terminalInputReady}
-                onClick={() => writeAccessoryKey("\x1b[A")}
-              >
-                <ArrowUp className="size-4" aria-hidden />
-              </Button>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                aria-label="Right arrow"
-                disabled={!terminalInputReady}
-                onClick={() => writeAccessoryKey("\x1b[C")}
-              >
-                <ArrowRight className="size-4" aria-hidden />
-              </Button>
-            </div>
-
-            <div className="terminal-accessory-group">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="terminal-key terminal-key--wide"
-                onClick={() => terminalRef.current?.scrollPages(-1)}
-              >
-                PgUp
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="terminal-key terminal-key--wide"
-                onClick={() => terminalRef.current?.scrollPages(1)}
-              >
-                PgDn
-              </Button>
-            </div>
-
-            <div className="terminal-accessory-group">
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                aria-label="Copy selection or visible screen"
-                title="Copy selection or visible screen"
-                onClick={() => void copyTerminalText()}
-              >
-                <ClipboardCopy className="size-4" aria-hidden />
-              </Button>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                aria-label="Paste"
-                title="Paste"
-                disabled={!terminalInputReady}
-                onClick={() => void pasteTerminalText()}
-              >
-                <ClipboardPaste className="size-4" aria-hidden />
-              </Button>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                aria-label="Toggle terminal keyboard"
-                title="Toggle terminal keyboard"
-                disabled={!terminalInputReady}
-                onClick={toggleTerminalKeyboard}
-              >
-                <Keyboard className="size-4" aria-hidden />
-              </Button>
-            </div>
-
-            <div className="terminal-accessory-group terminal-font-controls">
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                disabled={terminalFontSize <= MIN_TERMINAL_FONT_SIZE}
-                aria-label="Decrease terminal text size"
-                onClick={() => changeTerminalFontSize(-1)}
-              >
-                <ZoomOut className="size-4" aria-hidden />
-              </Button>
-              <output aria-label="Terminal text size">
-                {terminalFontSize}
-              </output>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                className="terminal-key terminal-key--icon"
-                disabled={terminalFontSize >= MAX_TERMINAL_FONT_SIZE}
-                aria-label="Increase terminal text size"
-                onClick={() => changeTerminalFontSize(1)}
-              >
-                <ZoomIn className="size-4" aria-hidden />
-              </Button>
-            </div>
-          </div>
+            onToggleModifier={toggleModifier}
+            onWriteKey={writeAccessoryKey}
+            onScrollPages={(pages) => terminalRef.current?.scrollPages(pages)}
+            onCopy={() => void copyTerminalText()}
+            onPaste={() => void pasteTerminalText()}
+            onToggleKeyboard={toggleTerminalKeyboard}
+            onChangeFontSize={changeTerminalFontSize}
+          />
         ) : null}
         <div
           className="terminal-surface"
