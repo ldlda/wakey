@@ -13,7 +13,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 const MAX_TERMINAL_FRAME_BYTES: usize = 64 * 1024;
-const TERMINAL_SCROLLBACK_ROWS: usize = 5_000;
+const TERMINAL_SCROLLBACK_ROWS: usize = 1_000;
 const RELAY_INPUT_QUEUE: usize = 32;
 const RELAY_OUTPUT_QUEUE: usize = 32;
 const PTY_EXIT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);

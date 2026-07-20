@@ -435,7 +435,7 @@ export function TerminalPage({
       scrollbar: {
         width: window.matchMedia("(pointer: coarse)").matches ? 22 : 16,
       },
-      scrollback: 5000,
+      scrollback: 10_000,
       theme: {
         background: "#0b1117",
         foreground: "#e5e7eb",
