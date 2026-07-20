@@ -326,7 +326,7 @@
 
 .terminal-page {
   display: flex;
-  height: calc(100dvh - 2.5rem);
+  height: calc(var(--terminal-visual-viewport-height, 100dvh) - 2.5rem);
   min-height: 0;
   flex-direction: column;
   gap: 1rem;
@@ -578,11 +578,93 @@
 }
 
 .terminal-surface {
+  order: 2;
   flex: 1;
   min-height: 0;
   overflow: hidden;
   background: #0b1117;
   padding: 0;
+}
+
+.terminal-accessories-toggle[data-active] {
+  color: #6ee7a8;
+  background: rgb(110 231 168 / 10%);
+}
+
+.terminal-accessories {
+  display: flex;
+  order: 3;
+  min-width: 0;
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.45rem max(0.35rem, env(safe-area-inset-bottom));
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+  background: #101820;
+  color: #cbd5e1;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+}
+
+.terminal-accessory-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.terminal-accessory-group + .terminal-accessory-group {
+  padding-left: 0.35rem;
+  border-left: 1px solid rgb(255 255 255 / 10%);
+}
+
+.terminal-accessories .terminal-key {
+  width: auto;
+  min-width: 2.4rem;
+  height: 2rem;
+  padding-inline: 0.55rem;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: calc(var(--radius) - 3px);
+  background: rgb(255 255 255 / 4%);
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.terminal-accessories .terminal-key:hover {
+  background: rgb(255 255 255 / 9%);
+  color: #f1f5f9;
+}
+
+.terminal-accessories .terminal-key[data-active] {
+  border-color: rgb(110 231 168 / 48%);
+  background: rgb(110 231 168 / 14%);
+  color: #9af0bf;
+}
+
+.terminal-accessories .terminal-key--icon {
+  width: 2rem;
+  min-width: 2rem;
+  padding: 0;
+}
+
+.terminal-accessories .terminal-key--control {
+  min-width: 2.25rem;
+}
+
+.terminal-accessories .terminal-key--wide {
+  min-width: 3.15rem;
+}
+
+.terminal-font-controls output {
+  min-width: 1.5rem;
+  color: #91a0ae;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.6875rem;
+  text-align: center;
 }
 
 .terminal-surface .xterm {
@@ -609,7 +691,7 @@
 
 @media (max-width: 640px) {
   .terminal-page {
-    height: calc(100dvh - 2.5rem);
+    height: calc(var(--terminal-visual-viewport-height, 100dvh) - 2.5rem);
   }
 
   .terminal-controls {
@@ -623,6 +705,22 @@
 
   .terminal-surface .xterm {
     padding: 0.5rem;
+  }
+}
+
+@media (pointer: coarse) {
+  .terminal-accessories {
+    min-height: 3.25rem;
+  }
+
+  .terminal-accessories .terminal-key {
+    min-width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .terminal-accessories .terminal-key--icon {
+    width: 2.75rem;
+    min-width: 2.75rem;
   }
 }
 
