@@ -178,6 +178,36 @@ function terminalCreatedTime(createdAtUnix: number): string {
   });
 }
 
+function terminalTimestamp(timestampUnix: number): string {
+  return new Date(timestampUnix * 1000).toLocaleString();
+}
+
+function terminalExpiryDisplay(
+  expiresAtUnix: number | null | undefined,
+  nowUnix: number,
+): { label: string; warning: boolean } | null {
+  if (expiresAtUnix == null) return null;
+  const remainingSeconds = expiresAtUnix - nowUnix;
+  if (remainingSeconds <= 0) return { label: "expired", warning: true };
+  if (remainingSeconds < 60) return { label: "<1m left", warning: true };
+  if (remainingSeconds < 3600) {
+    return {
+      label: `${Math.floor(remainingSeconds / 60)}m left`,
+      warning: remainingSeconds < 10 * 60,
+    };
+  }
+  if (remainingSeconds < 24 * 3600) {
+    return {
+      label: `${Math.floor(remainingSeconds / 3600)}h left`,
+      warning: false,
+    };
+  }
+  return {
+    label: `${Math.floor(remainingSeconds / (24 * 3600))}d left`,
+    warning: false,
+  };
+}
+
 function applyTerminalModifiers(
   data: string,
   modifiers: TerminalModifiers,
@@ -230,6 +260,7 @@ export function TerminalPage({
   const [terminalFontSize, setTerminalFontSize] = useState(
     DEFAULT_TERMINAL_FONT_SIZE,
   );
+  const [nowUnix, setNowUnix] = useState(() => Math.floor(Date.now() / 1000));
   const [modifiers, setModifiers] = useState<TerminalModifiers>(
     NO_TERMINAL_MODIFIERS,
   );
@@ -237,6 +268,14 @@ export function TerminalPage({
     () => window.matchMedia("(pointer: coarse), (max-width: 640px)").matches,
   );
   const [operatorId] = useState(terminalOperatorId);
+
+  useEffect(() => {
+    const clock = window.setInterval(
+      () => setNowUnix(Math.floor(Date.now() / 1000)),
+      30_000,
+    );
+    return () => window.clearInterval(clock);
+  }, []);
 
   activeSessionRef.current = session;
   selectedAgentIdRef.current = selectedAgentId;
@@ -918,6 +957,14 @@ export function TerminalPage({
                   const tabLabel = sessionTitle
                     ? `${agentLabel} · ${sessionTitle}`
                     : agentLabel;
+                  const expiry = terminalExpiryDisplay(
+                    item.expires_at_unix,
+                    nowUnix,
+                  );
+                  const timingTitle =
+                    item.expires_at_unix != null
+                      ? `Expires ${terminalTimestamp(item.expires_at_unix)}`
+                      : "No expiry";
                   return (
                     <div
                       key={item.terminal_id}
@@ -932,9 +979,7 @@ export function TerminalPage({
                         aria-selected={active}
                         className="terminal-tab-select"
                         disabled={locked || connection === "connecting"}
-                        title={
-                          locked ? "Attached in another browser" : tabLabel
-                        }
+                        title={`${locked ? "Attached in another browser\n" : ""}${tabLabel}\nCreated ${terminalTimestamp(item.created_at_unix)}\n${timingTitle}`}
                         onClick={() => void activateSession(item)}
                       >
                         <span
@@ -952,11 +997,18 @@ export function TerminalPage({
                         />
                         <span className="terminal-tab-label">{tabLabel}</span>
                         <time
+                          className={
+                            expiry?.warning
+                              ? "text-amber-400"
+                              : "text-[#7f8d9a]"
+                          }
                           dateTime={new Date(
-                            item.created_at_unix * 1000,
+                            (item.expires_at_unix ?? item.created_at_unix) *
+                              1000,
                           ).toISOString()}
                         >
-                          {terminalCreatedTime(item.created_at_unix)}
+                          {expiry?.label ??
+                            terminalCreatedTime(item.created_at_unix)}
                         </time>
                       </button>
                       <button

@@ -3728,7 +3728,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-vt100"
-version = "0.16.2-wakey.1"
+version = "0.16.2-wakey.2"
 dependencies = [
  "itoa",
  "unicode-width",

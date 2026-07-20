@@ -71,7 +71,7 @@ fn public_api_routes(ui_dist_dir: std::path::PathBuf) -> Router<AppState> {
         .route("/", get(|| async { Redirect::temporary("/ui/") })) // same as caddyfile
         .nest_service(
             "/ui/",
-            get_service(ServeDir::new(ui_dist_dir).not_found_service(ServeFile::new(index_file))),
+            get_service(ServeDir::new(ui_dist_dir).fallback(ServeFile::new(index_file))),
         )
         .route("/healthz", get(api::healthz))
         .route("/api/v1/agents/enroll", post(api::enroll))
