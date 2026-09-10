@@ -7,7 +7,7 @@ mod commands;
 mod control;
 mod terminals;
 
-pub use alerts::{active_alerts, alert_history, alerts_stream};
+pub use alerts::{AlertsHub, active_alerts, alert_history, alerts_stream, run_alert_evaluator};
 pub use audit::list_audit_events;
 pub use commands::{list_agents, run_command};
 pub use control::{

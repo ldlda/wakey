@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
@@ -7,12 +8,13 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
+use tokio::sync::{RwLock, broadcast};
 use tokio::time::Duration;
 use tracing::warn;
 
 use crate::api::ApiError;
 use crate::runtime::AppState;
-use crate::state::{AlertState, AuditEvent, AuditEventFilter};
+use crate::state::{AlertState, AlertTransition, AuditEvent, AuditEventFilter};
 
 struct AlertBuildContext<'a> {
     now_unix: u64,
@@ -27,20 +29,12 @@ struct AlertBuildContext<'a> {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ActiveAlertsQuery {
-    pub lookback_seconds: Option<u64>,
-    pub timeout_threshold: Option<u64>,
-    pub auth_rejected_threshold: Option<u64>,
-    pub enroll_rejected_threshold: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct AlertHistoryQuery {
     pub since_unix: Option<u64>,
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AlertRuleConfig {
     pub lookback_seconds: Option<u64>,
     pub timeout_threshold: Option<u64>,
@@ -48,25 +42,120 @@ pub struct AlertRuleConfig {
     pub enroll_rejected_threshold: Option<u64>,
 }
 
-pub async fn active_alerts(
-    State(state): State<AppState>,
-    Query(query): Query<ActiveAlertsQuery>,
-) -> Result<impl IntoResponse, ApiError> {
-    let alerts = evaluate_alerts(
-        &state,
-        AlertRuleConfig {
-            lookback_seconds: query.lookback_seconds,
-            timeout_threshold: query.timeout_threshold,
-            auth_rejected_threshold: query.auth_rejected_threshold,
-            enroll_rejected_threshold: query.enroll_rejected_threshold,
-        },
-    )
-    .await?;
+impl Default for AlertRuleConfig {
+    fn default() -> Self {
+        Self {
+            lookback_seconds: Some(900),
+            timeout_threshold: Some(3),
+            auth_rejected_threshold: Some(3),
+            enroll_rejected_threshold: Some(5),
+        }
+    }
+}
 
-    if let Err(err) = state.store.sync_alert_transitions(&alerts).await {
-        warn!(error = %err, "failed to sync alert transitions");
+#[derive(Clone, Default)]
+pub struct AlertsSnapshot {
+    pub ts_unix: u64,
+    pub alerts: Vec<AlertState>,
+    pub recent_transitions: Vec<AlertTransition>,
+}
+
+/// Holds the latest alert snapshot computed by the background evaluator and
+/// broadcasts each new snapshot to connected `alerts/ws` subscribers.
+#[derive(Clone)]
+pub struct AlertsHub {
+    tx: broadcast::Sender<String>,
+    latest_payload: Arc<RwLock<Option<String>>>,
+    latest_alerts: Arc<RwLock<Vec<AlertState>>>,
+}
+
+impl Default for AlertsHub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AlertsHub {
+    pub fn new() -> Self {
+        let (tx, _) = broadcast::channel(16);
+        Self {
+            tx,
+            latest_payload: Arc::new(RwLock::new(None)),
+            latest_alerts: Arc::new(RwLock::new(Vec::new())),
+        }
     }
 
+    pub fn subscribe(&self) -> broadcast::Receiver<String> {
+        self.tx.subscribe()
+    }
+
+    pub async fn latest_alerts(&self) -> Vec<AlertState> {
+        self.latest_alerts.read().await.clone()
+    }
+
+    pub async fn latest_payload(&self) -> Option<String> {
+        self.latest_payload.read().await.clone()
+    }
+
+    pub async fn publish(&self, snapshot: AlertsSnapshot) {
+        let payload = serde_json::json!({
+            "type": "alerts_snapshot",
+            "ts_unix": snapshot.ts_unix,
+            "alerts": snapshot.alerts,
+            "recent_transitions": snapshot.recent_transitions,
+        });
+        let Ok(encoded) = serde_json::to_string(&payload) else {
+            warn!("failed to encode alerts snapshot payload");
+            return;
+        };
+        *self.latest_alerts.write().await = snapshot.alerts;
+        *self.latest_payload.write().await = Some(encoded.clone());
+        let _ = self.tx.send(encoded);
+    }
+}
+
+/// Background task that owns alert evaluation: on a fixed ticker it recomputes
+/// the snapshot, persists transitions, and publishes to subscribers so neither
+/// the GET endpoint nor individual WS clients evaluate alerts themselves.
+pub async fn run_alert_evaluator(state: AppState) {
+    let config = AlertRuleConfig::default();
+    let mut tick = tokio::time::interval(Duration::from_secs(5));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tick.tick().await;
+        let alerts = match evaluate_alerts(&state, &config).await {
+            Ok(alerts) => alerts,
+            Err(err) => {
+                warn!(code = %err.code, "failed to evaluate alerts in background task");
+                continue;
+            }
+        };
+
+        if let Err(err) = state.store.sync_alert_transitions(&alerts).await {
+            warn!(error = %err, "failed to sync alert transitions in background task");
+        }
+
+        let recent_transitions = match state.store.list_alert_transitions(None, 20).await {
+            Ok(history) => history,
+            Err(err) => {
+                warn!(error = %err, "failed to load alert transition history for snapshot");
+                Vec::new()
+            }
+        };
+
+        state
+            .alerts
+            .publish(AlertsSnapshot {
+                ts_unix: now_unix(),
+                alerts,
+                recent_transitions,
+            })
+            .await;
+    }
+}
+
+pub async fn active_alerts(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let alerts = state.alerts.latest_alerts().await;
     Ok((StatusCode::OK, Json(alerts)))
 }
 
@@ -94,64 +183,34 @@ pub async fn alert_history(
 pub async fn alerts_stream(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
-    Query(query): Query<ActiveAlertsQuery>,
 ) -> impl IntoResponse {
-    let config = AlertRuleConfig {
-        lookback_seconds: query.lookback_seconds,
-        timeout_threshold: query.timeout_threshold,
-        auth_rejected_threshold: query.auth_rejected_threshold,
-        enroll_rejected_threshold: query.enroll_rejected_threshold,
-    };
-    ws.on_upgrade(move |socket| alerts_stream_socket(state, socket, config))
+    ws.on_upgrade(move |socket| alerts_stream_socket(state, socket))
 }
 
-async fn alerts_stream_socket(state: AppState, mut socket: WebSocket, config: AlertRuleConfig) {
-    let mut tick = tokio::time::interval(Duration::from_secs(5));
-    loop {
-        tick.tick().await;
-        let alerts = match evaluate_alerts(&state, config.clone()).await {
-            Ok(alerts) => alerts,
-            Err(err) => {
-                warn!(code = %err.code, "failed to evaluate alerts for stream");
-                continue;
-            }
-        };
+async fn alerts_stream_socket(state: AppState, mut socket: WebSocket) {
+    let mut rx = state.alerts.subscribe();
 
-        if let Err(err) = state.store.sync_alert_transitions(&alerts).await {
-            warn!(error = %err, "failed to sync alert transitions in stream");
+    if let Some(encoded) = state.alerts.latest_payload().await
+        && socket.send(Message::Text(encoded.into())).await.is_err() {
+            return;
         }
 
-        let history = match state.store.list_alert_transitions(None, 20).await {
-            Ok(h) => h,
-            Err(err) => {
-                warn!(error = %err, "failed to load alert transition history for stream");
-                Vec::new()
+    loop {
+        match rx.recv().await {
+            Ok(encoded) => {
+                if socket.send(Message::Text(encoded.into())).await.is_err() {
+                    break;
+                }
             }
-        };
-
-        let payload = serde_json::json!({
-            "type": "alerts_snapshot",
-            "ts_unix": now_unix(),
-            "alerts": alerts,
-            "recent_transitions": history,
-        });
-        let encoded = match serde_json::to_string(&payload) {
-            Ok(s) => s,
-            Err(err) => {
-                warn!(error = %err, "failed to encode alerts stream payload");
-                continue;
-            }
-        };
-
-        if socket.send(Message::Text(encoded.into())).await.is_err() {
-            break;
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
         }
     }
 }
 
 async fn evaluate_alerts(
     state: &AppState,
-    config: AlertRuleConfig,
+    config: &AlertRuleConfig,
 ) -> Result<Vec<AlertState>, ApiError> {
     let lookback_seconds = config.lookback_seconds.unwrap_or(900).clamp(60, 86_400);
     let timeout_threshold = config.timeout_threshold.unwrap_or(3).max(1);
@@ -161,7 +220,14 @@ async fn evaluate_alerts(
     let now = now_unix();
     let since_unix = now.saturating_sub(lookback_seconds);
 
-    let enrolled_agents = state.store.list_agents().await;
+    let enrolled_agents = state.store.list_agents().await.map_err(|err| {
+        warn!(error = %err, "failed listing agents for alert evaluation");
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "alerts_query_failed",
+            err.to_string(),
+        )
+    })?;
     let connected_agents = state
         .sessions
         .read()

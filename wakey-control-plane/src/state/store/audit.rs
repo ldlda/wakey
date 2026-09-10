@@ -1,6 +1,25 @@
 use super::*;
 
 impl Store {
+    /// Best-effort audit append: logs the failure with event context instead of
+    /// bubbling it up. Auditing must never fail the operation that triggered it.
+    pub async fn audit(&self, input: AuditEventInput) {
+        let event_type = input.event_type.clone();
+        let outcome = input.outcome.clone();
+        let agent_id = input.agent_id.clone();
+        let request_id = input.request_id.clone();
+        if let Err(err) = self.append_audit_event(input).await {
+            warn!(
+                error = %err,
+                event_type = %event_type,
+                outcome = %outcome,
+                agent_id = ?agent_id,
+                request_id = ?request_id,
+                "failed to append audit event"
+            );
+        }
+    }
+
     pub async fn append_audit_event(&self, input: AuditEventInput) -> Result<AuditEvent> {
         let event = AuditEvent {
             event_id: format!("evt-{}", Uuid::new_v4()),

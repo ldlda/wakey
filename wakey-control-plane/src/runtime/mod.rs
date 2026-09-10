@@ -43,6 +43,7 @@ pub struct AppState {
     pub command_timeout: Duration,
     pub enroll_token_ttl: Duration,
     pub terminals: terminals::TerminalRegistry,
+    pub alerts: api::AlertsHub,
 }
 
 #[derive(Clone)]
@@ -182,7 +183,10 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         command_timeout: daemon.command_timeout,
         enroll_token_ttl: daemon.enroll_token_ttl,
         terminals: terminals::TerminalRegistry::new(),
+        alerts: api::AlertsHub::new(),
     };
+
+    tokio::spawn(api::run_alert_evaluator(app_state.clone()));
 
     // Keep route classes explicit so edge policy can map directly:
     // - public_api_routes: intended internet-facing agent endpoints
@@ -230,6 +234,18 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
                             }
                         }
                         Err(err) => warn!(error = %err, "periodic gc failed"),
+                    }
+                    match app_state.store.gc_retention(daemon.observation_retention).await {
+                        Ok(stats) => {
+                            if stats.audit_events_removed > 0 || stats.alert_transitions_removed > 0 {
+                                info!(
+                                    audit_events_removed = stats.audit_events_removed,
+                                    alert_transitions_removed = stats.alert_transitions_removed,
+                                    "periodic gc pruned rows older than retention window"
+                                );
+                            }
+                        }
+                        Err(err) => warn!(error = %err, "periodic retention gc failed"),
                     }
                 }
                 join = &mut server => {

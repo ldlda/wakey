@@ -154,6 +154,37 @@ impl Store {
         Ok(removed)
     }
 
+    /// Prunes audit and alert history older than the retention window.
+    ///
+    /// Runs from the daemon's periodic maintenance loop; both tables have a
+    /// `ts_unix` index so the deletes stay cheap as history grows.
+    pub async fn gc_retention(&self, older_than: Duration) -> Result<RetentionStats> {
+        let cutoff = i64::try_from(now_unix().saturating_sub(older_than.as_secs().max(1)))
+            .context("retention cutoff does not fit SQLite integer")?;
+        let audit_events_removed =
+            sqlx::query!("DELETE FROM audit_events WHERE ts_unix < ?1", cutoff)
+                .execute(&self.pool)
+                .await
+                .context("failed pruning old audit events")?
+                .rows_affected();
+        let alert_transitions_removed =
+            sqlx::query!("DELETE FROM alert_transitions WHERE ts_unix < ?1", cutoff)
+                .execute(&self.pool)
+                .await
+                .context("failed pruning old alert transitions")?
+                .rows_affected();
+        if audit_events_removed > 0 || alert_transitions_removed > 0 {
+            info!(
+                audit_events_removed,
+                alert_transitions_removed, "pruned state rows older than retention window"
+            );
+        }
+        Ok(RetentionStats {
+            audit_events_removed,
+            alert_transitions_removed,
+        })
+    }
+
     async fn ensure_schema_version(&self) -> Result<()> {
         match sqlx::query_scalar!("SELECT value FROM meta WHERE key = ?1", SCHEMA_VERSION_KEY)
             .fetch_optional(&self.pool)

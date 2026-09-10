@@ -649,9 +649,9 @@ async fn append_terminal_audit(
     terminal_id: &str,
     audit: TerminalAudit<'_>,
 ) {
-    if let Err(err) = state
+    state
         .store
-        .append_audit_event(AuditEventInput {
+        .audit(AuditEventInput {
             actor_type: audit.actor_type.into(),
             actor_id: None,
             agent_id: Some(agent_id.to_string()),
@@ -662,10 +662,7 @@ async fn append_terminal_audit(
             message: audit.message.into(),
             metadata: audit.metadata,
         })
-        .await
-    {
-        warn!(terminal_id, event_type = audit.event_type, error = %err, "failed to append terminal audit event");
-    }
+        .await;
 }
 
 fn validate_size(rows: u16, cols: u16) -> Result<(), ApiError> {

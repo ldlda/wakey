@@ -17,7 +17,8 @@ impl Store {
         };
 
         let now = now_unix();
-        if expires_at_unix as u64 <= now {
+        let now_i64 = i64::try_from(now).context("current time does not fit SQLite integer")?;
+        if expires_at_unix <= now_i64 {
             sqlx::query!("DELETE FROM enroll_tokens WHERE token = ?1", enroll_token)
                 .execute(&mut *tx)
                 .await
@@ -165,20 +166,16 @@ impl Store {
         }
     }
 
-    pub async fn list_agents(&self) -> Vec<String> {
-        match sqlx::query_scalar!(r#"SELECT agent_id as "agent_id!" FROM agents ORDER BY agent_id"#)
-            .fetch_all(&self.pool)
-            .await
-        {
-            Ok(out) => out,
-            Err(err) => {
-                warn!(error = %err, "failed to list agents from state db");
-                Vec::new()
-            }
-        }
+    pub async fn list_agents(&self) -> Result<Vec<String>> {
+        let ids =
+            sqlx::query_scalar!(r#"SELECT agent_id as "agent_id!" FROM agents ORDER BY agent_id"#)
+                .fetch_all(&self.pool)
+                .await
+                .context("failed listing agents from state db")?;
+        Ok(ids)
     }
 
-    pub async fn list_agents_with_nicknames(&self) -> Vec<(String, Option<String>)> {
+    pub async fn list_agents_with_nicknames(&self) -> Result<Vec<(String, Option<String>)>> {
         let rows = sqlx::query!(
             r#"SELECT agents.agent_id as "agent_id!", agent_meta.nickname
              FROM agents
@@ -186,23 +183,19 @@ impl Store {
              ORDER BY agents.agent_id"#,
         )
         .fetch_all(&self.pool)
-        .await;
+        .await
+        .context("failed listing agents from state db")?;
 
-        match rows {
-            Ok(rows) => rows
-                .into_iter()
-                .map(|row| {
-                    let nickname = row
-                        .nickname
-                        .map(|v| v.trim().to_string())
-                        .filter(|v| !v.is_empty());
-                    (row.agent_id, nickname)
-                })
-                .collect(),
-            Err(err) => {
-                warn!(error = %err, "failed to list agents from state db");
-                Vec::new()
-            }
-        }
+        let agents = rows
+            .into_iter()
+            .map(|row| {
+                let nickname = row
+                    .nickname
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty());
+                (row.agent_id, nickname)
+            })
+            .collect();
+        Ok(agents)
     }
 }

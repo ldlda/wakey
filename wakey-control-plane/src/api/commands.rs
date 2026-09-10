@@ -40,7 +40,18 @@ pub struct RelayCommandResponse {
 }
 
 pub async fn list_agents(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
-    let enrolled = state.store.list_agents_with_nicknames().await;
+    let enrolled = state
+        .store
+        .list_agents_with_nicknames()
+        .await
+        .map_err(|err| {
+            warn!(error = %err, "failed listing agents");
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "list_agents_failed",
+                err.to_string(),
+            )
+        })?;
     let sessions = state.sessions.read().await;
 
     let agents = enrolled
@@ -120,9 +131,9 @@ pub async fn relay_agent_command(
         .insert(request_id_string.clone(), pending_tx);
 
     info!("dispatching command to agent");
-    if let Err(err) = state
+    state
         .store
-        .append_audit_event(AuditEventInput {
+        .audit(AuditEventInput {
             actor_type: "admin_api".into(),
             actor_id: None,
             agent_id: Some(agent_id.to_string()),
@@ -133,10 +144,7 @@ pub async fn relay_agent_command(
             message: "dispatched command to connected agent".into(),
             metadata: serde_json::json!({ "command": command_kind }),
         })
-        .await
-    {
-        warn!(error = %err, "failed to append audit event for command dispatch");
-    }
+        .await;
 
     if let Err(err) = tx.send(SessionEvent::Message(ServerMessage::Command {
         request_id,
@@ -144,9 +152,9 @@ pub async fn relay_agent_command(
     })) {
         state.pending.lock().await.remove(&request_id_string);
         warn!(error = %err, "failed sending command to agent session");
-        if let Err(audit_err) = state
+        state
             .store
-            .append_audit_event(AuditEventInput {
+            .audit(AuditEventInput {
                 actor_type: "admin_api".into(),
                 actor_id: None,
                 agent_id: Some(agent_id.to_string()),
@@ -157,10 +165,7 @@ pub async fn relay_agent_command(
                 message: err.to_string(),
                 metadata: serde_json::json!({ "command": command_kind }),
             })
-            .await
-        {
-            warn!(error = %audit_err, "failed to append audit event for command send failure");
-        }
+            .await;
         return Err(ApiError::new(
             StatusCode::BAD_GATEWAY,
             "agent_send_failed",
@@ -177,9 +182,9 @@ pub async fn relay_agent_command(
     let response = match outcome {
         Ok(Ok(AgentReply::Result(result))) => {
             info!("agent command completed");
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: Some(agent_id.to_string()),
@@ -190,10 +195,7 @@ pub async fn relay_agent_command(
                     message: "agent command completed".into(),
                     metadata: serde_json::json!({ "command": command_kind }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for command success");
-            }
+                .await;
             RelayCommandResponse {
                 request_id: request_id_string,
                 status: "ok".into(),
@@ -203,9 +205,9 @@ pub async fn relay_agent_command(
         }
         Ok(Ok(AgentReply::Error(error))) => {
             warn!(code = %error.code, "agent command returned error");
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: Some(agent_id.to_string()),
@@ -216,10 +218,7 @@ pub async fn relay_agent_command(
                     message: error.message.clone(),
                     metadata: serde_json::json!({ "command": command_kind, "code": error.code }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for command error result");
-            }
+                .await;
             RelayCommandResponse {
                 request_id: request_id_string,
                 status: "error".into(),
@@ -229,9 +228,9 @@ pub async fn relay_agent_command(
         }
         Ok(Err(_)) => {
             warn!("agent response channel dropped");
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: Some(agent_id.to_string()),
@@ -242,10 +241,7 @@ pub async fn relay_agent_command(
                     message: "agent response channel dropped".into(),
                     metadata: serde_json::json!({ "command": command_kind }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for dropped response");
-            }
+                .await;
             return Err(ApiError::new(
                 StatusCode::BAD_GATEWAY,
                 "agent_response_dropped",
@@ -258,9 +254,9 @@ pub async fn relay_agent_command(
                 timeout_ms = timeout.as_millis() as u64,
                 "agent command timed out"
             );
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: Some(agent_id.to_string()),
@@ -271,10 +267,7 @@ pub async fn relay_agent_command(
                     message: "agent command timed out".into(),
                     metadata: serde_json::json!({ "command": command_kind, "timeout_ms": timeout.as_millis() as u64 }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for timeout");
-            }
+                .await;
             return Err(ApiError::new(
                 StatusCode::GATEWAY_TIMEOUT,
                 "agent_timeout",

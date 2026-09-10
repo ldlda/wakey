@@ -33,6 +33,12 @@ pub struct StateStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetentionStats {
+    pub audit_events_removed: u64,
+    pub alert_transitions_removed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnownDevice {
     pub device_id: String,
     pub display_name: String,

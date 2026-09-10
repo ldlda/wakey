@@ -159,9 +159,9 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
             sessions.remove(&agent_id);
         }
         drop(sessions);
-        if let Err(err) = state
+        state
             .store
-            .append_audit_event(AuditEventInput {
+            .audit(AuditEventInput {
                 actor_type: "agent".into(),
                 actor_id: Some(agent_id.clone()),
                 agent_id: Some(agent_id),
@@ -172,10 +172,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
                 message: "agent websocket disconnected".into(),
                 metadata: serde_json::json!({}),
             })
-            .await
-        {
-            warn!(error = %err, "failed to append audit event for ws disconnect");
-        }
+            .await;
     }
 
     writer.abort();
@@ -251,9 +248,9 @@ async fn process_agent_text(
                 .await
             {
                 warn!(agent_id = %agent_id, "agent auth rejected");
-                if let Err(err) = state
+                state
                     .store
-                    .append_audit_event(AuditEventInput {
+                    .audit(AuditEventInput {
                         actor_type: "agent".into(),
                         actor_id: Some(agent_id.clone()),
                         agent_id: Some(agent_id),
@@ -267,10 +264,7 @@ async fn process_agent_text(
                             "hello_to_auth_ms": hello_to_auth_ms,
                         }),
                     })
-                    .await
-                {
-                    warn!(error = %err, "failed to append audit event for auth rejection");
-                }
+                    .await;
                 anyhow::bail!("agent auth rejected");
             }
             state.sessions.write().await.insert(
@@ -284,9 +278,9 @@ async fn process_agent_text(
             );
             connection.authed_agent_id = Some(agent_id.clone());
             info!(agent_id = %agent_id, connect_to_auth_ms, hello_to_auth_ms = hello_to_auth_ms.unwrap_or(0), "agent authenticated");
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "agent".into(),
                     actor_id: Some(agent_id.clone()),
                     agent_id: Some(agent_id),
@@ -300,10 +294,7 @@ async fn process_agent_text(
                         "hello_to_auth_ms": hello_to_auth_ms,
                     }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for auth success");
-            }
+                .await;
             let _ = tx.send(SessionEvent::Message(ServerMessage::SyncDeviceSnapshot));
         }
         IncomingClientMessage::Heartbeat { agent_id } => {

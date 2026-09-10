@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM alert_transitions WHERE ts_unix < ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "ce850a32c8702595bbc3207bf86d53209c48be145562192b3a8f84903d39eac1"
+}

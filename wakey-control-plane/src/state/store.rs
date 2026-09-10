@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::state::types::{
     AlertState, AlertTransition, AuditEvent, AuditEventFilter, AuditEventInput, DeviceIdentifier,
     DeviceIdentifierInput, EnrollTokenInfo, IssuedAgent, IssuedEnrollToken, KnownDevice,
-    KnownDeviceInput, StateStats,
+    KnownDeviceInput, RetentionStats, StateStats,
 };
 
 pub struct Store {
@@ -101,6 +101,124 @@ mod tests {
         .await
         .expect("read should succeed");
         assert_eq!(exists, 0);
+    }
+
+    #[tokio::test]
+    async fn enroll_rejects_negative_expiry() {
+        let ts = TestStore::new().await;
+        sqlx::query!(
+            "INSERT INTO enroll_tokens (token, expires_at_unix) VALUES (?1, ?2)",
+            "enr-negative-expiry-test",
+            -1_i64
+        )
+        .execute(&ts.store().pool)
+        .await
+        .expect("insert should succeed");
+
+        let err = ts
+            .store()
+            .enroll("enr-negative-expiry-test")
+            .await
+            .expect_err("negative expiry should be treated as expired");
+
+        assert!(err.to_string().contains("expired"));
+        let exists = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM enroll_tokens WHERE token = ?1",
+            "enr-negative-expiry-test"
+        )
+        .fetch_one(&ts.store().pool)
+        .await
+        .expect("read should succeed");
+        assert_eq!(exists, 0);
+    }
+
+    #[tokio::test]
+    async fn gc_retention_prunes_old_audit_and_alert_history() {
+        let ts = TestStore::new().await;
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_secs() as i64;
+        let old_ts = now - 86_400;
+        let old_evt = format!("{:020}:old-evt", old_ts);
+        sqlx::query!(
+            "INSERT INTO audit_events
+             (event_key, event_id, ts_unix, actor_type, actor_id, agent_id, request_id,
+              event_type, outcome, latency_ms, message, metadata_json)
+             VALUES (?1, ?2, ?3, 'test', NULL, NULL, NULL, 'test', 'ok', NULL, 'old', '{}')",
+            old_evt,
+            "old-evt",
+            old_ts
+        )
+        .execute(&ts.store().pool)
+        .await
+        .expect("old audit event should insert");
+
+        let old_atr = format!("{:020}:old-atr", old_ts);
+        sqlx::query!(
+            "INSERT INTO alert_transitions
+             (transition_key, transition_id, ts_unix, alert_id, kind, agent_id,
+              from_status, to_status, message, metadata_json)
+             VALUES (?1, ?2, ?3, 'alert-old', 'test', NULL, NULL, 'active', 'old', '{}')",
+            old_atr,
+            "old-atr",
+            old_ts
+        )
+        .execute(&ts.store().pool)
+        .await
+        .expect("old alert transition should insert");
+
+        ts.store()
+            .append_audit_event(crate::state::AuditEventInput {
+                actor_type: "test".into(),
+                actor_id: None,
+                agent_id: None,
+                request_id: None,
+                event_type: "test".into(),
+                outcome: "ok".into(),
+                latency_ms: None,
+                message: "fresh".into(),
+                metadata: serde_json::json!({}),
+            })
+            .await
+            .expect("fresh audit event should insert");
+
+        let stats = ts
+            .store()
+            .gc_retention(Duration::from_secs(3600))
+            .await
+            .expect("retention gc should succeed");
+
+        assert_eq!(stats.audit_events_removed, 1);
+        assert_eq!(stats.alert_transitions_removed, 1);
+
+        let old_audit_gone = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM audit_events WHERE event_id = ?1",
+            "old-evt"
+        )
+        .fetch_one(&ts.store().pool)
+        .await
+        .expect("read should succeed");
+        assert_eq!(old_audit_gone, 0);
+
+        let fresh_audit_remains = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM audit_events WHERE message = ?1",
+            "fresh"
+        )
+        .fetch_one(&ts.store().pool)
+        .await
+        .expect("read should succeed");
+        assert_eq!(fresh_audit_remains, 1);
+
+        let old_transition_gone = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM alert_transitions WHERE transition_id = ?1",
+            "old-atr"
+        )
+        .fetch_one(&ts.store().pool)
+        .await
+        .expect("read should succeed");
+        assert_eq!(old_transition_gone, 0);
     }
 
     #[tokio::test]
@@ -209,7 +327,11 @@ mod tests {
             .expect("nickname set should succeed");
         assert!(updated);
 
-        let listed = ts.store().list_agents_with_nicknames().await;
+        let listed = ts
+            .store()
+            .list_agents_with_nicknames()
+            .await
+            .expect("list agents with nicknames should succeed");
         assert!(listed.iter().any(|(id, name)| {
             id == &issued.agent_id && name.as_deref() == Some("kitchen-router")
         }));
@@ -221,7 +343,11 @@ mod tests {
             .expect("nickname clear should succeed");
         assert!(cleared);
 
-        let listed = ts.store().list_agents_with_nicknames().await;
+        let listed = ts
+            .store()
+            .list_agents_with_nicknames()
+            .await
+            .expect("list agents with nicknames should succeed");
         assert!(
             listed
                 .iter()

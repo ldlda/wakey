@@ -74,9 +74,9 @@ pub async fn enroll(
     match state.store.enroll(&req.enroll_token).await {
         Ok(issued) => {
             info!(agent_id = %issued.agent_id, "agent enrollment accepted");
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "agent".into(),
                     actor_id: Some(issued.agent_id.clone()),
                     agent_id: Some(issued.agent_id.clone()),
@@ -87,10 +87,7 @@ pub async fn enroll(
                     message: "agent enrollment accepted".into(),
                     metadata: serde_json::json!({}),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for enroll success");
-            }
+                .await;
             Ok((
                 StatusCode::OK,
                 Json(EnrollResponse {
@@ -102,9 +99,9 @@ pub async fn enroll(
         }
         Err(err) => {
             warn!(error = %err, "agent enrollment rejected");
-            if let Err(audit_err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "agent".into(),
                     actor_id: None,
                     agent_id: None,
@@ -115,10 +112,7 @@ pub async fn enroll(
                     message: err.to_string(),
                     metadata: serde_json::json!({}),
                 })
-                .await
-            {
-                warn!(error = %audit_err, "failed to append audit event for enroll rejection");
-            }
+                .await;
             Err(ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "enrollment_rejected",
@@ -145,9 +139,9 @@ pub async fn issue_enroll_token(
                 expires_at_unix = issued.expires_at_unix,
                 "issued enroll token"
             );
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: None,
@@ -161,10 +155,7 @@ pub async fn issue_enroll_token(
                         "expires_at_unix": issued.expires_at_unix,
                     }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for token issuance");
-            }
+                .await;
             Ok((
                 StatusCode::OK,
                 Json(IssueEnrollTokenResponse {
@@ -189,9 +180,9 @@ pub async fn list_enroll_tokens(
 ) -> Result<impl IntoResponse, ApiError> {
     match state.store.list_enroll_tokens().await {
         Ok(tokens) => {
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: None,
@@ -204,10 +195,7 @@ pub async fn list_enroll_tokens(
                         "count": tokens.len(),
                     }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for token listing");
-            }
+                .await;
             let body = tokens
                 .into_iter()
                 .map(|t| EnrollTokenStatus {
@@ -235,9 +223,9 @@ pub async fn revoke_enroll_token(
 ) -> Result<impl IntoResponse, ApiError> {
     match state.store.revoke_enroll_token(&token).await {
         Ok(revoked) => {
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: None,
@@ -256,10 +244,7 @@ pub async fn revoke_enroll_token(
                     },
                     metadata: serde_json::json!({ "token": token }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for token revoke");
-            }
+                .await;
             Ok((
                 StatusCode::OK,
                 Json(RevokeEnrollTokenResponse { token, revoked }),
@@ -289,9 +274,9 @@ pub async fn revoke_agent(
                 }
             }
 
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: Some(agent_id.clone()),
@@ -310,10 +295,7 @@ pub async fn revoke_agent(
                     },
                     metadata: serde_json::json!({ "agent_id": agent_id }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for agent revoke");
-            }
+                .await;
 
             Ok((
                 StatusCode::OK,
@@ -349,9 +331,9 @@ pub async fn set_agent_nickname(
         .await
     {
         Ok(updated) => {
-            if let Err(err) = state
+            state
                 .store
-                .append_audit_event(AuditEventInput {
+                .audit(AuditEventInput {
                     actor_type: "admin_api".into(),
                     actor_id: None,
                     agent_id: Some(agent_id.clone()),
@@ -373,10 +355,7 @@ pub async fn set_agent_nickname(
                         "nickname": normalized,
                     }),
                 })
-                .await
-            {
-                warn!(error = %err, "failed to append audit event for nickname set");
-            }
+                .await;
 
             Ok((
                 StatusCode::OK,

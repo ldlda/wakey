@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO alert_transitions\n             (transition_key, transition_id, ts_unix, alert_id, kind, agent_id,\n              from_status, to_status, message, metadata_json)\n             VALUES (?1, ?2, ?3, 'alert-old', 'test', NULL, NULL, 'active', 'old', '{}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "e83a43217a3bfaacd2f5e76df1fd05447558646fb2b47963751a7ab53b3a99b6"
+}

@@ -4,11 +4,12 @@ use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use futures_util::StreamExt;
 use tracing::warn;
 use wakey_agent::protocol::{AgentCommand, InventoryRequest, WakeRequest};
 
 use crate::api::ApiError;
-use crate::api::commands::relay_agent_command;
+use crate::api::commands::{RelayCommandResponse, relay_agent_command};
 use crate::runtime::AppState;
 
 mod build;
@@ -25,6 +26,9 @@ use types::{
     FleetDevice, ListFleetDevicesQuery, RefreshFleetAgentResult, RefreshFleetDevicesRequest,
     RefreshFleetDevicesResponse, WakeFleetDeviceRequest, WakeFleetDeviceResponse,
 };
+
+const MAX_REFRESH_AGENTS: usize = 128;
+const REFRESH_CONCURRENCY: usize = 8;
 
 pub async fn list_fleet_devices(
     State(state): State<AppState>,
@@ -55,87 +59,42 @@ pub async fn refresh_fleet_devices(
     };
     agent_ids.sort();
     agent_ids.dedup();
-
-    let mut results = Vec::with_capacity(agent_ids.len());
-    let mut total_accepted = 0usize;
-    for agent_id in agent_ids {
-        let response = relay_agent_command(
-            &state,
-            &agent_id,
-            AgentCommand::Inventory(InventoryRequest {
-                query: None,
-                name: None,
-                ips: Vec::new(),
-                devs: Vec::new(),
-                nuds: Vec::new(),
-                macs: Vec::new(),
-            }),
-            req.timeout_ms,
-        )
-        .await;
-
-        match response {
-            Ok(response) if response.status == "ok" => {
-                let Some(result) = response.result else {
-                    results.push(RefreshFleetAgentResult {
-                        agent_id,
-                        status: "error".into(),
-                        accepted: 0,
-                        error: Some("inventory command returned no result".into()),
-                    });
-                    continue;
-                };
-                match serde_json::from_value::<wakey_core::DeviceInventory>(result)
-                    .map(|i| i.devices)
-                {
-                    Ok(devices) => {
-                        match state
-                            .store
-                            .replace_agent_device_snapshot(&agent_id, &devices)
-                            .await
-                        {
-                            Ok(accepted) => {
-                                total_accepted = total_accepted.saturating_add(accepted);
-                                results.push(RefreshFleetAgentResult {
-                                    agent_id,
-                                    status: "ok".into(),
-                                    accepted,
-                                    error: None,
-                                });
-                            }
-                            Err(err) => results.push(RefreshFleetAgentResult {
-                                agent_id,
-                                status: "error".into(),
-                                accepted: 0,
-                                error: Some(err.to_string()),
-                            }),
-                        }
-                    }
-                    Err(err) => results.push(RefreshFleetAgentResult {
-                        agent_id,
-                        status: "error".into(),
-                        accepted: 0,
-                        error: Some(err.to_string()),
-                    }),
-                }
-            }
-            Ok(response) => results.push(RefreshFleetAgentResult {
-                agent_id,
-                status: "error".into(),
-                accepted: 0,
-                error: response
-                    .error
-                    .map(|error| error.message)
-                    .or_else(|| Some("inventory command failed".into())),
-            }),
-            Err(err) => results.push(RefreshFleetAgentResult {
-                agent_id,
-                status: "error".into(),
-                accepted: 0,
-                error: Some(format!("{}: {}", err.status, err.message)),
-            }),
-        }
+    if agent_ids.len() > MAX_REFRESH_AGENTS {
+        warn!(
+            requested = agent_ids.len(),
+            capped = MAX_REFRESH_AGENTS,
+            "capping fleet refresh agent count"
+        );
+        agent_ids.truncate(MAX_REFRESH_AGENTS);
     }
+
+    let results = futures_util::stream::iter(agent_ids.into_iter().map(|agent_id| {
+        let state = state.clone();
+        async move {
+            let response = relay_agent_command(
+                &state,
+                &agent_id,
+                AgentCommand::Inventory(InventoryRequest {
+                    query: None,
+                    name: None,
+                    ips: Vec::new(),
+                    devs: Vec::new(),
+                    nuds: Vec::new(),
+                    macs: Vec::new(),
+                }),
+                req.timeout_ms,
+            )
+            .await;
+            refresh_fleet_agent_result(&state, &agent_id, response).await
+        }
+    }))
+    .buffer_unordered(REFRESH_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
+    let mut results = results;
+    results.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
+    let total_accepted = results.iter().map(|result| result.accepted).sum::<usize>();
 
     Ok((
         StatusCode::OK,
@@ -144,6 +103,70 @@ pub async fn refresh_fleet_devices(
             agents: results,
         }),
     ))
+}
+
+async fn refresh_fleet_agent_result(
+    state: &AppState,
+    agent_id: &str,
+    response: Result<RelayCommandResponse, ApiError>,
+) -> RefreshFleetAgentResult {
+    match response {
+        Ok(response) if response.status == "ok" => {
+            let Some(result) = response.result else {
+                return RefreshFleetAgentResult {
+                    agent_id: agent_id.to_string(),
+                    status: "error".into(),
+                    accepted: 0,
+                    error: Some("inventory command returned no result".into()),
+                };
+            };
+            match serde_json::from_value::<wakey_core::DeviceInventory>(result)
+                .map(|inventory| inventory.devices)
+            {
+                Ok(devices) => {
+                    match state
+                        .store
+                        .replace_agent_device_snapshot(agent_id, &devices)
+                        .await
+                    {
+                        Ok(accepted) => RefreshFleetAgentResult {
+                            agent_id: agent_id.to_string(),
+                            status: "ok".into(),
+                            accepted,
+                            error: None,
+                        },
+                        Err(err) => RefreshFleetAgentResult {
+                            agent_id: agent_id.to_string(),
+                            status: "error".into(),
+                            accepted: 0,
+                            error: Some(err.to_string()),
+                        },
+                    }
+                }
+                Err(err) => RefreshFleetAgentResult {
+                    agent_id: agent_id.to_string(),
+                    status: "error".into(),
+                    accepted: 0,
+                    error: Some(err.to_string()),
+                },
+            }
+        }
+        Ok(response) => RefreshFleetAgentResult {
+            agent_id: agent_id.to_string(),
+            status: "error".into(),
+            accepted: 0,
+            error: response
+                .error
+                .map(|error| error.message)
+                .or_else(|| Some("inventory command failed".into())),
+        },
+        Err(err) => RefreshFleetAgentResult {
+            agent_id: agent_id.to_string(),
+            status: "error".into(),
+            accepted: 0,
+            error: Some(format!("{}: {}", err.status, err.message)),
+        },
+    }
 }
 
 pub async fn wake_fleet_device(
@@ -243,7 +266,7 @@ async fn load_fleet_devices(
         let sessions = state.sessions.read().await;
         sessions.keys().cloned().collect::<BTreeSet<_>>()
     };
-    let agents = state.store.list_agents_with_nicknames().await;
+    let agents = state.store.list_agents_with_nicknames().await?;
     let agent_status = agents
         .into_iter()
         .map(|(agent_id, nickname)| {
