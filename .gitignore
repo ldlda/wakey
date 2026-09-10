@@ -20,3 +20,6 @@ target/
 .env
 
 .codex
+
+# sqlx prepare DB (created by scripts/prepare_sqlx_sqlite.sh)
+wakey-prepare.sqlite3*

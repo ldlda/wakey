@@ -2,7 +2,7 @@
 set -eu
 
 ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
-DB="${SQLX_PREPARE_DB:-/tmp/wakey-sqlx-prepare.sqlite3}"
+DB="${SQLX_PREPARE_DB:-$ROOT/wakey-prepare.sqlite3}"
 DATABASE_URL="sqlite://$DB"
 
 if ! cargo sqlx --version >/dev/null 2>&1; then
@@ -23,3 +23,4 @@ cp .sqlx/*.json wakey-control-plane/.sqlx/
 
 echo "SQLx metadata prepared in $ROOT/.sqlx"
 echo "SQLx package metadata mirrored in $ROOT/wakey-control-plane/.sqlx"
+echo "Prepare DB (referenced by .env for live compile-time checking): $DB"
