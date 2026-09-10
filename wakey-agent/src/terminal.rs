@@ -109,6 +109,10 @@ impl RelayOutputBuffer {
             self.snapshot_pending = false;
         }
     }
+
+    fn live_sender(&self) -> Option<mpsc::Sender<Message>> {
+        self.sender.clone()
+    }
 }
 
 impl TerminalState {
@@ -465,12 +469,12 @@ async fn run_terminal(
         None => terminate_process_group(&mut child, process_group).await?,
     };
     if relay_output.is_connected() {
-        let control = TerminalControl::Exited {
+        let exit_frame = serde_json::to_string(&TerminalControl::Exited {
             exit_code: status.code(),
-        };
-        if let Ok(text) = serde_json::to_string(&control) {
-            relay_output.queue_frame(Message::Text(text.into()));
-        }
+        })
+        .ok()
+        .map(|text| Message::Text(text.into()));
+        flush_relay_output(&mut relay_output, exit_frame, PTY_EXIT_DRAIN_TIMEOUT).await;
     }
     info!(terminal_id = %terminal_id, exit_code = ?status.code(), requested_close, ttl_expired, "terminal worker exited");
     Ok(())
@@ -598,6 +602,43 @@ async fn reserve_relay_output(
         Some(sender) => sender.reserve_owned().await.map_err(|_| ()),
         None => std::future::pending().await,
     }
+}
+
+/// Flushes frames the select loop left pending, then sends the exit lifecycle
+/// frame behind them, bounded by `deadline`: a relay that stays saturated past
+/// it drops the backlog rather than holding worker shutdown open. Queuing the
+/// exit frame without this would drop it together with the pending buffer when
+/// the worker returns.
+async fn flush_relay_output(
+    relay_output: &mut RelayOutputBuffer,
+    exit_frame: Option<Message>,
+    deadline: Duration,
+) {
+    let _ = tokio::time::timeout(deadline, async {
+        while relay_output.has_pending() {
+            let sender = relay_output.pending_sender();
+            match reserve_relay_output(sender).await {
+                Ok(permit) => relay_output.send_reserved(permit),
+                Err(()) => {
+                    relay_output.disconnect();
+                    return;
+                }
+            }
+        }
+        let Some(frame) = exit_frame else {
+            return;
+        };
+        let sender = relay_output
+            .pending_sender()
+            .or_else(|| relay_output.live_sender());
+        match reserve_relay_output(sender).await {
+            Ok(permit) => {
+                permit.send(frame);
+            }
+            Err(()) => relay_output.disconnect(),
+        }
+    })
+    .await;
 }
 
 #[cfg(not(unix))]
@@ -784,6 +825,50 @@ mod tests {
                 .expect("terminal manager")
                 .contains_key("closing-terminal")
         );
+    }
+
+    #[tokio::test]
+    async fn exit_frame_is_delivered_after_saturated_relay_drains() {
+        let (tx, mut rx) = mpsc::channel(RELAY_OUTPUT_QUEUE);
+        let mut relay_output = RelayOutputBuffer::default();
+        relay_output.connect(tx);
+
+        let total = RELAY_OUTPUT_QUEUE * 2;
+        for i in 0..total {
+            relay_output.queue_frame(Message::Text(format!("out-{i}").into()));
+        }
+        assert!(relay_output.has_pending());
+
+        let collected = tokio::spawn(async move {
+            let mut frames = Vec::new();
+            while let Some(frame) = rx.recv().await {
+                frames.push(frame);
+            }
+            frames
+        });
+
+        let exit_frame = serde_json::to_string(&TerminalControl::Exited { exit_code: Some(0) })
+            .expect("exit frame encodes");
+        flush_relay_output(
+            &mut relay_output,
+            Some(Message::Text(exit_frame.clone().into())),
+            PTY_EXIT_DRAIN_TIMEOUT,
+        )
+        .await;
+        relay_output.disconnect();
+
+        let mut frames = collected.await.expect("relay reader completes");
+        assert_eq!(frames.len(), total + 1);
+        let Some(Message::Text(last)) = frames.pop() else {
+            panic!("last frame should be the exit control frame");
+        };
+        assert_eq!(last.as_str(), exit_frame);
+        for (i, frame) in frames.iter().enumerate() {
+            let Message::Text(payload) = frame else {
+                panic!("expected text frame at position {i}, got {frame:?}");
+            };
+            assert_eq!(payload.as_str(), format!("out-{i}"));
+        }
     }
 
     #[test]

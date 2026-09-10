@@ -113,30 +113,72 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/v1/control/alerts/ws`;
-    const ws = new WebSocket(wsUrl);
+    let socket: WebSocket | null = null;
+    let disposed = false;
+    let attempt = 0;
+    let openedAt = 0;
+    let wsGeneration = 0;
+    let reconnectTimer: number | undefined;
 
-    ws.onmessage = (evt) => {
-      try {
-        const payload = JSON.parse(String(evt.data)) as {
-          alerts?: Alert[];
-          recent_transitions?: AlertTransition[];
-        };
-        if (payload.alerts) setAlerts(payload.alerts);
-        if (payload.recent_transitions) setHistory(payload.recent_transitions);
-      } catch {
-        // Ignore malformed stream payloads and keep current UI state.
-      }
+    const resync = () => {
+      const generation = wsGeneration;
+      void Promise.all([fetchAlerts(), fetchAlertHistory(20)])
+        .then(([nextAlerts, nextHistory]) => {
+          // A WS snapshot delivered while this request was in flight is newer.
+          if (generation !== wsGeneration) return;
+          setAlerts(nextAlerts);
+          setHistory(nextHistory);
+        })
+        .catch(() => undefined);
     };
 
-    ws.onerror = () => {
-      const id = window.setInterval(() => {
-        void refreshAlertsAndHistory().catch(() => undefined);
-      }, 8000);
-      ws.onclose = () => window.clearInterval(id);
+    const connect = () => {
+      if (disposed) return;
+      const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/api/v1/control/alerts/ws`;
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        openedAt = Date.now();
+        // Pull anything missed while the stream was down.
+        resync();
+      };
+
+      socket.onmessage = (evt) => {
+        wsGeneration += 1;
+        try {
+          const payload = JSON.parse(String(evt.data)) as {
+            alerts?: Alert[];
+            recent_transitions?: AlertTransition[];
+          };
+          if (payload.alerts) setAlerts(payload.alerts);
+          if (payload.recent_transitions)
+            setHistory(payload.recent_transitions);
+        } catch {
+          // Ignore malformed stream payloads and keep current UI state.
+        }
+      };
+
+      socket.onclose = () => {
+        socket = null;
+        if (disposed) return;
+        // Only a connection that stayed up proves the stream is healthy; an
+        // accept-then-close server must not pin us to the first backoff step.
+        if (openedAt && Date.now() - openedAt > 10_000) attempt = 0;
+        // Browsers never reconnect a WebSocket on their own.
+        const delay =
+          Math.min(30_000, 1000 * 2 ** attempt) + Math.random() * 1000;
+        attempt += 1;
+        reconnectTimer = window.setTimeout(connect, delay);
+      };
     };
 
-    return () => ws.close();
+    connect();
+
+    return () => {
+      disposed = true;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      socket?.close();
+    };
   }, []);
 
   return (

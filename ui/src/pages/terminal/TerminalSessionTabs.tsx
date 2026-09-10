@@ -150,10 +150,14 @@ export function TerminalSessionTabs({
                 <button
                   type="button"
                   className="terminal-tab-close"
-                  disabled={locked}
+                  disabled={locked || connection === "connecting"}
                   aria-label={`Close ${agentLabel} terminal session`}
                   title={
-                    locked ? "Attached in another browser" : "Close session"
+                    locked
+                      ? "Attached in another browser"
+                      : connection === "connecting"
+                        ? "Connecting — wait before closing"
+                        : "Close session"
                   }
                   onClick={() => onClose(item)}
                 >

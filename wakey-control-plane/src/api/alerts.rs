@@ -191,9 +191,10 @@ async fn alerts_stream_socket(state: AppState, mut socket: WebSocket) {
     let mut rx = state.alerts.subscribe();
 
     if let Some(encoded) = state.alerts.latest_payload().await
-        && socket.send(Message::Text(encoded.into())).await.is_err() {
-            return;
-        }
+        && socket.send(Message::Text(encoded.into())).await.is_err()
+    {
+        return;
+    }
 
     loop {
         match rx.recv().await {

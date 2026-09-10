@@ -105,6 +105,7 @@ export function TerminalPage({
   const modifiersRef = useRef<TerminalModifiers>(NO_TERMINAL_MODIFIERS);
   const terminalTouchRef = useRef<TerminalTouch | null>(null);
   const terminalInputFocusedBeforeAccessoryRef = useRef(false);
+  const refreshSessionsRef = useRef<() => void>(() => {});
   const [sessions, setSessions] = useState<TerminalSession[]>([]);
   const [session, setSession] = useState<TerminalSession | null>(null);
   const [connection, setConnection] = useState<TerminalConnectionState>("idle");
@@ -348,6 +349,7 @@ export function TerminalPage({
           };
           if (control.type === "ready") {
             setConnection("ready");
+            refreshSessionsRef.current();
             window.requestAnimationFrame(() => {
               fitRef.current?.fit();
               lastTerminalSizeRef.current = { rows: 0, cols: 0 };
@@ -387,6 +389,8 @@ export function TerminalPage({
           if (current === "exited") return current;
           return "disconnected";
         });
+        // The agent may have reaped or reported sessions while we were away.
+        refreshSessionsRef.current();
       };
     },
     [detachTransport, operatorId, sendResize],
@@ -572,7 +576,7 @@ export function TerminalPage({
     });
     resizeObserver.observe(hostRef.current);
     void restoreTerminalSession();
-    const sessionRefresh = window.setInterval(() => {
+    const refreshSessions = () => {
       void listTerminals()
         .then((listed) => {
           if (!cancelled) {
@@ -585,15 +589,20 @@ export function TerminalPage({
           // The attached terminal transport remains authoritative while a
           // background list refresh is temporarily unavailable.
         });
-    }, 5000);
+    };
+    refreshSessionsRef.current = refreshSessions;
+    // Session lifecycle only changes at connect/disconnect moments or when the
+    // operator returns to the tab; refresh on those instead of polling.
+    window.addEventListener("focus", refreshSessions);
 
     return () => {
       cancelled = true;
       input.dispose();
       titleChange.dispose();
       resizeObserver.disconnect();
+      window.removeEventListener("focus", refreshSessions);
+      refreshSessionsRef.current = () => {};
       window.cancelAnimationFrame(resizeFrame);
-      window.clearInterval(sessionRefresh);
       detachTransport();
       terminal.dispose();
       terminalRef.current = null;

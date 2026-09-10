@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Inbox, MoreHorizontal, RefreshCw, Search, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -69,8 +69,12 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [wakeBusyKey, setWakeBusyKey] = useState("");
   const [details, setDetails] = useState<FleetDevice | null>(null);
+  const loadSeqRef = useRef(0);
 
   async function loadFleet() {
+    // Latest request wins: filter changes and debounced searches overlap, and
+    // an older response must never overwrite fresher state.
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     try {
       const [nextDevices, nextKnownDevices] = await Promise.all([
@@ -84,12 +88,14 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
         }),
         fetchKnownDevices(),
       ]);
+      if (seq !== loadSeqRef.current) return;
       setDevices(nextDevices);
       setKnownDevices(nextKnownDevices);
     } catch (err) {
+      if (seq !== loadSeqRef.current) return;
       toast.error("Failed to load fleet", { description: String(err) });
     } finally {
-      setLoading(false);
+      if (seq === loadSeqRef.current) setLoading(false);
     }
   }
 
@@ -152,7 +158,13 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presence, known, agentId]);
 
+  // The filter effect above already loads on mount; only react to query edits.
+  const mountedRef = useRef(false);
   useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
     const timer = window.setTimeout(() => void loadFleet(), 220);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
