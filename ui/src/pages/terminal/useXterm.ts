@@ -172,6 +172,10 @@ export function useXterm({ pageRef, hostRef }: Options) {
       toast.info("Nothing to copy");
       return;
     }
+    if (!navigator.clipboard) {
+      toast.error("Clipboard access requires HTTPS or localhost");
+      return;
+    }
     try {
       await navigator.clipboard.writeText(text);
       toast.success(
@@ -184,6 +188,10 @@ export function useXterm({ pageRef, hostRef }: Options) {
     }
   }, []);
   const paste = useCallback(async (writeData: (data: string) => void) => {
+    if (!navigator.clipboard) {
+      toast.error("Clipboard access requires HTTPS or localhost");
+      return;
+    }
     try {
       const text = await navigator.clipboard.readText();
       if (text) writeData(text);

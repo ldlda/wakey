@@ -24,3 +24,4 @@ cp .sqlx/*.json wakey-control-plane/.sqlx/
 echo "SQLx metadata prepared in $ROOT/.sqlx"
 echo "SQLx package metadata mirrored in $ROOT/wakey-control-plane/.sqlx"
 echo "Prepare DB (referenced by .env for live compile-time checking): $DB"
+echo "DATABASE_URL=$DATABASE_URL"

@@ -207,6 +207,7 @@ export function App() {
         // Only a connection that stayed up proves the stream is healthy; an
         // accept-then-close server must not pin us to the first backoff step.
         if (openedAt && Date.now() - openedAt > 10_000) attempt = 0;
+        openedAt = 0;
         // Browsers never reconnect a WebSocket on their own.
         const delay =
           Math.min(30_000, 1000 * 2 ** attempt) + Math.random() * 1000;
