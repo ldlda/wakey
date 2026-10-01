@@ -8,8 +8,22 @@ use super::build::{
     AgentRuntimeStatus, FleetBuildContext, build_fleet_devices, filter_fleet_devices,
     known_device_summary,
 };
+use super::normalize_refresh_agent_ids;
 use super::types::ListFleetDevicesQuery;
 use crate::state::{AgentDeviceRow, AgentDeviceWithChildren, DeviceIdentifier, KnownDevice};
+
+#[test]
+fn refresh_agent_selection_keeps_all_agents_beyond_previous_cap() {
+    let ids = (0..140)
+        .map(|index| format!("agent-{index:03}"))
+        .collect::<Vec<_>>();
+
+    let selected = normalize_refresh_agent_ids(ids);
+
+    assert_eq!(selected.len(), 140);
+    assert_eq!(selected.first().map(String::as_str), Some("agent-000"));
+    assert_eq!(selected.last().map(String::as_str), Some("agent-139"));
+}
 
 fn context(connected: &[&str]) -> FleetBuildContext {
     FleetBuildContext {

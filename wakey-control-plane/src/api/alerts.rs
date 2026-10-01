@@ -35,6 +35,7 @@ pub struct AlertHistoryQuery {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
 pub struct AlertRuleConfig {
     pub lookback_seconds: Option<u64>,
     pub timeout_threshold: Option<u64>,
@@ -53,6 +54,45 @@ impl Default for AlertRuleConfig {
     }
 }
 
+impl AlertRuleConfig {
+    fn validate(&self) -> Result<(), ApiError> {
+        let defaults = Self::default();
+        let overrides = [
+            (
+                "lookback_seconds",
+                self.lookback_seconds,
+                defaults.lookback_seconds,
+            ),
+            (
+                "timeout_threshold",
+                self.timeout_threshold,
+                defaults.timeout_threshold,
+            ),
+            (
+                "auth_rejected_threshold",
+                self.auth_rejected_threshold,
+                defaults.auth_rejected_threshold,
+            ),
+            (
+                "enroll_rejected_threshold",
+                self.enroll_rejected_threshold,
+                defaults.enroll_rejected_threshold,
+            ),
+        ];
+        if let Some((field, _, _)) = overrides
+            .into_iter()
+            .find(|(_, requested, default)| requested.is_some() && requested != default)
+        {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "unsupported_alert_override",
+                format!("custom alert {field} is not supported; omit it or use its default value"),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct AlertsSnapshot {
     pub ts_unix: u64,
@@ -67,7 +107,16 @@ pub struct AlertsHub {
     tx: broadcast::Sender<String>,
     latest_payload: Arc<RwLock<Option<String>>>,
     latest_alerts: Arc<RwLock<Vec<AlertState>>>,
+    evaluator_status: Arc<RwLock<EvaluatorStatus>>,
 }
+
+#[derive(Default)]
+struct EvaluatorStatus {
+    last_success_unix: Option<u64>,
+    failure: Option<String>,
+}
+
+const ALERT_SNAPSHOT_MAX_AGE_SECS: u64 = 15;
 
 impl Default for AlertsHub {
     fn default() -> Self {
@@ -82,6 +131,7 @@ impl AlertsHub {
             tx,
             latest_payload: Arc::new(RwLock::new(None)),
             latest_alerts: Arc::new(RwLock::new(Vec::new())),
+            evaluator_status: Arc::new(RwLock::new(EvaluatorStatus::default())),
         }
     }
 
@@ -97,6 +147,22 @@ impl AlertsHub {
         self.latest_payload.read().await.clone()
     }
 
+    async fn mark_unavailable(&self, reason: impl Into<String>) {
+        self.evaluator_status.write().await.failure = Some(reason.into());
+    }
+
+    async fn unavailable_reason(&self) -> Option<String> {
+        let status = self.evaluator_status.read().await;
+        if let Some(failure) = &status.failure {
+            return Some(failure.clone());
+        }
+        match status.last_success_unix {
+            Some(ts) if now_unix().saturating_sub(ts) <= ALERT_SNAPSHOT_MAX_AGE_SECS => None,
+            Some(_) => Some("alert evaluator snapshot is stale".into()),
+            None => Some("alert evaluator has not produced a snapshot yet".into()),
+        }
+    }
+
     pub async fn publish(&self, snapshot: AlertsSnapshot) {
         let payload = serde_json::json!({
             "type": "alerts_snapshot",
@@ -110,6 +176,10 @@ impl AlertsHub {
         };
         *self.latest_alerts.write().await = snapshot.alerts;
         *self.latest_payload.write().await = Some(encoded.clone());
+        let mut status = self.evaluator_status.write().await;
+        status.last_success_unix = Some(snapshot.ts_unix);
+        status.failure = None;
+        drop(status);
         let _ = self.tx.send(encoded);
     }
 }
@@ -127,6 +197,7 @@ pub async fn run_alert_evaluator(state: AppState) {
             Ok(alerts) => alerts,
             Err(err) => {
                 warn!(code = %err.code, "failed to evaluate alerts in background task");
+                state.alerts.mark_unavailable(err.message.clone()).await;
                 continue;
             }
         };
@@ -154,7 +225,18 @@ pub async fn run_alert_evaluator(state: AppState) {
     }
 }
 
-pub async fn active_alerts(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+pub async fn active_alerts(
+    State(state): State<AppState>,
+    Query(config): Query<AlertRuleConfig>,
+) -> Result<impl IntoResponse, ApiError> {
+    config.validate()?;
+    if let Some(reason) = state.alerts.unavailable_reason().await {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "alerts_unavailable",
+            reason,
+        ));
+    }
     let alerts = state.alerts.latest_alerts().await;
     Ok((StatusCode::OK, Json(alerts)))
 }
@@ -426,9 +508,11 @@ fn now_unix() -> u64 {
 mod tests {
     use std::collections::HashSet;
 
+    use axum::http::StatusCode;
+
     use crate::state::AuditEvent;
 
-    use super::{AlertBuildContext, build_alerts};
+    use super::{AlertBuildContext, AlertRuleConfig, AlertsHub, AlertsSnapshot, build_alerts};
 
     fn event(agent_id: Option<&str>, event_type: &str, outcome: &str, ts_unix: u64) -> AuditEvent {
         AuditEvent {
@@ -515,6 +599,83 @@ mod tests {
             alerts
                 .iter()
                 .any(|a| a.kind == "enroll_reject_spike" && a.agent_id.is_none())
+        );
+    }
+
+    #[test]
+    fn alert_rule_config_accepts_omitted_and_default_values() {
+        AlertRuleConfig::default().validate().unwrap();
+        AlertRuleConfig {
+            lookback_seconds: None,
+            timeout_threshold: None,
+            auth_rejected_threshold: None,
+            enroll_rejected_threshold: None,
+        }
+        .validate()
+        .unwrap();
+    }
+
+    #[test]
+    fn alert_rule_config_rejects_custom_overrides() {
+        let configs = [
+            AlertRuleConfig {
+                lookback_seconds: Some(300),
+                ..Default::default()
+            },
+            AlertRuleConfig {
+                timeout_threshold: Some(4),
+                ..Default::default()
+            },
+            AlertRuleConfig {
+                auth_rejected_threshold: Some(4),
+                ..Default::default()
+            },
+            AlertRuleConfig {
+                enroll_rejected_threshold: Some(6),
+                ..Default::default()
+            },
+        ];
+
+        for config in configs {
+            let error = config.validate().unwrap_err();
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            assert_eq!(error.code, "unsupported_alert_override");
+            assert!(error.message.contains("not supported"));
+        }
+    }
+
+    #[tokio::test]
+    async fn alert_hub_reports_initial_failure_and_recovers_on_snapshot() {
+        let hub = AlertsHub::new();
+        assert!(hub.unavailable_reason().await.is_some());
+
+        hub.mark_unavailable("store query failed").await;
+        assert_eq!(
+            hub.unavailable_reason().await.as_deref(),
+            Some("store query failed")
+        );
+
+        hub.publish(AlertsSnapshot {
+            ts_unix: super::now_unix(),
+            alerts: Vec::new(),
+            recent_transitions: Vec::new(),
+        })
+        .await;
+        assert_eq!(hub.unavailable_reason().await, None);
+    }
+
+    #[tokio::test]
+    async fn alert_hub_rejects_stale_snapshots() {
+        let hub = AlertsHub::new();
+        hub.publish(AlertsSnapshot {
+            ts_unix: 0,
+            alerts: Vec::new(),
+            recent_transitions: Vec::new(),
+        })
+        .await;
+        assert_eq!(
+            hub.unavailable_reason().await.as_deref(),
+            Some("alert evaluator snapshot is stale")
         );
     }
 }

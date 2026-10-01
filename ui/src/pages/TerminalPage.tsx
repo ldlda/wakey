@@ -576,7 +576,10 @@ export function TerminalPage({
     });
     resizeObserver.observe(hostRef.current);
     void restoreTerminalSession();
+    let refreshInFlight = false;
     const refreshSessions = () => {
+      if (refreshInFlight) return;
+      refreshInFlight = true;
       void listTerminals()
         .then((listed) => {
           if (!cancelled) {
@@ -588,11 +591,13 @@ export function TerminalPage({
         .catch(() => {
           // The attached terminal transport remains authoritative while a
           // background list refresh is temporarily unavailable.
+        })
+        .finally(() => {
+          refreshInFlight = false;
         });
     };
     refreshSessionsRef.current = refreshSessions;
-    // Session lifecycle only changes at connect/disconnect moments or when the
-    // operator returns to the tab; refresh on those instead of polling.
+    const refreshTimer = window.setInterval(refreshSessions, 15_000);
     window.addEventListener("focus", refreshSessions);
 
     return () => {
@@ -600,6 +605,7 @@ export function TerminalPage({
       input.dispose();
       titleChange.dispose();
       resizeObserver.disconnect();
+      window.clearInterval(refreshTimer);
       window.removeEventListener("focus", refreshSessions);
       refreshSessionsRef.current = () => {};
       window.cancelAnimationFrame(resizeFrame);

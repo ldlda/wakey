@@ -27,7 +27,6 @@ use types::{
     RefreshFleetDevicesResponse, WakeFleetDeviceRequest, WakeFleetDeviceResponse,
 };
 
-const MAX_REFRESH_AGENTS: usize = 128;
 const REFRESH_CONCURRENCY: usize = 8;
 
 pub async fn list_fleet_devices(
@@ -51,22 +50,13 @@ pub async fn refresh_fleet_devices(
     State(state): State<AppState>,
     Json(req): Json<RefreshFleetDevicesRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let mut agent_ids = if req.agent_ids.is_empty() {
+    let agent_ids = if req.agent_ids.is_empty() {
         let sessions = state.sessions.read().await;
         sessions.keys().cloned().collect::<Vec<_>>()
     } else {
         req.agent_ids.clone()
     };
-    agent_ids.sort();
-    agent_ids.dedup();
-    if agent_ids.len() > MAX_REFRESH_AGENTS {
-        warn!(
-            requested = agent_ids.len(),
-            capped = MAX_REFRESH_AGENTS,
-            "capping fleet refresh agent count"
-        );
-        agent_ids.truncate(MAX_REFRESH_AGENTS);
-    }
+    let agent_ids = normalize_refresh_agent_ids(agent_ids);
 
     let results = futures_util::stream::iter(agent_ids.into_iter().map(|agent_id| {
         let state = state.clone();
@@ -103,6 +93,12 @@ pub async fn refresh_fleet_devices(
             agents: results,
         }),
     ))
+}
+
+fn normalize_refresh_agent_ids(mut agent_ids: Vec<String>) -> Vec<String> {
+    agent_ids.sort();
+    agent_ids.dedup();
+    agent_ids
 }
 
 async fn refresh_fleet_agent_result(
