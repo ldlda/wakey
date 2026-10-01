@@ -16,10 +16,18 @@ import { Textarea } from "@/components/ui/textarea";
 type Props = {
   alerts: Alert[];
   transitions: AlertTransition[];
+  alertsHealth: { available: boolean; reason?: string } | null;
+  alertsStreamConnected: boolean;
   onRefresh: () => Promise<void>;
 };
 
-export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
+export function AlertsPage({
+  alerts,
+  transitions,
+  alertsHealth,
+  alertsStreamConnected,
+  onRefresh,
+}: Props) {
   const [severity, setSeverity] = useState("all");
   const [status, setStatus] = useState("all");
   const [kind, setKind] = useState("all");
@@ -66,9 +74,27 @@ export function AlertsPage({ alerts, transitions, onRefresh }: Props) {
       <Card>
         <CardHeader className="flex items-center justify-between gap-2">
           <CardTitle>Active Alerts</CardTitle>
-          <Button size="sm" variant="outline" onClick={() => void onRefresh()}>
-            Refresh
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+            <div
+              aria-live="polite"
+              className="text-right text-xs text-muted-foreground"
+            >
+              {!alertsStreamConnected && <div>Alert stream disconnected</div>}
+              {alertsHealth?.available === false && (
+                <div>
+                  Alert results may be stale or unavailable
+                  {alertsHealth.reason ? `: ${alertsHealth.reason}` : ""}
+                </div>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void onRefresh()}
+            >
+              Refresh
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-2 sm:grid-cols-3">

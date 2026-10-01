@@ -513,9 +513,38 @@ export function TerminalPage({
     terminalRef.current = terminal;
     fitRef.current = fit;
 
+    let cancelled = false;
+    let refreshInFlight: Promise<TerminalSession[]> | null = null;
+    let refreshRequested = false;
+    const refreshSessions = (): Promise<TerminalSession[]> => {
+      if (refreshInFlight) {
+        refreshRequested = true;
+        return refreshInFlight;
+      }
+      refreshInFlight = (async () => {
+        let listed: TerminalSession[] = [];
+        do {
+          refreshRequested = false;
+          listed = await listTerminals();
+          if (!cancelled) {
+            setSessions((current) =>
+              reconcileTerminalSessions(current, listed),
+            );
+          }
+        } while (refreshRequested && !cancelled);
+        return listed;
+      })().finally(() => {
+        refreshInFlight = null;
+        if (refreshRequested && !cancelled) {
+          void refreshSessions().catch(() => undefined);
+        }
+      });
+      return refreshInFlight;
+    };
+
     async function restoreTerminalSession() {
       try {
-        const listed = await listTerminals();
+        const listed = await refreshSessions();
         if (cancelled) return;
         setSessions(orderTerminalSessions(listed));
         const rememberedId = window.sessionStorage.getItem(
@@ -557,7 +586,6 @@ export function TerminalPage({
       }
     }
 
-    let cancelled = false;
     const input = terminal.onData((data) => writeTerminalData(data, true));
     let resizeFrame = 0;
     let lastHostWidth = 0;
@@ -575,30 +603,61 @@ export function TerminalPage({
       });
     });
     resizeObserver.observe(hostRef.current);
-    void restoreTerminalSession();
-    let refreshInFlight = false;
-    const refreshSessions = () => {
-      if (refreshInFlight) return;
-      refreshInFlight = true;
-      void listTerminals()
-        .then((listed) => {
-          if (!cancelled) {
-            setSessions((current) =>
-              reconcileTerminalSessions(current, listed),
-            );
+    let eventsSocket: WebSocket | null = null;
+    let reconnectTimer = 0;
+    let healthyTimer = 0;
+    let reconnectAttempt = 0;
+    const connectEvents = () => {
+      if (cancelled) return;
+      const socket = new WebSocket(
+        websocketUrl("/api/v1/control/terminals/events/ws"),
+      );
+      eventsSocket = socket;
+      socket.onmessage = (event) => {
+        if (cancelled || eventsSocket !== socket) return;
+        if (typeof event.data !== "string") return;
+        try {
+          const message = JSON.parse(event.data) as { type?: string };
+          if (message.type === "sessions_changed") {
+            void refreshSessions().catch(() => undefined);
           }
-        })
-        .catch(() => {
-          // The attached terminal transport remains authoritative while a
-          // background list refresh is temporarily unavailable.
-        })
-        .finally(() => {
-          refreshInFlight = false;
-        });
+        } catch {
+          // Ignore malformed event frames; the fallback refresh remains active.
+        }
+      };
+      socket.onopen = () => {
+        window.clearTimeout(healthyTimer);
+        healthyTimer = window.setTimeout(() => {
+          if (eventsSocket === socket && socket.readyState === WebSocket.OPEN) {
+            reconnectAttempt = 0;
+          }
+        }, 10_000);
+      };
+      socket.onclose = () => {
+        if (cancelled || eventsSocket !== socket) return;
+        window.clearTimeout(healthyTimer);
+        const ceiling = Math.min(500 * 2 ** reconnectAttempt, 12_000);
+        const delay = Math.min(
+          Math.round(ceiling * (0.8 + Math.random() * 0.4)),
+          15_000,
+        );
+        reconnectAttempt = Math.min(reconnectAttempt + 1, 5);
+        reconnectTimer = window.setTimeout(connectEvents, delay);
+      };
+      socket.onerror = () => socket.close();
     };
-    refreshSessionsRef.current = refreshSessions;
-    const refreshTimer = window.setInterval(refreshSessions, 15_000);
-    window.addEventListener("focus", refreshSessions);
+    connectEvents();
+    void restoreTerminalSession();
+    refreshSessionsRef.current = () => {
+      void refreshSessions().catch(() => undefined);
+    };
+    const refreshTimer = window.setInterval(() => {
+      void refreshSessions().catch(() => undefined);
+    }, 15_000);
+    const refreshOnFocus = () => {
+      void refreshSessions().catch(() => undefined);
+    };
+    window.addEventListener("focus", refreshOnFocus);
 
     return () => {
       cancelled = true;
@@ -606,7 +665,11 @@ export function TerminalPage({
       titleChange.dispose();
       resizeObserver.disconnect();
       window.clearInterval(refreshTimer);
-      window.removeEventListener("focus", refreshSessions);
+      window.removeEventListener("focus", refreshOnFocus);
+      window.clearTimeout(reconnectTimer);
+      window.clearTimeout(healthyTimer);
+      eventsSocket?.close();
+      eventsSocket = null;
       refreshSessionsRef.current = () => {};
       window.cancelAnimationFrame(resizeFrame);
       detachTransport();

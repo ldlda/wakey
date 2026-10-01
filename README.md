@@ -207,9 +207,22 @@ Control-plane admin API includes token management endpoints:
 - `GET /api/v1/control/audit/events?agent_id=<id>&event_type=<type>&limit=<n>`
 - `GET /api/v1/control/alerts?lookback_seconds=900`
 - `GET /api/v1/control/alerts/history?since_unix=<ts>&limit=<n>`
-- `GET /api/v1/control/alerts/ws` (websocket snapshots + recent transitions)
+- `GET /api/v1/control/alerts/ws` (websocket snapshots, recent transitions, and evaluator health)
+- `GET /api/v1/control/terminals/events/ws` (websocket session-list invalidations)
 - `DELETE /api/v1/control/agents/{agent_id}`
 - `PATCH /api/v1/control/agents/{agent_id}/nickname`
+
+Alert evaluation runs once per control plane every five seconds. The alerts GET
+returns `503 alerts_unavailable` until a successful evaluation, after evaluation
+failure, or when its snapshot is stale. The existing alerts stream also sends
+`alerts_health` messages with `available` and an optional `reason`; the UI keeps
+the last results visible with a stale warning until recovery. Custom alert-rule
+query overrides are rejected with `400 unsupported_alert_override`.
+
+Terminal session events carry only `sessions_changed` invalidations. Clients
+refetch the session list after changes or reconnection and retain a 15-second
+fallback refresh. Events do not grant session ownership; attachment still uses
+the existing server-side locking and scoped credentials.
 
 If commands still appear silent, verify both processes are running with `-v`
 and that `RUST_LOG` is not overriding to a stricter level.

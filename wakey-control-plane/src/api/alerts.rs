@@ -8,6 +8,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
+use tokio::select;
 use tokio::sync::{RwLock, broadcast};
 use tokio::time::Duration;
 use tracing::warn;
@@ -105,15 +106,16 @@ pub struct AlertsSnapshot {
 #[derive(Clone)]
 pub struct AlertsHub {
     tx: broadcast::Sender<String>,
-    latest_payload: Arc<RwLock<Option<String>>>,
-    latest_alerts: Arc<RwLock<Vec<AlertState>>>,
-    evaluator_status: Arc<RwLock<EvaluatorStatus>>,
+    status: Arc<RwLock<HubStatus>>,
 }
 
 #[derive(Default)]
-struct EvaluatorStatus {
+struct HubStatus {
+    latest_payload: Option<String>,
+    latest_alerts: Vec<AlertState>,
     last_success_unix: Option<u64>,
     failure: Option<String>,
+    last_health_available: Option<bool>,
 }
 
 const ALERT_SNAPSHOT_MAX_AGE_SECS: u64 = 15;
@@ -129,9 +131,7 @@ impl AlertsHub {
         let (tx, _) = broadcast::channel(16);
         Self {
             tx,
-            latest_payload: Arc::new(RwLock::new(None)),
-            latest_alerts: Arc::new(RwLock::new(Vec::new())),
-            evaluator_status: Arc::new(RwLock::new(EvaluatorStatus::default())),
+            status: Arc::new(RwLock::new(HubStatus::default())),
         }
     }
 
@@ -140,27 +140,49 @@ impl AlertsHub {
     }
 
     pub async fn latest_alerts(&self) -> Vec<AlertState> {
-        self.latest_alerts.read().await.clone()
-    }
-
-    pub async fn latest_payload(&self) -> Option<String> {
-        self.latest_payload.read().await.clone()
+        self.status.read().await.latest_alerts.clone()
     }
 
     async fn mark_unavailable(&self, reason: impl Into<String>) {
-        self.evaluator_status.write().await.failure = Some(reason.into());
+        let mut status = self.status.write().await;
+        if status.failure.is_some() {
+            return;
+        }
+        status.failure = Some(reason.into());
+        let reason = status.failure.as_deref().unwrap_or_default().to_owned();
+        status.last_health_available = Some(false);
+        self.broadcast_health(false, Some(reason));
     }
 
     async fn unavailable_reason(&self) -> Option<String> {
-        let status = self.evaluator_status.read().await;
-        if let Some(failure) = &status.failure {
-            return Some(failure.clone());
+        let status = self.status.read().await;
+        evaluator_unavailable_reason(&status, now_unix())
+    }
+
+    async fn resync_payloads(&self) -> (String, Option<String>) {
+        let status = self.status.read().await;
+        (
+            encode_health(evaluator_unavailable_reason(&status, now_unix())),
+            status.latest_payload.clone(),
+        )
+    }
+
+    async fn broadcast_health_if_changed(&self) {
+        let mut status = self.status.write().await;
+        if status.last_success_unix.is_none() || status.failure.is_some() {
+            return;
         }
-        match status.last_success_unix {
-            Some(ts) if now_unix().saturating_sub(ts) <= ALERT_SNAPSHOT_MAX_AGE_SECS => None,
-            Some(_) => Some("alert evaluator snapshot is stale".into()),
-            None => Some("alert evaluator has not produced a snapshot yet".into()),
+        let reason = evaluator_unavailable_reason(&status, now_unix());
+        let available = reason.is_none();
+        if status.last_health_available == Some(available) {
+            return;
         }
+        status.last_health_available = Some(available);
+        self.broadcast_health(available, reason);
+    }
+
+    fn broadcast_health(&self, available: bool, reason: Option<String>) {
+        let _ = self.tx.send(encode_health_message(available, reason));
     }
 
     pub async fn publish(&self, snapshot: AlertsSnapshot) {
@@ -174,14 +196,47 @@ impl AlertsHub {
             warn!("failed to encode alerts snapshot payload");
             return;
         };
-        *self.latest_alerts.write().await = snapshot.alerts;
-        *self.latest_payload.write().await = Some(encoded.clone());
-        let mut status = self.evaluator_status.write().await;
+        let mut status = self.status.write().await;
+        let was_unavailable = evaluator_unavailable_reason(&status, now_unix()).is_some();
+        status.latest_alerts = snapshot.alerts;
+        status.latest_payload = Some(encoded.clone());
         status.last_success_unix = Some(snapshot.ts_unix);
         status.failure = None;
-        drop(status);
+        let available = evaluator_unavailable_reason(&status, now_unix()).is_none();
+        if available {
+            status.last_health_available = Some(true);
+        }
+        if was_unavailable && available {
+            self.broadcast_health(true, None);
+        }
         let _ = self.tx.send(encoded);
     }
+}
+
+fn evaluator_unavailable_reason(status: &HubStatus, now: u64) -> Option<String> {
+    if let Some(failure) = &status.failure {
+        return Some(failure.clone());
+    }
+    match status.last_success_unix {
+        Some(ts) if now.saturating_sub(ts) <= ALERT_SNAPSHOT_MAX_AGE_SECS => None,
+        Some(_) => Some("alert evaluator snapshot is stale".into()),
+        None => Some("alert evaluator has not produced a snapshot yet".into()),
+    }
+}
+
+fn encode_health(reason: Option<String>) -> String {
+    encode_health_message(reason.is_none(), reason)
+}
+
+fn encode_health_message(available: bool, reason: Option<String>) -> String {
+    let mut message = serde_json::json!({
+        "type": "alerts_health",
+        "available": available,
+    });
+    if let Some(reason) = reason {
+        message["reason"] = serde_json::Value::String(reason);
+    }
+    message.to_string()
 }
 
 /// Background task that owns alert evaluation: on a fixed ticker it recomputes
@@ -271,22 +326,49 @@ pub async fn alerts_stream(
 
 async fn alerts_stream_socket(state: AppState, mut socket: WebSocket) {
     let mut rx = state.alerts.subscribe();
+    let mut freshness_tick = tokio::time::interval(Duration::from_secs(1));
+    freshness_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    if let Some(encoded) = state.alerts.latest_payload().await
+    let (health, snapshot) = state.alerts.resync_payloads().await;
+    if socket.send(Message::Text(health.into())).await.is_err() {
+        return;
+    }
+    if let Some(encoded) = snapshot
         && socket.send(Message::Text(encoded.into())).await.is_err()
     {
         return;
     }
 
     loop {
-        match rx.recv().await {
-            Ok(encoded) => {
-                if socket.send(Message::Text(encoded.into())).await.is_err() {
-                    break;
+        select! {
+            incoming = socket.recv() => {
+                match incoming {
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    Some(Ok(_)) => {}
                 }
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => break,
+            update = rx.recv() => {
+                match update {
+                    Ok(encoded) => {
+                        if socket.send(Message::Text(encoded.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let (health, snapshot) = state.alerts.resync_payloads().await;
+                        if socket.send(Message::Text(health.into())).await.is_err() {
+                            break;
+                        }
+                        if let Some(encoded) = snapshot
+                            && socket.send(Message::Text(encoded.into())).await.is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            _ = freshness_tick.tick() => state.alerts.broadcast_health_if_changed().await,
         }
     }
 }
@@ -648,11 +730,23 @@ mod tests {
     async fn alert_hub_reports_initial_failure_and_recovers_on_snapshot() {
         let hub = AlertsHub::new();
         assert!(hub.unavailable_reason().await.is_some());
+        let mut updates = hub.subscribe();
 
         hub.mark_unavailable("store query failed").await;
         assert_eq!(
             hub.unavailable_reason().await.as_deref(),
             Some("store query failed")
+        );
+        let failure: serde_json::Value =
+            serde_json::from_str(&updates.try_recv().unwrap()).unwrap();
+        assert_eq!(failure["type"], "alerts_health");
+        assert_eq!(failure["available"], false);
+        assert_eq!(failure["reason"], "store query failed");
+
+        hub.mark_unavailable("same outage, later attempt").await;
+        assert!(
+            updates.try_recv().is_err(),
+            "failure notifications deduplicate"
         );
 
         hub.publish(AlertsSnapshot {
@@ -662,6 +756,14 @@ mod tests {
         })
         .await;
         assert_eq!(hub.unavailable_reason().await, None);
+        let recovery: serde_json::Value =
+            serde_json::from_str(&updates.try_recv().unwrap()).unwrap();
+        assert_eq!(recovery["type"], "alerts_health");
+        assert_eq!(recovery["available"], true);
+        assert_eq!(recovery.get("reason"), None);
+        let snapshot: serde_json::Value =
+            serde_json::from_str(&updates.try_recv().unwrap()).unwrap();
+        assert_eq!(snapshot["type"], "alerts_snapshot");
     }
 
     #[tokio::test]
@@ -677,5 +779,50 @@ mod tests {
             hub.unavailable_reason().await.as_deref(),
             Some("alert evaluator snapshot is stale")
         );
+    }
+
+    #[tokio::test]
+    async fn alert_hub_initial_resync_marks_cached_snapshot_stale() {
+        let hub = AlertsHub::new();
+        let (initial_health, initial_snapshot) = hub.resync_payloads().await;
+        let initial_health: serde_json::Value = serde_json::from_str(&initial_health).unwrap();
+        assert_eq!(initial_health["available"], false);
+        assert_eq!(
+            initial_health["reason"],
+            "alert evaluator has not produced a snapshot yet"
+        );
+        assert!(initial_snapshot.is_none());
+
+        hub.publish(AlertsSnapshot {
+            ts_unix: 0,
+            alerts: Vec::new(),
+            recent_transitions: Vec::new(),
+        })
+        .await;
+        let (stale_health, cached_snapshot) = hub.resync_payloads().await;
+        let stale_health: serde_json::Value = serde_json::from_str(&stale_health).unwrap();
+        assert_eq!(stale_health["available"], false);
+        assert_eq!(stale_health["reason"], "alert evaluator snapshot is stale");
+        assert!(cached_snapshot.is_some());
+    }
+
+    #[tokio::test]
+    async fn alert_hub_broadcasts_stale_transition_once() {
+        let hub = AlertsHub::new();
+        let mut updates = hub.subscribe();
+        hub.publish(AlertsSnapshot {
+            ts_unix: 0,
+            alerts: Vec::new(),
+            recent_transitions: Vec::new(),
+        })
+        .await;
+        let _snapshot = updates.try_recv().unwrap();
+
+        hub.broadcast_health_if_changed().await;
+        let stale: serde_json::Value = serde_json::from_str(&updates.try_recv().unwrap()).unwrap();
+        assert_eq!(stale["available"], false);
+        assert_eq!(stale["reason"], "alert evaluator snapshot is stale");
+        hub.broadcast_health_if_changed().await;
+        assert!(updates.try_recv().is_err());
     }
 }

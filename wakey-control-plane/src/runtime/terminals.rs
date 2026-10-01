@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use uuid::Uuid;
 use wakey_agent::protocol::{AgentTerminalSession, TerminalId};
 
@@ -12,6 +12,7 @@ pub const TERMINAL_PENDING_AGENT_BYTES: usize = 256 * 1024;
 pub const TERMINAL_ATTACH_TIMEOUT: Duration = Duration::from_secs(10);
 const TERMINAL_TOMBSTONE_TTL: Duration = Duration::from_secs(5 * 60);
 const TERMINAL_MAX_TOMBSTONES: usize = 1024;
+const TERMINAL_EVENTS_CAPACITY: usize = 32;
 
 #[derive(Clone, Debug)]
 pub enum TerminalRelayFrame {
@@ -24,6 +25,7 @@ pub enum TerminalRelayFrame {
 pub struct TerminalRegistry {
     inner: Arc<Mutex<HashMap<String, TerminalSession>>>,
     closed: Arc<Mutex<HashMap<String, Instant>>>,
+    events: broadcast::Sender<()>,
 }
 
 struct TerminalSession {
@@ -69,10 +71,20 @@ impl Default for TerminalRegistry {
 
 impl TerminalRegistry {
     pub fn new() -> Self {
+        let (events, _) = broadcast::channel(TERMINAL_EVENTS_CAPACITY);
         Self {
             inner: Arc::new(Mutex::new(HashMap::new())),
             closed: Arc::new(Mutex::new(HashMap::new())),
+            events,
         }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<()> {
+        self.events.subscribe()
+    }
+
+    fn notify_changed(&self) {
+        let _ = self.events.send(());
     }
 
     #[cfg(test)]
@@ -95,13 +107,17 @@ impl TerminalRegistry {
         session_ttl_seconds: u64,
     ) -> Result<CreatedTerminal, &'static str> {
         let mut sessions = self.inner.lock().await;
-        prune_expired_sessions(&mut sessions);
+        let pruned = prune_expired_sessions(&mut sessions) > 0;
         if sessions
             .values()
             .filter(|session| session.agent_id == agent_id)
             .count()
             >= max_sessions.max(1)
         {
+            drop(sessions);
+            if pruned {
+                self.notify_changed();
+            }
             return Err("agent_terminal_limit_reached");
         }
 
@@ -112,8 +128,13 @@ impl TerminalRegistry {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let expiry = expiry_for_created_at(created_at_unix, session_ttl_seconds)
-            .ok_or("terminal_ttl_invalid")?;
+        let Some(expiry) = expiry_for_created_at(created_at_unix, session_ttl_seconds) else {
+            drop(sessions);
+            if pruned {
+                self.notify_changed();
+            }
+            return Err("terminal_ttl_invalid");
+        };
         sessions.insert(
             terminal_id.clone(),
             TerminalSession {
@@ -133,6 +154,8 @@ impl TerminalRegistry {
                 operator_detached_at: None,
             },
         );
+        drop(sessions);
+        self.notify_changed();
 
         Ok(CreatedTerminal {
             terminal_id,
@@ -145,6 +168,7 @@ impl TerminalRegistry {
 
     pub async fn remove(&self, terminal_id: &str) -> Option<String> {
         let session = self.inner.lock().await.remove(terminal_id)?;
+        self.notify_changed();
         self.remember_closed(terminal_id).await;
         if let Some(tx) = session.agent_tx {
             let _ =
@@ -196,10 +220,10 @@ impl TerminalRegistry {
             })
             .map(|session| session.terminal_id.as_str())
             .collect::<std::collections::HashSet<_>>();
-        let stale_ids = {
+        let (stale_ids, pruned) = {
             let mut sessions = self.inner.lock().await;
-            prune_expired_sessions(&mut sessions);
-            sessions
+            let pruned = prune_expired_sessions(&mut sessions) > 0;
+            let stale_ids = sessions
                 .iter()
                 .filter(|(terminal_id, session)| {
                     session.agent_id == agent_id
@@ -207,13 +231,18 @@ impl TerminalRegistry {
                         && !reported_ids.contains(terminal_id.as_str())
                 })
                 .map(|(terminal_id, _)| terminal_id.clone())
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (stale_ids, pruned)
         };
+        if pruned {
+            self.notify_changed();
+        }
         for terminal_id in stale_ids {
             self.remove(&terminal_id).await;
         }
 
         let mut credentials = Vec::new();
+        let mut changed = false;
         let mut sessions = self.inner.lock().await;
         for reported_session in reported {
             let Some(expiry) = expiry_for_created_at(
@@ -223,9 +252,9 @@ impl TerminalRegistry {
                 continue;
             };
             let terminal_id = reported_session.terminal_id.as_str().to_string();
-            let session = sessions
-                .entry(terminal_id)
-                .or_insert_with(|| TerminalSession {
+            let session = sessions.entry(terminal_id).or_insert_with(|| {
+                changed = true;
+                TerminalSession {
                     agent_id: agent_id.to_string(),
                     created_at_unix: reported_session.created_at_unix,
                     expiry,
@@ -240,7 +269,8 @@ impl TerminalRegistry {
                     operator_id: None,
                     operator_connection_id: None,
                     operator_detached_at: Some(Instant::now()),
-                });
+                }
+            });
             if session.agent_id != agent_id || session.agent_tx.is_some() {
                 continue;
             }
@@ -249,14 +279,24 @@ impl TerminalRegistry {
             session.relay_token = Some(token.clone());
             credentials.push((reported_session.terminal_id.clone(), token));
         }
+        drop(sessions);
+        if changed {
+            self.notify_changed();
+        }
         credentials
     }
 
     pub async fn detach_agent(&self, terminal_id: &str) -> Option<String> {
         let mut sessions = self.inner.lock().await;
         let session = sessions.get_mut(terminal_id)?;
+        let changed = session.agent_tx.is_some();
         session.agent_tx = None;
-        Some(session.agent_id.clone())
+        let agent_id = session.agent_id.clone();
+        drop(sessions);
+        if changed {
+            self.notify_changed();
+        }
+        Some(agent_id)
     }
 
     /// Issues a token while atomically handing this operator's attachment to
@@ -269,17 +309,21 @@ impl TerminalRegistry {
     ) -> Result<String, &'static str> {
         validate_operator_id(operator_id)?;
         let mut sessions = self.inner.lock().await;
-        let target = active_session(&mut sessions, terminal_id)?;
+        let target = active_session(&mut sessions, terminal_id, &self.events)?;
         if target.operator_tx.is_some() && target.operator_id.as_deref() != Some(operator_id) {
             return Err("terminal_operator_already_attached");
         }
 
-        detach_operator_sessions(&mut sessions, operator_id);
+        let detached = detach_operator_sessions(&mut sessions, operator_id);
 
-        let session = active_session(&mut sessions, terminal_id)?;
+        let session = active_session(&mut sessions, terminal_id, &self.events)?;
         let token = new_token();
         session.attachment_token = Some(token.clone());
         session.attachment_operator_id = Some(operator_id.to_string());
+        drop(sessions);
+        if detached {
+            self.notify_changed();
+        }
         Ok(token)
     }
 
@@ -290,7 +334,7 @@ impl TerminalRegistry {
         relay_token: &str,
     ) -> Result<(mpsc::Receiver<TerminalRelayFrame>, Vec<TerminalRelayFrame>), &'static str> {
         let mut sessions = self.inner.lock().await;
-        let session = active_session(&mut sessions, terminal_id)?;
+        let session = active_session(&mut sessions, terminal_id, &self.events)?;
         if session.agent_id != agent_id {
             return Err("terminal_agent_mismatch");
         }
@@ -306,6 +350,8 @@ impl TerminalRegistry {
         session.agent_tx = Some(tx);
         let pending = session.pending_agent.drain(..).collect();
         session.pending_agent_bytes = 0;
+        drop(sessions);
+        self.notify_changed();
         Ok((rx, pending))
     }
 
@@ -317,7 +363,7 @@ impl TerminalRegistry {
     ) -> Result<mpsc::Receiver<TerminalRelayFrame>, &'static str> {
         validate_operator_id(operator_id)?;
         let mut sessions = self.inner.lock().await;
-        let session = active_session(&mut sessions, terminal_id)?;
+        let session = active_session(&mut sessions, terminal_id, &self.events)?;
         if session.operator_tx.is_some() {
             return Err("terminal_operator_already_attached");
         }
@@ -336,7 +382,7 @@ impl TerminalRegistry {
         // WebSocket presents that token, it still atomically releases any
         // older session held by the same browser tab.
         detach_operator_sessions(&mut sessions, operator_id);
-        let session = active_session(&mut sessions, terminal_id)?;
+        let session = active_session(&mut sessions, terminal_id, &self.events)?;
         session.attachment_token = None;
         session.attachment_operator_id = None;
         session.operator_detached_at = None;
@@ -344,6 +390,8 @@ impl TerminalRegistry {
         session.operator_tx = Some(tx);
         session.operator_id = Some(operator_id.to_string());
         session.operator_connection_id = Some(attachment_token.to_string());
+        drop(sessions);
+        self.notify_changed();
         Ok(rx)
     }
 
@@ -357,7 +405,7 @@ impl TerminalRegistry {
         // leave input stranded in the pre-attachment queue.
         let tx = {
             let mut sessions = self.inner.lock().await;
-            let session = active_session(&mut sessions, terminal_id)?;
+            let session = active_session(&mut sessions, terminal_id, &self.events)?;
             if let Some(tx) = session.agent_tx.clone() {
                 tx
             } else {
@@ -385,7 +433,7 @@ impl TerminalRegistry {
     ) -> Result<(), &'static str> {
         let operator_tx = {
             let mut sessions = self.inner.lock().await;
-            let session = active_session(&mut sessions, terminal_id)?;
+            let session = active_session(&mut sessions, terminal_id, &self.events)?;
             session.operator_tx.clone()
         };
 
@@ -397,13 +445,19 @@ impl TerminalRegistry {
                     // Detach its stale sender; the agent's parsed screen remains
                     // authoritative and will reconstruct the next attachment.
                     let mut sessions = self.inner.lock().await;
-                    let session = active_session(&mut sessions, terminal_id)?;
+                    let session = active_session(&mut sessions, terminal_id, &self.events)?;
+                    let mut changed = false;
                     if session
                         .operator_tx
                         .as_ref()
                         .is_some_and(|current| current.same_channel(&tx))
                     {
                         clear_operator_attachment(session);
+                        changed = true;
+                    }
+                    drop(sessions);
+                    if changed {
+                        self.notify_changed();
                     }
                     return Ok(());
                 }
@@ -445,25 +499,36 @@ impl TerminalRegistry {
         }
         let detached_at = Instant::now();
         clear_operator_attachment(session);
+        drop(sessions);
+        self.notify_changed();
         Some(detached_at)
     }
 
     pub async fn summary(&self, terminal_id: &str) -> Option<TerminalSummary> {
         let mut sessions = self.inner.lock().await;
-        prune_expired_sessions(&mut sessions);
-        sessions
+        let pruned = prune_expired_sessions(&mut sessions) > 0;
+        let summary = sessions
             .get(terminal_id)
-            .map(|session| terminal_summary(terminal_id, session))
+            .map(|session| terminal_summary(terminal_id, session));
+        drop(sessions);
+        if pruned {
+            self.notify_changed();
+        }
+        summary
     }
 
     pub async fn summaries(&self) -> Vec<TerminalSummary> {
         let mut sessions = self.inner.lock().await;
-        prune_expired_sessions(&mut sessions);
+        let removed = prune_expired_sessions(&mut sessions);
         let mut summaries = sessions
             .iter()
             .map(|(terminal_id, session)| terminal_summary(terminal_id, session))
             .collect::<Vec<_>>();
         summaries.sort_by_key(|session| std::cmp::Reverse(session.created_at_unix));
+        drop(sessions);
+        if removed > 0 {
+            self.notify_changed();
+        }
         summaries
     }
 }
@@ -482,12 +547,14 @@ fn terminal_summary(terminal_id: &str, session: &TerminalSession) -> TerminalSum
 fn active_session<'a>(
     sessions: &'a mut HashMap<String, TerminalSession>,
     terminal_id: &str,
+    events: &broadcast::Sender<()>,
 ) -> Result<&'a mut TerminalSession, &'static str> {
     if sessions
         .get(terminal_id)
         .is_some_and(|session| session.expiry.is_expired(Instant::now()))
     {
         sessions.remove(terminal_id);
+        let _ = events.send(());
         return Err("terminal_expired");
     }
     sessions.get_mut(terminal_id).ok_or("terminal_not_found")
@@ -500,12 +567,18 @@ fn validate_operator_id(operator_id: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn detach_operator_sessions(sessions: &mut HashMap<String, TerminalSession>, operator_id: &str) {
+fn detach_operator_sessions(
+    sessions: &mut HashMap<String, TerminalSession>,
+    operator_id: &str,
+) -> bool {
+    let mut detached = false;
     for session in sessions.values_mut() {
         if session.operator_id.as_deref() == Some(operator_id) {
             clear_operator_attachment(session);
+            detached = true;
         }
     }
+    detached
 }
 
 fn clear_operator_attachment(session: &mut TerminalSession) {
@@ -523,9 +596,11 @@ fn prune_tombstones(closed: &mut HashMap<String, Instant>) {
     closed.retain(|_, closed_at| closed_at.elapsed() < TERMINAL_TOMBSTONE_TTL);
 }
 
-fn prune_expired_sessions(sessions: &mut HashMap<String, TerminalSession>) {
+fn prune_expired_sessions(sessions: &mut HashMap<String, TerminalSession>) -> usize {
     let now = Instant::now();
+    let old_len = sessions.len();
     sessions.retain(|_, session| !session.expiry.is_expired(now));
+    old_len - sessions.len()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -989,5 +1064,128 @@ mod tests {
         registry.reconcile_agent_sessions("router", &[]).await;
 
         assert!(registry.summary(&created.terminal_id).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn session_events_invalidate_mutations_but_not_reads_or_terminal_bytes() {
+        let registry = TerminalRegistry::new();
+        let mut events = registry.subscribe();
+        let created = registry.create("router".into()).await.expect("create");
+        assert!(events.try_recv().is_ok());
+
+        registry.summaries().await;
+        registry.summary(&created.terminal_id).await;
+        assert!(events.try_recv().is_err(), "ordinary reads emit no event");
+
+        let mut operator = registry
+            .attach_operator(&created.terminal_id, &created.attachment_token, OPERATOR_A)
+            .await
+            .expect("attach operator");
+        assert!(events.try_recv().is_ok());
+        registry
+            .relay_from_agent(
+                &created.terminal_id,
+                TerminalRelayFrame::Binary(b"terminal output".to_vec()),
+            )
+            .await
+            .expect("relay terminal bytes");
+        operator.recv().await.expect("terminal bytes delivered");
+        assert!(events.try_recv().is_err(), "terminal bytes emit no event");
+
+        registry
+            .detach_operator(&created.terminal_id, &created.attachment_token)
+            .await
+            .expect("detach operator");
+        assert!(events.try_recv().is_ok());
+        registry.remove(&created.terminal_id).await.expect("remove");
+        assert!(events.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn lagged_session_receiver_recovers_with_latest_invalidation() {
+        let registry = TerminalRegistry::new();
+        let mut events = registry.subscribe();
+        for _ in 0..(TERMINAL_EVENTS_CAPACITY + 3) {
+            registry
+                .create_with_limits("router".into(), TERMINAL_EVENTS_CAPACITY + 3, 0)
+                .await
+                .expect("create");
+        }
+
+        assert!(matches!(
+            events.try_recv(),
+            Err(broadcast::error::TryRecvError::Lagged(_))
+        ));
+        assert!(events.try_recv().is_ok());
+        assert_eq!(
+            registry.summaries().await.len(),
+            TERMINAL_EVENTS_CAPACITY + 3
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_attach_detach_and_reconciliation_invalidate_catalog_changes() {
+        let registry = TerminalRegistry::new();
+        let mut events = registry.subscribe();
+        let terminal_id = TerminalId::new("reconciled-session").expect("terminal id");
+        let reported = AgentTerminalSession {
+            terminal_id: terminal_id.clone(),
+            created_at_unix: 0,
+            session_ttl_seconds: 0,
+        };
+
+        let credentials = registry
+            .reconcile_agent_sessions("router", std::slice::from_ref(&reported))
+            .await;
+        assert_eq!(credentials.len(), 1);
+        assert!(events.try_recv().is_ok(), "adoption changes the catalog");
+
+        let (_, relay_token) = &credentials[0];
+        registry
+            .attach_agent(terminal_id.as_str(), "router", relay_token)
+            .await
+            .expect("attach agent");
+        assert!(events.try_recv().is_ok());
+        registry
+            .detach_agent(terminal_id.as_str())
+            .await
+            .expect("detach agent");
+        assert!(events.try_recv().is_ok());
+
+        registry.reconcile_agent_sessions("router", &[]).await;
+        assert!(
+            events.try_recv().is_ok(),
+            "reconciliation removes stale session"
+        );
+        assert!(registry.summary(terminal_id.as_str()).await.is_none());
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn pruning_sibling_keeps_requested_summary_and_notifies_once() {
+        let registry = TerminalRegistry::new();
+        let mut events = registry.subscribe();
+        let expired = registry.create("router".into()).await.expect("expired");
+        let live = registry.create("router".into()).await.expect("live");
+        events.try_recv().expect("expired create event");
+        events.try_recv().expect("live create event");
+        registry
+            .inner
+            .lock()
+            .await
+            .get_mut(&expired.terminal_id)
+            .expect("expired session")
+            .expiry = TerminalExpiry::Finite {
+            deadline: Instant::now(),
+            unix: expired.created_at_unix,
+        };
+
+        let summary = registry
+            .summary(&live.terminal_id)
+            .await
+            .expect("live sibling remains available");
+        assert_eq!(summary.terminal_id, live.terminal_id);
+        assert!(matches!(events.try_recv(), Ok(())));
+        assert!(events.try_recv().is_err());
     }
 }

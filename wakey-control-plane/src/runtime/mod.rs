@@ -149,6 +149,10 @@ fn control_api_routes() -> Router<AppState> {
             get(api::list_terminals).post(api::create_terminal),
         )
         .route(
+            "/api/v1/control/terminals/events/ws",
+            get(api::terminal_events_ws),
+        )
+        .route(
             "/api/v1/control/terminals/{terminal_id}",
             get(api::get_terminal).delete(api::close_terminal),
         )

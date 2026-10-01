@@ -27,6 +27,8 @@ type Props = {
   transitions: AlertTransition[];
   audit: AuditEvent[];
   loading: boolean;
+  alertsHealth: { available: boolean; reason?: string } | null;
+  alertsStreamConnected: boolean;
   onRefresh: () => void;
 };
 
@@ -66,6 +68,8 @@ export function DashboardPage({
   transitions,
   audit,
   loading,
+  alertsHealth,
+  alertsStreamConnected,
   onRefresh,
 }: Props) {
   const connected = agents.filter((a) => a.connected).length;
@@ -165,6 +169,20 @@ export function DashboardPage({
           </Link>
         </CardHeader>
         <CardContent>
+          {(!alertsStreamConnected || alertsHealth?.available === false) && (
+            <div
+              aria-live="polite"
+              className="mb-2 text-xs text-muted-foreground"
+            >
+              {!alertsStreamConnected && <div>Alert stream disconnected</div>}
+              {alertsHealth?.available === false && (
+                <div>
+                  Alert results may be stale or unavailable
+                  {alertsHealth.reason ? `: ${alertsHealth.reason}` : ""}
+                </div>
+              )}
+            </div>
+          )}
           <div className="text-2xl font-bold tabular-nums">{alerts.length}</div>
           {Object.keys(severityBuckets).length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1.5">

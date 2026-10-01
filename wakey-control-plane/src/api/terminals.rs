@@ -6,6 +6,7 @@ use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tracing::{info, warn};
 use wakey_agent::protocol::{
     AgentCapability, DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
@@ -242,6 +243,49 @@ pub async fn operator_terminal_ws(
 ) -> Response {
     ws.max_message_size(TERMINAL_MAX_FRAME_BYTES)
         .on_upgrade(move |socket| handle_operator_terminal_socket(state, terminal_id, socket))
+}
+
+pub async fn terminal_events_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    ws.on_upgrade(move |socket| handle_terminal_events_socket(state, socket))
+}
+
+async fn handle_terminal_events_socket(state: AppState, socket: WebSocket) {
+    let mut events = state.terminals.subscribe();
+    let (mut write, mut read) = socket.split();
+    if write
+        .send(Message::Text(r#"{"type":"sessions_changed"}"#.into()))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            event = events.recv() => {
+                match event {
+                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                        if write.send(Message::Text(r#"{"type":"sessions_changed"}"#.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            incoming = read.next() => {
+                match incoming {
+                    Some(Ok(Message::Ping(payload))) => {
+                        if write.send(Message::Pong(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                    Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_))) => {}
+                }
+            }
+        }
+    }
 }
 
 async fn handle_agent_terminal_socket(state: AppState, terminal_id: String, mut socket: WebSocket) {
