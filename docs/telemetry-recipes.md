@@ -103,6 +103,23 @@ sum by (job, instance) (increase(wakey_terminal_backpressure_total[15m]))
 This counts encounters, not their duration and not dropped chunks. A burst of
 image output can raise it while output still arrives intact through backpressure.
 
+Average duration of completed backpressure episodes, in seconds:
+
+```promql
+sum by (job, instance, outcome) (
+  rate(wakey_operation_duration_seconds_sum{operation="terminal_backpressure_wait"}[5m])
+)
+/
+sum by (job, instance, outcome) (
+  rate(wakey_operation_duration_seconds_count{operation="terminal_backpressure_wait"}[5m])
+)
+```
+
+An episode starts when the output channel is full and ends when the pending
+backlog drains or the relay disconnects. It is not per-frame network latency;
+unfinished episodes do not appear until they end. Keep the outcome grouping so
+disconnected episodes are not confused with successfully drained ones.
+
 ## Snapshots
 
 Device entries in successfully sent snapshots over the last hour:

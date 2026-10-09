@@ -35,6 +35,7 @@ struct RelayOutputBuffer {
     sender: Option<mpsc::Sender<Message>>,
     pending: VecDeque<Message>,
     snapshot_pending: bool,
+    backpressure_wait: Option<wakey_core::telemetry::Operation>,
 }
 
 impl RelayOutputBuffer {
@@ -44,6 +45,9 @@ impl RelayOutputBuffer {
     }
 
     fn disconnect(&mut self) {
+        if let Some(mut wait) = self.backpressure_wait.take() {
+            wait.outcome("disconnected");
+        }
         self.sender = None;
         self.pending.clear();
         self.snapshot_pending = false;
@@ -80,6 +84,10 @@ impl RelayOutputBuffer {
         match sender.try_send(frame) {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Full(frame)) => {
+                // One measurement per backlog episode, not per select poll.
+                self.backpressure_wait = Some(wakey_core::telemetry::Operation::new(
+                    "terminal_backpressure_wait",
+                ));
                 wakey_core::telemetry::count(
                     wakey_core::telemetry::Counter::TerminalBackpressure,
                     1,
@@ -111,6 +119,9 @@ impl RelayOutputBuffer {
         permit.send(frame);
         if self.pending.is_empty() {
             self.snapshot_pending = false;
+            if let Some(mut wait) = self.backpressure_wait.take() {
+                wait.outcome("ok");
+            }
         }
     }
 
@@ -134,10 +145,14 @@ impl TerminalState {
         self.parser.screen_mut().set_size(rows, cols);
     }
 
+    #[tracing::instrument(name = "terminal_snapshot_generate", skip_all, fields(bytes = tracing::field::Empty))]
     fn snapshot(&self) -> Vec<u8> {
-        self.parser
+        let snapshot = self
+            .parser
             .screen()
-            .snapshot_formatted(TERMINAL_SCROLLBACK_ROWS)
+            .snapshot_formatted(TERMINAL_SCROLLBACK_ROWS);
+        tracing::Span::current().record("bytes", snapshot.len());
+        snapshot
     }
 }
 
@@ -262,6 +277,7 @@ impl TerminalManager {
 
     #[tracing::instrument(name = "terminal_resume", skip_all, fields(terminal_id = %terminal_id))]
     pub fn resume(&self, terminal_id: &TerminalId, relay_token: String) -> Result<()> {
+        let mut operation = wakey_core::telemetry::Operation::new("terminal_resume");
         let active = self.active.lock().expect("terminal manager poisoned");
         let session = active
             .get(terminal_id.as_str())
@@ -269,6 +285,8 @@ impl TerminalManager {
         if session.relay_credentials.send(relay_token).is_err() {
             anyhow::bail!("terminal session {terminal_id} has stopped");
         }
+        operation.outcome("ok");
+        info!("terminal resume credentials queued for worker");
         Ok(())
     }
 
@@ -1190,6 +1208,7 @@ mod tests {
 
         assert!(relay.is_connected());
         assert!(relay.has_pending());
+        assert!(relay.backpressure_wait.is_some());
         assert_eq!(
             rx.recv().await.expect("original queued frame").into_data(),
             vec![1]
@@ -1202,6 +1221,20 @@ mod tests {
             rx.recv().await.expect("backpressured frame").into_data(),
             vec![2]
         );
+        assert!(!relay.has_pending());
+        assert!(relay.backpressure_wait.is_none());
+    }
+
+    #[test]
+    fn disconnect_finishes_backpressure_episode() {
+        let (tx, _rx) = mpsc::channel(1);
+        let mut relay = RelayOutputBuffer::default();
+        relay.connect(tx);
+        relay.queue_live(Message::Binary(vec![1].into()));
+        relay.queue_live(Message::Binary(vec![2].into()));
+        assert!(relay.backpressure_wait.is_some());
+        relay.disconnect();
+        assert!(relay.backpressure_wait.is_none());
         assert!(!relay.has_pending());
     }
 

@@ -7,7 +7,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::sync::broadcast;
-use tracing::{info, warn};
+use tracing::{Instrument, info, warn};
 use wakey_agent::protocol::{
     AgentCapability, DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
     ServerMessage, TerminalAgentHandshake, TerminalControl, TerminalId, TerminalOperatorHandshake,
@@ -307,10 +307,17 @@ async fn handle_agent_terminal_socket(state: AppState, terminal_id: String, mut 
     let (mut outbound, pending) = match state
         .terminals
         .attach_agent(&terminal_id, &auth.0, &auth.1)
+        .instrument(
+            tracing::info_span!("terminal_agent_transport_attach", terminal_id = %terminal_id),
+        )
         .await
     {
         Ok(outbound) => outbound,
         Err(code) => {
+            warn!(
+                terminal_id,
+                code, "agent terminal transport attachment rejected"
+            );
             close_socket(&mut socket, code).await;
             return;
         }
@@ -393,10 +400,17 @@ async fn handle_operator_terminal_socket(
     let mut outbound = match state
         .terminals
         .attach_operator(&terminal_id, &auth.0, &auth.1)
+        .instrument(
+            tracing::info_span!("terminal_operator_transport_attach", terminal_id = %terminal_id),
+        )
         .await
     {
         Ok(attached) => attached,
         Err(code) => {
+            warn!(
+                terminal_id,
+                code, "operator terminal transport attachment rejected"
+            );
             close_socket(&mut socket, code).await;
             return;
         }
@@ -407,6 +421,7 @@ async fn handle_operator_terminal_socket(
     if let Err(code) = state
         .terminals
         .relay_to_agent(&terminal_id, TerminalRelayFrame::Text(snapshot))
+        .instrument(tracing::info_span!("terminal_snapshot_request", terminal_id = %terminal_id))
         .await
     {
         warn!(terminal_id, code, "failed to request terminal snapshot");

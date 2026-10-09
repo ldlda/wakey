@@ -100,6 +100,12 @@ existing debug events too; inspect them before enabling it broadly.
   with backoff and CC disconnect duration. Sending credentials is not an auth ACK;
   CC's authentication event is the authoritative result. DNS diagnostics are a
   separate lookup, not a measurement of the resolver inside WebSocket connect.
+- Terminal recovery uses `terminal_snapshot_generate` (encoded byte count),
+  transport-attachment spans, and `terminal_snapshot_request`. These measure
+  local work, not browser restoration or end-to-end image replay. Resume operation
+  success means credentials were queued for the worker. `terminal_backpressure_wait`
+  operation durations cover one full-queue backlog episode until it drains (`ok`)
+  or disconnects (`disconnected`); cancellation can retain the default `error` outcome.
 
 Instrument operation boundaries rather than individual rows or terminal chunks.
 Use `skip_all`, explicitly allow count fields, and instrument async futures rather

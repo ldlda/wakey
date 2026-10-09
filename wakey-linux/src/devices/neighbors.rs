@@ -3,9 +3,11 @@ use futures::future::try_join_all;
 use lda_ipjs::subcommands::neighbor;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use tracing::Instrument;
 use wakey_core::{InventoryQuery, NeighborEntry, NeighborState, Query};
 
 /// Resolve a hostname through the local resolver and return all reported IPs.
+#[tracing::instrument(name = "neighbor_hostname_resolve", skip_all)]
 pub async fn get_ips(machine_name: &str) -> Result<impl Iterator<Item = IpAddr>> {
     Ok(tokio::net::lookup_host((machine_name, 0))
         .await
@@ -54,6 +56,10 @@ pub async fn get_neighbors(
     #[cfg(unix)]
     {
         let results = neighbor::nl::get(&ip_filter, &dev_strs, &nud_filter, macs)
+            .instrument(tracing::info_span!(
+                "neighbor_table_read",
+                backend = "netlink"
+            ))
             .await
             .context("rtnetlink failed")?
             .into_iter()
@@ -68,6 +74,7 @@ pub async fn get_neighbors(
         if ip_filter.is_empty() {
             let dev = dev_strs.first().copied();
             results = neighbor::get_with_backend(neighbor::Backend::Json, None, dev, &nud_filter)
+                .instrument(tracing::info_span!("neighbor_table_read", backend = "json"))
                 .await
                 .context("ip -j neigh failed")?
                 .into_iter()
@@ -82,6 +89,7 @@ pub async fn get_neighbors(
                     dev,
                     &nud_filter,
                 )
+                .instrument(tracing::info_span!("neighbor_table_read", backend = "json"))
                 .await
                 .with_context(|| format!("ip -j neigh failed for {ip}"))?
                 .into_iter()
