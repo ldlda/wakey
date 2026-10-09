@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tracing::{debug, info, instrument, warn};
+use tracing::{Instrument, debug, info, instrument, warn};
 
 use crate::config::AgentConfig;
 use crate::protocol::{
@@ -69,22 +69,31 @@ async fn dispatch_inventory(req: InventoryRequest, config: &AgentConfig) -> Resu
     ))
 }
 
+#[instrument(name = "agent_inventory", skip_all, fields(neighbors = tracing::field::Empty, leases = tracing::field::Empty, observations = tracing::field::Empty, devices = tracing::field::Empty))]
 pub async fn inventory_for_config(
     req: InventoryRequest,
     config: &AgentConfig,
 ) -> Result<wakey_core::DeviceInventory> {
     let query = req.into_inventory_query();
-    let neighbors = wakey::wakey_linux::devices::query_neighbors(&query).await?;
+    // This configured path serves both commands and periodic snapshots; keep
+    // phase spans here so neither caller bypasses source timing.
+    let neighbors = wakey::wakey_linux::devices::query_neighbors(&query)
+        .instrument(tracing::info_span!("inventory_neighbors"))
+        .await?;
+    tracing::Span::current().record("neighbors", neighbors.len());
     let leases = wakey::wakey_linux::dhcp::read_dhcp_leases_with_names_from_paths(
         &config.dhcp_leases_path,
         &config.observation_store_path,
         &config.mac_name_cache_path,
     )
+    .instrument(tracing::info_span!("inventory_dhcp_leases"))
     .await?;
+    tracing::Span::current().record("leases", leases.len());
     match wakey::wakey_linux::observations::prune_stale_observations_from_path(
         &config.observation_store_path,
         config.observation_retention_days,
     )
+    .instrument(tracing::info_span!("inventory_observation_prune"))
     .await
     {
         Ok(removed) if removed > 0 => {
@@ -98,6 +107,7 @@ pub async fn inventory_for_config(
     let observations = match wakey::wakey_linux::observations::list_local_observations_from_path(
         &config.observation_store_path,
     )
+    .instrument(tracing::info_span!("inventory_hook_store"))
     .await
     {
         Ok(observations) => observations
@@ -109,6 +119,7 @@ pub async fn inventory_for_config(
             Vec::new()
         }
     };
+    tracing::Span::current().record("observations", observations.len());
     debug!(
         neighbors = neighbors.len(),
         leases = leases.len(),
@@ -123,6 +134,7 @@ pub async fn inventory_for_config(
             &query,
         ),
     };
+    tracing::Span::current().record("devices", inventory.devices.len());
     debug!(
         rows = inventory.devices.len(),
         "dispatched inventory command"
