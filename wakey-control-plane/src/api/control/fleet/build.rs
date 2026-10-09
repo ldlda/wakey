@@ -61,6 +61,7 @@ impl Default for FleetAccumulator {
     }
 }
 
+#[tracing::instrument(name = "fleet_group_devices", skip_all, fields(known = known_devices.len(), observed = agent_devices.len()))]
 pub(crate) fn build_fleet_devices(
     known_devices: Vec<KnownDevice>,
     agent_devices: Vec<AgentDeviceWithChildren>,

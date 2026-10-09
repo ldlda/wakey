@@ -90,6 +90,10 @@ existing debug events too; inspect them before enabling it broadly.
 - Inventory source spans separate neighbor, DHCP lease, and hook-store reads
   from merging. `db_*` spans cover snapshot replacement, fleet reads, and manual
   identity changes, including transaction waits and result assembly where applicable.
+- Fleet spans cover list/load/grouping, refresh fan-out with per-agent outcomes,
+  and wake dispatch. Counts distinguish grouped, filtered, and returned rows;
+  wake events identify the chosen agent and whether the route was explicit,
+  without recording device identifiers or addresses.
 
 Instrument operation boundaries rather than individual rows or terminal chunks.
 Use `skip_all`, explicitly allow count fields, and instrument async futures rather
