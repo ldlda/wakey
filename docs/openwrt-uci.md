@@ -51,15 +51,24 @@ config service 'main'
 ```
 
 The example above uses a placeholder. Avoid typing real credentials into a
-command that your shell will save in history. On OpenWrt's ash, you can instead
+command that your shell will save in history. In an interactive SSH terminal, you can
 read the Basic header without echoing it and send it to UCI over stdin:
 
 ```sh
-read -r -s -p 'Complete Basic authorization header: ' authorization
-printf '\n'
-printf "set wakey.main.otlp_authorization='%s'\ncommit wakey\n" "$authorization" | uci batch
-unset authorization
-chmod 600 /etc/config/wakey
+(
+    set -e
+    terminal_state=$(stty -g </dev/tty)
+    # Restore the original terminal settings even on failure or interruption.
+    trap 'stty "$terminal_state" </dev/tty' 0
+    trap 'exit 1' HUP INT TERM
+    printf 'Complete Basic authorization header: ' >/dev/tty
+    stty -echo </dev/tty
+    IFS= read -r authorization </dev/tty
+    stty "$terminal_state" </dev/tty
+    printf '\n' >/dev/tty
+    printf "set wakey.main.otlp_authorization='%s'\ncommit wakey\n" "$authorization" | uci batch
+    chmod 600 /etc/config/wakey
+)
 ```
 
 Use a normal `Basic <base64>` header here, without quotes/newlines inside the value.

@@ -19,7 +19,13 @@ async fn main() -> Result<()> {
 
     // Only the long-lived daemon exports: hotplug/enroll invocations stay cheap.
     let daemon_config = if let Command::Serve(args) = &cli.command {
-        Some(config::load_config(global_config.unwrap_or(&args.config))?)
+        let path = global_config.unwrap_or(&args.config);
+        // Let serve report its enrollment/setup instructions for a missing file.
+        if path.exists() {
+            Some(config::load_config(path)?)
+        } else {
+            None
+        }
     } else {
         None
     };
