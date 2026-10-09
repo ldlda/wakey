@@ -87,8 +87,21 @@ existing debug events too; inspect them before enabling it broadly.
   persistence separately. Snapshot traces are not yet linked across the wire.
 - Terminal create/attach/close/resume spans describe lifecycle operations, not
   output chunks. Trace-linked OTLP logs use the SDK's tracing-context bridge.
+- Inventory source spans separate neighbor, DHCP lease, and hook-store reads
+  from merging. `db_*` spans cover snapshot replacement, fleet reads, and manual
+  identity changes, including transaction waits and result assembly where applicable.
+
+Instrument operation boundaries rather than individual rows or terminal chunks.
+Use `skip_all`, explicitly allow count fields, and instrument async futures rather
+than holding entered span guards across awaits. Do not record query arguments,
+SQL parameters, device payloads, or credentials. Span names are fixed across requests.
 
 Metrics are exported every 30 seconds and at orderly shutdown:
+
+The table uses OpenTelemetry instrument names. Prometheus conversion typically
+replaces dots with underscores and adds type/unit suffixes; histograms produce
+multiple series. See the [metrics recipe book](telemetry-recipes.md) for discovery
+queries, rates, averages, percentiles, and Grafana units.
 
 | Metric | Meaning |
 | --- | --- |

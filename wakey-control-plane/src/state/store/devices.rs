@@ -1,5 +1,6 @@
 use super::*;
 impl Store {
+    #[tracing::instrument(name = "db_create_known_device", skip_all, fields(identifiers = input.identifiers.len()))]
     pub async fn create_known_device(&self, input: KnownDeviceInput) -> Result<KnownDevice> {
         let display_name = normalize_required_text(&input.display_name, "display_name")?;
         let notes = normalize_optional_text(input.notes.as_deref());
@@ -41,6 +42,7 @@ impl Store {
             .ok_or_else(|| anyhow::anyhow!("created known device disappeared"))
     }
 
+    #[tracing::instrument(name = "db_list_known_devices", skip_all)]
     pub async fn list_known_devices(&self) -> Result<Vec<KnownDevice>> {
         let rows = list_known_device_rows(&self.pool).await?;
 
@@ -52,6 +54,7 @@ impl Store {
         Ok(out)
     }
 
+    #[tracing::instrument(name = "db_get_known_device", skip_all)]
     pub async fn get_known_device(&self, device_id: &str) -> Result<Option<KnownDevice>> {
         let row = get_known_device_row(&self.pool, device_id).await?;
 
@@ -61,6 +64,7 @@ impl Store {
         }
     }
 
+    #[tracing::instrument(name = "db_forget_known_device", skip_all)]
     pub async fn forget_known_device(&self, device_id: &str) -> Result<bool> {
         let result = sqlx::query!("DELETE FROM known_devices WHERE device_id = ?1", device_id)
             .execute(&self.pool)
@@ -69,6 +73,7 @@ impl Store {
         Ok(result.rows_affected() > 0)
     }
 
+    #[tracing::instrument(name = "db_merge_known_devices", skip_all)]
     pub async fn merge_known_devices(
         &self,
         target_device_id: &str,
@@ -134,6 +139,7 @@ impl Store {
         self.get_known_device(target_device_id).await
     }
 
+    #[tracing::instrument(name = "db_attach_device_identifier", skip_all)]
     pub async fn attach_device_identifier(
         &self,
         device_id: &str,
@@ -169,6 +175,7 @@ impl Store {
         self.get_known_device(device_id).await
     }
 
+    #[tracing::instrument(name = "db_detach_device_identifier", skip_all)]
     pub async fn detach_device_identifier(
         &self,
         device_id: &str,

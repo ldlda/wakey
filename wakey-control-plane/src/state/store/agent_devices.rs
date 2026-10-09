@@ -10,6 +10,7 @@ impl Store {
     ///
     /// This is the only write path for agent device state. Every sync source
     /// (WebSocket snapshot, fleet refresh, HTTP upload) must go through here.
+    #[tracing::instrument(name = "db_replace_agent_snapshot", skip_all, fields(devices = devices.len(), accepted = tracing::field::Empty))]
     pub async fn replace_agent_device_snapshot(
         &self,
         agent_id: &str,
@@ -222,10 +223,12 @@ impl Store {
             .await
             .context("failed committing device snapshot")?;
 
+        tracing::Span::current().record("accepted", incoming_keys.len());
         Ok(incoming_keys.len())
     }
 
     /// List all agent device rows with their child MAC/IP/hostname/fact rows.
+    #[tracing::instrument(name = "db_list_fleet_devices", skip_all)]
     pub async fn list_agent_device_rows(&self) -> Result<Vec<AgentDeviceWithChildren>> {
         let devices = sqlx::query_as!(
             AgentDeviceRow,
@@ -290,6 +293,7 @@ impl Store {
 
     /// List agent device rows for a single agent.
     #[allow(dead_code)]
+    #[tracing::instrument(name = "db_list_agent_devices", skip_all)]
     pub async fn list_agent_device_rows_for_agent(
         &self,
         agent_id: &str,

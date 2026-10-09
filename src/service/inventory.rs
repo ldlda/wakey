@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tracing::{debug, warn};
+use tracing::{Instrument, debug, warn};
 use wakey_core::{
     Device, DeviceInventory, DeviceObservationFact, DhcpLease, DhcpLeaseWithState, InventoryQuery,
     NeighborEntry, Presence, Query,
@@ -19,10 +19,28 @@ pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
 /// This is the current center of gravity for the service layer. Higher-level
 /// status and wake flows should prefer deriving from inventory rather than
 /// directly from raw Linux source rows.
+#[tracing::instrument(name = "inventory", skip_all, fields(devices = tracing::field::Empty))]
 pub async fn inventory(query: InventoryQuery) -> Result<DeviceInventory> {
-    let neighbors = wakey_linux::devices::query_neighbors(&query).await?;
-    let leases = get_leases().await?;
-    let observations = match wakey_linux::observations::list_local_observations().await {
+    // Instrument futures, not entered guards: each source remains correctly
+    // parented when Tokio moves the task between workers during an await.
+    let neighbors = async {
+        let rows = wakey_linux::devices::query_neighbors(&query).await?;
+        debug!(rows = rows.len(), "neighbor source collected");
+        Ok::<_, anyhow::Error>(rows)
+    }
+    .instrument(tracing::info_span!("inventory_neighbors"))
+    .await?;
+    let leases = async {
+        let rows = get_leases().await?;
+        debug!(rows = rows.len(), "DHCP source collected");
+        Ok::<_, anyhow::Error>(rows)
+    }
+    .instrument(tracing::info_span!("inventory_dhcp_leases"))
+    .await?;
+    let observations = match wakey_linux::observations::list_local_observations()
+        .instrument(tracing::info_span!("inventory_hook_store"))
+        .await
+    {
         Ok(observations) => observations
             .into_iter()
             .filter_map(local_observation_to_fact)
@@ -39,6 +57,7 @@ pub async fn inventory(query: InventoryQuery) -> Result<DeviceInventory> {
         "building device inventory"
     );
     let devices = merge_devices_with_observations(neighbors, leases, observations, &query);
+    tracing::Span::current().record("devices", devices.len());
     debug!(devices = devices.len(), "merged device inventory");
     Ok(DeviceInventory { devices })
 }
@@ -57,6 +76,7 @@ pub fn merge_devices(
 
 /// Merge raw neighbor entries, DHCP leases, and hook observations into device
 /// aggregates.
+#[tracing::instrument(name = "inventory_merge", skip_all, fields(neighbors = neighbors.len(), leases = leases.len(), observations = observations.len()))]
 pub fn merge_devices_with_observations(
     neighbors: Vec<NeighborEntry>,
     leases: Vec<DhcpLeaseWithState>,
