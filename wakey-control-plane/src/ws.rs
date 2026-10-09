@@ -6,7 +6,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use tracing::{debug, info, info_span, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{
     AgentCapability, AgentCapabilityOptions, AgentTerminalSession, DEFAULT_TERMINAL_MAX_SESSIONS,
@@ -71,9 +71,9 @@ pub async fn agent_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> im
 
 async fn handle_agent_socket(state: AppState, socket: WebSocket) {
     let connection_id = Uuid::new_v4().to_string();
-    let span = info_span!("agent_ws_connection", connection_id = %connection_id);
-    let _span_guard = span.enter();
-    info!("agent websocket upgraded");
+    // Lifecycle events are available immediately; do not hold an entered span
+    // across socket awaits or wait for disconnect to export the connection.
+    info!(%connection_id, "agent websocket upgraded");
     let connected_at = Instant::now();
 
     let (mut write, mut read) = socket.split();
@@ -111,11 +111,11 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
         let msg = match frame {
             Some(Ok(msg)) => msg,
             Some(Err(err)) => {
-                warn!(error = %err, "agent websocket receive error");
+                warn!(%connection_id, error = %err, "agent websocket receive error");
                 break;
             }
             None => {
-                info!("agent websocket stream ended by peer");
+                info!(%connection_id, "agent websocket stream ended by peer");
                 break;
             }
         };
@@ -132,14 +132,14 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
                 )
                 .await
                 {
-                    warn!(error = %err, "closing agent websocket due to protocol/auth error");
+                    warn!(%connection_id, error = %err, "closing agent websocket due to protocol/auth error");
                     break;
                 }
             }
             Message::Ping(_) => {}
             Message::Pong(_) => {}
             Message::Close(frame) => {
-                info!(close = ?frame, "agent websocket close frame received");
+                info!(%connection_id, close = ?frame, "agent websocket close frame received");
                 break;
             }
             Message::Binary(_) => {
@@ -149,7 +149,7 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
     }
 
     if let Some(agent_id) = connection.authed_agent_id {
-        info!(agent_id = %agent_id, "agent disconnected");
+        info!(%connection_id, agent_id = %agent_id, connected_ms = now_duration_ms(connected_at.elapsed()), "agent disconnected");
         let mut sessions = state.sessions.write().await;
         let should_remove = sessions
             .get(&agent_id)
@@ -245,6 +245,7 @@ async fn process_agent_text(
             if !state
                 .store
                 .verify_agent_token(&agent_id, &agent_token)
+                .instrument(info_span!("agent_auth_verify", agent_id = %agent_id, %connection_id))
                 .await
             {
                 warn!(agent_id = %agent_id, "agent auth rejected");

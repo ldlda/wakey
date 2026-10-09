@@ -4,7 +4,7 @@ use std::net::IpAddr;
 use std::time::Instant;
 use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::{debug, error, info, info_span, warn};
+use tracing::{Instrument, debug, error, info, info_span, warn};
 
 use crate::config::AgentConfig;
 use crate::dispatch::{dispatch_command, inventory_for_config};
@@ -25,7 +25,7 @@ pub async fn run(config: AgentConfig) -> Result<()> {
                 backoff = config.reconnect_base_ms.max(100);
             }
             Err(err) => {
-                warn!(error = %err, backoff_ms = backoff, "agent session ended; reconnecting");
+                warn!(agent_id = %config.agent_id, error = %err, backoff_ms = backoff, "agent session ended; reconnecting");
                 sleep(Duration::from_millis(backoff)).await;
                 backoff = next_backoff_ms(backoff, config.reconnect_max_ms);
             }
@@ -40,20 +40,14 @@ async fn run_once(
         crate::terminal::TerminalManagerEvent,
     >,
 ) -> Result<()> {
-    let session_id = format!(
-        "{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or_default()
-    );
-    let span = info_span!("agent_session", session_id = %session_id, agent_id = %config.agent_id);
-    let _span_guard = span.enter(); // the ENTIRETY of below is agent_session.
-
+    // Connection-long spans export too late and entered guards are unsafe across
+    // awaits. Short phase spans export while a healthy socket is still running.
     let ws_url = websocket_url(&config.server_url)?;
     info!(%ws_url, agent_id = %config.agent_id, "connecting agent websocket");
-    if let Some((dns_resolve_ms, resolved_addrs)) = dns_resolution_diagnostics(&ws_url).await {
+    if let Some((dns_resolve_ms, resolved_addrs)) = dns_resolution_diagnostics(&ws_url)
+        .instrument(info_span!("agent_dns", agent_id = %config.agent_id))
+        .await
+    {
         info!(
             host = %ws_url.host_str().unwrap_or(""),
             dns_resolve_ms,
@@ -70,9 +64,17 @@ async fn run_once(
         }
     }
     let connect_started = Instant::now();
-    let (stream, _) = connect_async(ws_url.as_str())
-        .await
-        .context("failed to connect websocket")?;
+    let (stream, _) = async {
+        let mut operation = wakey_core::telemetry::Operation::new("agent_connect");
+        let result = connect_async(ws_url.as_str()).await;
+        if result.is_ok() {
+            operation.outcome("ok");
+        }
+        result
+    }
+    .instrument(info_span!("agent_connect", agent_id = %config.agent_id))
+    .await
+    .context("failed to connect websocket")?;
     let ws_connect_ms = connect_started.elapsed().as_millis() as u64;
     info!(%ws_url, agent_id = %config.agent_id, ws_connect_ms, "agent websocket connected");
     if ws_connect_ms > 10_000 {
@@ -80,33 +82,38 @@ async fn run_once(
     }
     let (mut sink, mut source) = stream.split();
 
-    send_json(
-        &mut sink,
-        &ClientMessage::Hello {
-            agent_id: config.agent_id.clone(),
-            capabilities: agent_capabilities(config),
-            capability_options: AgentCapabilityOptions {
-                terminal: config
-                    .terminal
-                    .enabled
-                    .then_some(TerminalCapabilityOptions {
-                        max_sessions: config.terminal.max_sessions.max(1),
-                        session_ttl_seconds: config.terminal.session_ttl_seconds,
-                    }),
+    async {
+        send_json(
+            &mut sink,
+            &ClientMessage::Hello {
+                agent_id: config.agent_id.clone(),
+                capabilities: agent_capabilities(config),
+                capability_options: AgentCapabilityOptions {
+                    terminal: config
+                        .terminal
+                        .enabled
+                        .then_some(TerminalCapabilityOptions {
+                            max_sessions: config.terminal.max_sessions.max(1),
+                            session_ttl_seconds: config.terminal.session_ttl_seconds,
+                        }),
+                },
             },
-        },
-    )
+        )
+        .await?;
+        send_json(
+            &mut sink,
+            &ClientMessage::Auth {
+                agent_id: config.agent_id.clone(),
+                agent_token: config.agent_token.clone(),
+            },
+        )
+        .await?;
+        send_terminal_sessions(&mut sink, terminal_manager).await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .instrument(info_span!("agent_handshake_send", agent_id = %config.agent_id))
     .await?;
-    send_json(
-        &mut sink,
-        &ClientMessage::Auth {
-            agent_id: config.agent_id.clone(),
-            agent_token: config.agent_token.clone(),
-        },
-    )
-    .await?;
-    send_terminal_sessions(&mut sink, terminal_manager).await?;
-    info!(agent_id = %config.agent_id, "agent websocket session authenticated");
+    info!(agent_id = %config.agent_id, "agent hello and credentials sent; awaiting server traffic");
 
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);

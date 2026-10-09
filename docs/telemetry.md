@@ -94,6 +94,12 @@ existing debug events too; inspect them before enabling it broadly.
   and wake dispatch. Counts distinguish grouped, filtered, and returned rows;
   wake events identify the chosen agent and whether the route was explicit,
   without recording device identifiers or addresses.
+- Connectivity uses short `agent_dns`, `agent_connect`, `agent_handshake_send`,
+  and CC `agent_auth_verify` spans, rather than connection-long spans. Connect
+  attempts also contribute to operation metrics. Lifecycle events report retries
+  with backoff and CC disconnect duration. Sending credentials is not an auth ACK;
+  CC's authentication event is the authoritative result. DNS diagnostics are a
+  separate lookup, not a measurement of the resolver inside WebSocket connect.
 
 Instrument operation boundaries rather than individual rows or terminal chunks.
 Use `skip_all`, explicitly allow count fields, and instrument async futures rather
