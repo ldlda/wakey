@@ -42,6 +42,8 @@ pub struct AgentConfig {
     pub observation_store_path: PathBuf,
     #[serde(default)]
     pub terminal: TerminalConfig,
+    #[serde(default)]
+    pub telemetry: wakey_core::telemetry::TelemetryConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -88,6 +90,7 @@ pub static DEFAULT_CONFIG: LazyLock<AgentConfig> = LazyLock::new(|| AgentConfig 
     mac_name_cache_path: default_mac_name_cache_path(),
     observation_store_path: default_observation_store_path(),
     terminal: TerminalConfig::default(),
+    telemetry: wakey_core::telemetry::TelemetryConfig::default(),
 });
 
 impl fmt::Debug for AgentConfig {
@@ -111,6 +114,7 @@ impl fmt::Debug for AgentConfig {
             .field("mac_name_cache_path", &self.mac_name_cache_path)
             .field("observation_store_path", &self.observation_store_path)
             .field("terminal", &self.terminal)
+            .field("telemetry", &self.telemetry)
             .finish()
     }
 }
@@ -274,6 +278,12 @@ mod tests {
             dhcp_leases_path: "/tmp/test-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/test-names.json".into(),
             observation_store_path: "/tmp/test-observations.json".into(),
+            telemetry: wakey_core::telemetry::TelemetryConfig {
+                otlp_endpoint: Some("http://10.0.0.1:4317".into()),
+                authorization_env: Some("WAKEY_OTLP_AUTHORIZATION".into()),
+                service_name: "router-agent".into(),
+                json_logs: true,
+            },
             terminal: TerminalConfig {
                 enabled: true,
                 shell: "/bin/sh".into(),

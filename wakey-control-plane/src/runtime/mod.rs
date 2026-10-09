@@ -213,6 +213,8 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         use tokio::signal::unix::{SignalKind, signal};
         let mut server = server;
         let mut hup = signal(SignalKind::hangup()).context("failed to install SIGHUP handler")?;
+        let mut terminate =
+            signal(SignalKind::terminate()).context("failed to install SIGTERM handler")?;
         let mut gc_tick = tokio::time::interval(Duration::from_secs(300));
         gc_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -221,6 +223,11 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!("ctrl-c received; shutting down control-plane");
+                    server.abort();
+                    break;
+                }
+                _ = terminate.recv() => {
+                    info!("SIGTERM received; shutting down control-plane");
                     server.abort();
                     break;
                 }

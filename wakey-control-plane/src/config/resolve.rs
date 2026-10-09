@@ -231,6 +231,7 @@ fn resolve_admin_public_url(
 fn resolve_telemetry(file: Option<FileTelemetryConfig>) -> TelemetryConfig {
     let mut out = TelemetryConfig::default();
     if let Some(file) = file {
+        out.authorization_env = file.authorization_env;
         if let Some(endpoint) = file.otlp_endpoint {
             let trimmed = endpoint.trim().to_string();
             if !trimmed.is_empty() {

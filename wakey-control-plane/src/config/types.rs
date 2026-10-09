@@ -23,6 +23,7 @@ pub struct DaemonConfig {
 #[derive(Debug, Clone)]
 pub struct TelemetryConfig {
     pub otlp_endpoint: Option<String>,
+    pub authorization_env: Option<String>,
     pub service_name: String,
     pub json_logs: bool,
 }
@@ -32,6 +33,7 @@ impl Default for TelemetryConfig {
         let defaults = &DEFAULT_CONFIG.telemetry;
         Self {
             otlp_endpoint: defaults.otlp_endpoint.clone(),
+            authorization_env: defaults.authorization_env.clone(),
             service_name: defaults.service_name.clone(),
             json_logs: defaults.json_logs,
         }
@@ -57,6 +59,7 @@ pub(crate) struct FileConfig {
 #[derive(Debug, Deserialize, Default)]
 pub(crate) struct FileTelemetryConfig {
     pub(crate) otlp_endpoint: Option<String>,
+    pub(crate) authorization_env: Option<String>,
     pub(crate) service_name: Option<String>,
     pub(crate) json_logs: Option<bool>,
 }
@@ -81,6 +84,8 @@ pub(crate) struct WritableConfig {
 pub(crate) struct WritableTelemetry {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) otlp_endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) authorization_env: Option<String>,
     pub(crate) service_name: String,
     pub(crate) json_logs: bool,
 }
@@ -98,6 +103,7 @@ pub(crate) static DEFAULT_CONFIG: LazyLock<WritableConfig> = LazyLock::new(|| Wr
     bootstrap_enroll_tokens: Vec::new(),
     telemetry: WritableTelemetry {
         otlp_endpoint: None,
+        authorization_env: None,
         service_name: "wakey-control-plane".to_string(),
         json_logs: false,
     },

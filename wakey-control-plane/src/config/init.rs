@@ -113,6 +113,9 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         ui_dist_dir,
         bootstrap_enroll_tokens,
         telemetry: WritableTelemetry {
+            authorization_env: base_telemetry
+                .authorization_env
+                .or_else(|| defaults.telemetry.authorization_env.clone()),
             otlp_endpoint: args
                 .telemetry_otlp_endpoint
                 .clone()
@@ -223,6 +226,7 @@ bootstrap_enroll_tokens = ["old-token"]
 
 [telemetry]
 otlp_endpoint = "http://otel.example"
+authorization_env = "WAKEY_OTLP_AUTHORIZATION"
 service_name = "old-service"
 json_logs = true
 "#,
@@ -261,6 +265,10 @@ json_logs = true
             Some("/tmp/wakey-base/old.sqlite3")
         );
         assert_eq!(parsed["telemetry"]["json_logs"].as_bool(), Some(true));
+        assert_eq!(
+            parsed["telemetry"]["authorization_env"].as_str(),
+            Some("WAKEY_OTLP_AUTHORIZATION")
+        );
         assert_eq!(
             parsed["telemetry"]["service_name"].as_str(),
             Some("old-service")

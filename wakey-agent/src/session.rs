@@ -195,11 +195,13 @@ where
     .await
 }
 
+#[tracing::instrument(name = "collect_device_snapshot", skip_all)]
 async fn send_device_snapshot_ws<S>(sink: &mut S, config: &AgentConfig) -> Result<usize>
 where
     S: SinkExt<Message> + Unpin,
     <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
 {
+    let mut operation = wakey_core::telemetry::Operation::new("snapshot");
     let req = crate::protocol::InventoryRequest {
         query: None,
         name: None,
@@ -221,6 +223,11 @@ where
     )
     .await?;
     debug!(agent_id = %config.agent_id, devices = count, "sent device snapshot over websocket");
+    operation.outcome("ok");
+    wakey_core::telemetry::count(
+        wakey_core::telemetry::Counter::SnapshotDevices,
+        count as u64,
+    );
     Ok(count)
 }
 
@@ -244,11 +251,16 @@ where
         ServerMessage::Command {
             request_id,
             command,
+            trace_context,
         } => {
             let kind = command_kind(&command);
+            let span = info_span!("execute_command", command = kind, request_id = %request_id);
+            wakey_core::telemetry::set_remote_parent(&span, &trace_context);
+            let mut operation = wakey_core::telemetry::Operation::new(kind);
             info!(request_id = %request_id, command = %kind, "received command from control-plane");
-            match dispatch_command(command, config).await {
+            match tracing::Instrument::instrument(dispatch_command(command, config), span).await {
                 Ok(result) => {
+                    operation.outcome("ok");
                     info!(request_id = %request_id, command = %kind, "command execution completed");
                     send_command_result(sink, request_id, kind, result).await?;
                 }

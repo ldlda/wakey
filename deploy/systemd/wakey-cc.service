@@ -12,6 +12,7 @@ ExecStart=/opt/wakey/bin/wakey-control-plane serve --config-file /etc/wakey-cont
 Restart=on-failure
 RestartSec=2
 Environment=RUST_LOG=info
+EnvironmentFile=-/etc/wakey-control-plane/environment
 
 [Install]
 WantedBy=multi-user.target

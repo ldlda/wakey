@@ -7,12 +7,26 @@ USE_PROCD=1
 NAME=wakey
 BIN=/root/.bin/wakey-agent
 CONFIG=/etc/wakey-agent/config.toml
+UCI_CONFIG=/etc/config/wakey
 
 start_service() {
+    local authorization='' log_filter='info'
+    if [ -f "$UCI_CONFIG" ]; then
+        config_load wakey || return 1
+        config_get authorization main otlp_authorization
+        config_get log_filter main log_filter 'info'
+    fi
     procd_open_instance
     procd_set_param command "$BIN" serve --config "$CONFIG"
     procd_set_param file "$CONFIG"
-    # procd_set_param env RUST_LOG=wakey_agent=debug,wakey=debug
+    if [ -f "$UCI_CONFIG" ]; then
+        procd_append_param file "$UCI_CONFIG"
+    fi
+    procd_set_param env "RUST_LOG=$log_filter"
+    # Pass the complete header as one argument; never log its value.
+    if [ -n "$authorization" ]; then
+        procd_append_param env "WAKEY_OTLP_AUTHORIZATION=$authorization"
+    fi
     procd_set_param respawn 5 1 0
     procd_set_param stdout 1
     procd_set_param stderr 1

@@ -29,6 +29,8 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
     {
         use tokio::signal::unix::{SignalKind, signal};
         let mut hup = signal(SignalKind::hangup()).context("failed to install SIGHUP handler")?;
+        let mut terminate =
+            signal(SignalKind::terminate()).context("failed to install SIGTERM handler")?;
 
         loop {
             tokio::select! {
@@ -37,9 +39,17 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
                     worker.abort();
                     break;
                 }
+                _ = terminate.recv() => {
+                    info!("SIGTERM received; shutting down wakey-agent");
+                    worker.abort();
+                    break;
+                }
                 _ = hup.recv() => {
                     match config::load_config(&args.config) {
                         Ok(new_cfg) => {
+                            if new_cfg.telemetry != cfg.telemetry {
+                                warn!("telemetry configuration changed; restart the daemon to apply it");
+                            }
                             cfg = new_cfg;
                             info!(config_path = %args.config.display(), agent_id = %cfg.agent_id, "reload requested; restarting session with updated config");
                             worker.abort();
@@ -67,6 +77,8 @@ pub async fn serve(args: ServeArgs) -> Result<()> {
         worker.abort();
     }
 
+    // Await the cancelled session task before flushing its telemetry.
+    let _ = worker.await;
     let _ = remove_pid_file(&pid_file);
     Ok(())
 }

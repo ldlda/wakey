@@ -309,12 +309,18 @@ async fn process_agent_text(
                 anyhow::bail!("device_snapshot for unauthenticated or mismatched agent");
             }
             ensure_current_session(state, &agent_id, connection_id).await?;
-            match state
-                .store
-                .replace_agent_device_snapshot(&agent_id, &devices)
-                .await
+            let mut operation = wakey_core::telemetry::Operation::new("snapshot_store");
+            let span = tracing::info_span!("store_device_snapshot", agent_id = %agent_id, devices = devices.len());
+            match tracing::Instrument::instrument(
+                state
+                    .store
+                    .replace_agent_device_snapshot(&agent_id, &devices),
+                span,
+            )
+            .await
             {
                 Ok(accepted) => {
+                    operation.outcome("ok");
                     debug!(agent_id = %agent_id, accepted, "agent websocket device snapshot accepted");
                 }
                 Err(err) => {

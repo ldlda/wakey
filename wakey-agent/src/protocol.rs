@@ -325,6 +325,8 @@ pub enum ServerMessage {
     Command {
         request_id: RequestId,
         command: AgentCommand,
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        trace_context: std::collections::BTreeMap<String, String>,
     },
     SyncDeviceSnapshot,
     SyncTerminalSessions,
@@ -354,6 +356,7 @@ mod tests {
             command: AgentCommand::Leases(LeasesRequest {
                 include_state: true,
             }),
+            trace_context: Default::default(),
         };
 
         let json = serde_json::to_string(&msg).expect("serialize");
@@ -365,6 +368,36 @@ mod tests {
     fn request_id_rejects_empty() {
         let err = RequestId::try_from("   ".to_string()).expect_err("must fail");
         assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn old_commands_without_trace_context_remain_valid() {
+        let message: ServerMessage = serde_json::from_str(r#"{"type":"command","request_id":"req-old","command":{"kind":"leases","include_state":false}}"#).expect("old command");
+        let ServerMessage::Command { trace_context, .. } = message else {
+            panic!("command expected")
+        };
+        assert!(trace_context.is_empty());
+    }
+
+    #[test]
+    fn command_trace_context_roundtrips() {
+        let message = ServerMessage::Command {
+            request_id: RequestId::try_from("req-traced".to_string()).unwrap(),
+            command: AgentCommand::Leases(LeasesRequest {
+                include_state: false,
+            }),
+            trace_context: [(
+                "traceparent".into(),
+                "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01".into(),
+            )]
+            .into(),
+        };
+        let ServerMessage::Command { trace_context, .. } =
+            serde_json::from_str(&serde_json::to_string(&message).unwrap()).unwrap()
+        else {
+            panic!("command expected")
+        };
+        assert!(trace_context.contains_key("traceparent"));
     }
 
     #[test]

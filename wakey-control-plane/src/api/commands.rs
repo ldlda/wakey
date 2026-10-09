@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
-use tracing::{info, info_span, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 use wakey_agent::protocol::{
     AgentCapability, AgentCapabilityOptions, AgentCommand, ErrorPayload, RequestId, ServerMessage,
@@ -85,6 +85,7 @@ pub async fn run_command(
     }
 }
 
+#[tracing::instrument(name = "relay_command", skip_all, fields(agent_id = %agent_id, request_id = tracing::field::Empty, command = tracing::field::Empty))]
 pub async fn relay_agent_command(
     state: &AppState,
     agent_id: &str,
@@ -93,14 +94,11 @@ pub async fn relay_agent_command(
 ) -> Result<RelayCommandResponse, ApiError> {
     let request_id_string = format!("req-{}", Uuid::new_v4());
     let command_kind = command_kind(&command);
+    tracing::Span::current()
+        .record("request_id", &request_id_string)
+        .record("command", command_kind);
     let started = Instant::now();
-    let span = info_span!(
-        "relay_command",
-        agent_id = %agent_id,
-        request_id = %request_id_string,
-        command = %command_kind,
-    );
-    let _span_guard = span.enter();
+    let mut operation = wakey_core::telemetry::Operation::new(command_kind);
 
     let request_id = RequestId::try_from(request_id_string.clone()).map_err(|err| {
         ApiError::new(
@@ -149,6 +147,7 @@ pub async fn relay_agent_command(
     if let Err(err) = tx.send(SessionEvent::Message(ServerMessage::Command {
         request_id,
         command,
+        trace_context: wakey_core::telemetry::current_trace_context(),
     })) {
         state.pending.lock().await.remove(&request_id_string);
         warn!(error = %err, "failed sending command to agent session");
@@ -249,6 +248,7 @@ pub async fn relay_agent_command(
             ));
         }
         Err(_) => {
+            operation.outcome("timeout");
             state.pending.lock().await.remove(&request_id_string);
             warn!(
                 timeout_ms = timeout.as_millis() as u64,
@@ -276,6 +276,11 @@ pub async fn relay_agent_command(
         }
     };
 
+    operation.outcome(if response.status == "ok" {
+        "ok"
+    } else {
+        "error"
+    });
     Ok(response)
 }
 

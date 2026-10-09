@@ -151,6 +151,12 @@ mod tests {
             dhcp_leases_path: "/tmp/custom-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/custom-names.json".into(),
             observation_store_path: "/tmp/custom-observations.json".into(),
+            telemetry: wakey_core::telemetry::TelemetryConfig {
+                otlp_endpoint: Some("http://10.0.0.1:4317".into()),
+                authorization_env: Some("WAKEY_OTLP_AUTHORIZATION".into()),
+                service_name: "router-agent".into(),
+                json_logs: true,
+            },
             terminal: crate::config::TerminalConfig {
                 enabled: true,
                 shell: "/bin/ash".into(),

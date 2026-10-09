@@ -80,6 +80,10 @@ impl RelayOutputBuffer {
         match sender.try_send(frame) {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Full(frame)) => {
+                wakey_core::telemetry::count(
+                    wakey_core::telemetry::Counter::TerminalBackpressure,
+                    1,
+                );
                 self.pending.push_back(frame);
             }
             Err(mpsc::error::TrySendError::Closed(_)) => self.disconnect(),
@@ -169,6 +173,7 @@ impl TerminalManager {
         )
     }
 
+    #[tracing::instrument(name = "terminal_open", skip_all, fields(terminal_id = %terminal_id))]
     pub fn open(
         &self,
         config: &AgentConfig,
@@ -214,6 +219,7 @@ impl TerminalManager {
         let active = Arc::downgrade(&self.active);
         let events = self.events.clone();
         tokio::spawn(async move {
+            let _active_metric = wakey_core::telemetry::ActiveTerminal::new();
             let result = run_terminal(
                 &config,
                 &terminal_id,
@@ -238,6 +244,7 @@ impl TerminalManager {
         Ok(())
     }
 
+    #[tracing::instrument(name = "terminal_close", skip_all, fields(terminal_id = %terminal_id))]
     pub fn close(&self, terminal_id: &TerminalId) -> bool {
         let mut active = self.active.lock().expect("terminal manager poisoned");
         let Some(terminal) = active.get_mut(terminal_id.as_str()) else {
@@ -253,6 +260,7 @@ impl TerminalManager {
         true
     }
 
+    #[tracing::instrument(name = "terminal_resume", skip_all, fields(terminal_id = %terminal_id))]
     pub fn resume(&self, terminal_id: &TerminalId, relay_token: String) -> Result<()> {
         let active = self.active.lock().expect("terminal manager poisoned");
         let session = active
@@ -453,6 +461,7 @@ async fn run_terminal(
                 match read {
                     Ok(0) => break,
                     Ok(count) => {
+                        wakey_core::telemetry::count(wakey_core::telemetry::Counter::TerminalOutputBytes, count as u64);
                         terminal_state.process(&output[..count]);
                         relay_output.queue_live(Message::Binary(output[..count].to_vec().into()));
                     }
@@ -575,6 +584,7 @@ where
                 let Some(message) = incoming else { break; };
                 match message.context("terminal relay websocket receive failed")? {
                     Message::Binary(bytes) => {
+                        wakey_core::telemetry::count(wakey_core::telemetry::Counter::TerminalInputBytes, bytes.len() as u64);
                         pending_input = Some(RelayInput::Binary {
                             generation,
                             bytes: bytes.to_vec(),

@@ -15,9 +15,31 @@ use wakey_agent::protocol;
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    tracing::init(cli.verbose);
     let global_config = cli.config.as_deref();
 
+    // Only the long-lived daemon exports: hotplug/enroll invocations stay cheap.
+    let daemon_config = if let Command::Serve(args) = &cli.command {
+        Some(config::load_config(global_config.unwrap_or(&args.config))?)
+    } else {
+        None
+    };
+    let local_only = wakey_core::telemetry::TelemetryConfig::default();
+    let telemetry = tracing::init(
+        cli.verbose,
+        daemon_config
+            .as_ref()
+            .map(|c| &c.telemetry)
+            .unwrap_or(&local_only),
+        daemon_config.as_ref().map(|c| c.agent_id.as_str()),
+    )?;
+
+    let result = run(cli).await;
+    tokio::task::spawn_blocking(move || telemetry.shutdown()).await?;
+    result
+}
+
+async fn run(cli: Cli) -> Result<()> {
+    let global_config = cli.config.as_deref();
     match cli.command {
         Command::Serve(mut args) => {
             if let Some(config) = global_config {

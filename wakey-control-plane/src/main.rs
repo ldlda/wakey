@@ -28,8 +28,10 @@ async fn main() -> Result<()> {
                 }
             }
             let daemon = config::DaemonConfig::from_serve_args(&args)?;
-            tracing::init(cli.verbose, &daemon.telemetry)?;
-            runtime::serve(daemon).await
+            let telemetry = tracing::init(cli.verbose, &daemon.telemetry)?;
+            let result = runtime::serve(daemon).await;
+            tokio::task::spawn_blocking(move || telemetry.shutdown()).await?;
+            result
         }
         Command::InitConfig(args) => {
             if let Some(path) = config::write_init_config(&args)? {

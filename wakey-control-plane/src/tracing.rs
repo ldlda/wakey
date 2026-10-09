@@ -1,99 +1,22 @@
-use anyhow::{Context, Result};
-use opentelemetry::global;
-use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::{SdkTracerProvider, Tracer};
-use time::UtcOffset;
-use time::format_description::well_known::Rfc3339;
-use tracing_subscriber::fmt::time::OffsetTime;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-
 use crate::config::TelemetryConfig;
+use anyhow::Result;
+pub use wakey_core::telemetry::TelemetryGuard;
 
-pub fn init(verbose: u8, telemetry: &TelemetryConfig) -> Result<()> {
-    let filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new(default_filter(verbose)))
-        .expect("static tracing filter should parse");
-
-    let otel = build_otel_layer(telemetry)?;
-
-    if telemetry.json_logs {
-        if let Some(otel_layer) = otel {
-            tracing_subscriber::registry()
-                .with(otel_layer)
-                .with(filter)
-                .with(fmt::layer().json().with_timer(local_offset_timer()))
-                .init();
-            tracing::info!(endpoint = ?telemetry.otlp_endpoint, json_logs = telemetry.json_logs, "tracing initialized with otlp exporter");
-        } else {
-            tracing_subscriber::registry()
-                .with(filter)
-                .with(fmt::layer().json().with_timer(local_offset_timer()))
-                .init();
-            tracing::info!(
-                json_logs = telemetry.json_logs,
-                "tracing initialized without otlp exporter"
-            );
-        }
-    } else if let Some(otel_layer) = otel {
-        tracing_subscriber::registry()
-            .with(otel_layer)
-            .with(filter)
-            .with(fmt::layer().with_timer(local_offset_timer()))
-            .init();
-        tracing::info!(endpoint = ?telemetry.otlp_endpoint, json_logs = telemetry.json_logs, "tracing initialized with otlp exporter");
-    } else {
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(fmt::layer().with_timer(local_offset_timer()))
-            .init();
-        tracing::info!(
-            json_logs = telemetry.json_logs,
-            "tracing initialized without otlp exporter"
-        );
-    }
-
-    Ok(())
-}
-
-fn build_otel_layer(
-    telemetry: &TelemetryConfig,
-) -> Result<Option<tracing_opentelemetry::OpenTelemetryLayer<tracing_subscriber::Registry, Tracer>>>
-{
-    let Some(endpoint) = telemetry.otlp_endpoint.as_deref() else {
-        return Ok(None);
+pub fn init(verbose: u8, telemetry: &TelemetryConfig) -> Result<TelemetryGuard> {
+    let config = wakey_core::telemetry::TelemetryConfig {
+        otlp_endpoint: telemetry.otlp_endpoint.clone(),
+        authorization_env: telemetry.authorization_env.clone(),
+        service_name: telemetry.service_name.clone(),
+        json_logs: telemetry.json_logs,
     };
-
-    let exporter = opentelemetry_otlp::SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint(endpoint)
-        .build()
-        .context("failed to build OTLP span exporter")?;
-
-    let provider = SdkTracerProvider::builder()
-        .with_batch_exporter(exporter)
-        .with_resource(
-            Resource::builder_empty()
-                .with_service_name(telemetry.service_name.clone())
-                .build(),
-        )
-        .build();
-
-    let tracer = provider.tracer(telemetry.service_name.clone());
-    global::set_tracer_provider(provider);
-    Ok(Some(tracing_opentelemetry::layer().with_tracer(tracer)))
-}
-
-fn default_filter(verbose: u8) -> &'static str {
-    match verbose {
-        0 => "wakey_control_plane=info",
-        1 => "wakey_control_plane=debug",
-        _ => "wakey_control_plane=trace",
-    }
-}
-
-fn local_offset_timer() -> OffsetTime<Rfc3339> {
-    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
-    OffsetTime::new(offset, Rfc3339)
+    wakey_core::telemetry::init(
+        &config,
+        "wakey-control-plane",
+        match verbose {
+            0 => "wakey_control_plane=info,wakey_core=info,opentelemetry=warn",
+            1 => "wakey_control_plane=debug,wakey_core=info,opentelemetry=warn",
+            _ => "wakey_control_plane=trace,wakey_core=info,opentelemetry=warn",
+        },
+        None,
+    )
 }

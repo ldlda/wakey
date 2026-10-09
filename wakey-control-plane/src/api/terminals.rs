@@ -49,6 +49,7 @@ pub struct TerminalSessionResponse {
     pub attachment_token: Option<String>,
 }
 
+#[tracing::instrument(name = "terminal_create", skip_all)]
 pub async fn create_terminal(
     State(state): State<AppState>,
     Json(request): Json<CreateTerminalRequest>,
@@ -183,6 +184,7 @@ pub async fn list_terminals(State(state): State<AppState>) -> Json<Vec<TerminalS
     )
 }
 
+#[tracing::instrument(name = "terminal_attach", skip_all)]
 pub async fn attach_terminal(
     State(state): State<AppState>,
     Path(terminal_id): Path<String>,
@@ -210,6 +212,7 @@ pub async fn attach_terminal(
     }))
 }
 
+#[tracing::instrument(name = "terminal_close", skip_all)]
 pub async fn close_terminal(
     State(state): State<AppState>,
     Path(terminal_id): Path<String>,
