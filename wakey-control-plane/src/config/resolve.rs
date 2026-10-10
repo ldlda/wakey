@@ -33,10 +33,7 @@ impl DaemonConfig {
                         args.config_file.display()
                     )
                 })?,
-                None => defaults
-                    .bind
-                    .parse()
-                    .expect("static default bind should parse"),
+                None => defaults.bind,
             },
         };
 
@@ -57,21 +54,21 @@ impl DaemonConfig {
         let command_timeout = Duration::from_millis(
             args.command_timeout_ms
                 .or(file.command_timeout_ms)
-                .unwrap_or(defaults.command_timeout_ms)
+                .unwrap_or(defaults.command_timeout.as_millis() as u64)
                 .max(1),
         );
 
         let enroll_token_ttl = Duration::from_secs(
             args.enroll_token_ttl_seconds
                 .or(file.enroll_token_ttl_seconds)
-                .unwrap_or(defaults.enroll_token_ttl_seconds)
+                .unwrap_or(defaults.enroll_token_ttl.as_secs())
                 .max(1),
         );
 
         let observation_retention = Duration::from_secs(
             args.observation_retention_seconds
                 .or(file.observation_retention_seconds)
-                .unwrap_or(defaults.observation_retention_seconds)
+                .unwrap_or(defaults.observation_retention.as_secs())
                 .max(1),
         );
 
@@ -146,7 +143,7 @@ pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<Issue
     let ttl = Duration::from_secs(
         args.ttl_seconds
             .or(file.enroll_token_ttl_seconds)
-            .unwrap_or(defaults.enroll_token_ttl_seconds)
+            .unwrap_or(defaults.enroll_token_ttl.as_secs())
             .max(1),
     );
 
@@ -229,7 +226,8 @@ fn resolve_admin_public_url(
 }
 
 fn resolve_telemetry(file: Option<FileTelemetryConfig>) -> TelemetryConfig {
-    let mut out = TelemetryConfig::default();
+    // Service-specific defaults live in the CC template, not the shared type.
+    let mut out = DEFAULT_CONFIG.telemetry.clone();
     if let Some(file) = file {
         out.authorization_env = file.authorization_env;
         out.console_filter = file.console_filter;
@@ -344,10 +342,7 @@ mod tests {
             resolved.state_file,
             defaults.data_dir.join(&defaults.state_file)
         );
-        assert_eq!(
-            resolved.command_timeout,
-            std::time::Duration::from_millis(defaults.command_timeout_ms)
-        );
+        assert_eq!(resolved.command_timeout, defaults.command_timeout);
         assert_eq!(
             resolved.telemetry.service_name,
             defaults.telemetry.service_name

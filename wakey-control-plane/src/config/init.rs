@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 
 use crate::cli::{InitConfigArgs, ServeArgs};
 use crate::config::resolve::{load_file_config, normalize_public_url, resolve_path};
-use crate::config::types::{DEFAULT_CONFIG, WritableConfig, WritableTelemetry};
+use crate::config::types::{DEFAULT_CONFIG, FileConfig, FileTelemetryConfig};
 
 pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
     if args.stdout && args.config_file.is_some() {
@@ -44,10 +44,7 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
                         .unwrap_or_else(|| "<defaults>".to_string())
                 )
             })?,
-            None => defaults
-                .bind
-                .parse()
-                .expect("static default bind should parse"),
+            None => defaults.bind,
         },
     };
     let public_url = normalize_public_url(
@@ -90,29 +87,35 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         args.bootstrap_enroll_tokens.clone()
     };
 
-    let body = WritableConfig {
-        data_dir,
-        bind: bind.to_string(),
-        public_url,
-        state_file,
-        command_timeout_ms: args
-            .command_timeout_ms
-            .or(base.command_timeout_ms)
-            .unwrap_or(defaults.command_timeout_ms)
-            .max(1),
-        enroll_token_ttl_seconds: args
-            .enroll_token_ttl_seconds
-            .or(base.enroll_token_ttl_seconds)
-            .unwrap_or(defaults.enroll_token_ttl_seconds)
-            .max(1),
-        observation_retention_seconds: args
-            .observation_retention_seconds
-            .or(base.observation_retention_seconds)
-            .unwrap_or(defaults.observation_retention_seconds),
-        pid_file,
-        ui_dist_dir,
-        bootstrap_enroll_tokens,
-        telemetry: WritableTelemetry {
+    let body = FileConfig {
+        data_dir: Some(data_dir),
+        bind: Some(bind.to_string()),
+        public_url: Some(public_url),
+        state_file: Some(state_file),
+        command_timeout_ms: Some(
+            args.command_timeout_ms
+                .or(base.command_timeout_ms)
+                .unwrap_or(defaults.command_timeout.as_millis() as u64)
+                .max(1),
+        ),
+        enroll_token_ttl_seconds: Some(
+            args.enroll_token_ttl_seconds
+                .or(base.enroll_token_ttl_seconds)
+                .unwrap_or(defaults.enroll_token_ttl.as_secs())
+                .max(1),
+        ),
+        observation_retention_seconds: Some(
+            args.observation_retention_seconds
+                .or(base.observation_retention_seconds)
+                .unwrap_or(defaults.observation_retention.as_secs()),
+        ),
+        pid_file: Some(pid_file),
+        ui_dist_dir: Some(ui_dist_dir),
+        // Preserve the previous generated template's omission of an empty list.
+        // Explicit empty lists still round-trip through FileConfig unchanged.
+        bootstrap_enroll_tokens: (!bootstrap_enroll_tokens.is_empty())
+            .then_some(bootstrap_enroll_tokens),
+        telemetry: Some(FileTelemetryConfig {
             console_filter: base_telemetry
                 .console_filter
                 .or_else(|| defaults.telemetry.console_filter.clone()),
@@ -130,16 +133,18 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
                 .clone()
                 .or(base_telemetry.otlp_endpoint)
                 .or_else(|| defaults.telemetry.otlp_endpoint.clone()),
-            service_name: args
-                .telemetry_service_name
-                .clone()
-                .or(base_telemetry.service_name)
-                .unwrap_or_else(|| defaults.telemetry.service_name.clone()),
-            json_logs: args
-                .telemetry_json_logs
-                .or(base_telemetry.json_logs)
-                .unwrap_or(defaults.telemetry.json_logs),
-        },
+            service_name: Some(
+                args.telemetry_service_name
+                    .clone()
+                    .or(base_telemetry.service_name)
+                    .unwrap_or_else(|| defaults.telemetry.service_name.clone()),
+            ),
+            json_logs: Some(
+                args.telemetry_json_logs
+                    .or(base_telemetry.json_logs)
+                    .unwrap_or(defaults.telemetry.json_logs),
+            ),
+        }),
     };
 
     let rendered = toml::to_string_pretty(&body).context("failed to render config template")?;
@@ -332,7 +337,7 @@ json_logs = true
         );
         assert_eq!(
             parsed["command_timeout_ms"].as_integer(),
-            Some(defaults.command_timeout_ms as i64)
+            Some(defaults.command_timeout.as_millis() as i64)
         );
         assert_eq!(
             parsed["telemetry"]["service_name"].as_str(),

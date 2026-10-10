@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+pub use wakey_core::telemetry::TelemetryConfig;
 
 #[derive(Debug, Clone)]
 pub struct DaemonConfig {
@@ -20,33 +21,9 @@ pub struct DaemonConfig {
     pub telemetry: TelemetryConfig,
 }
 
-#[derive(Debug, Clone)]
-pub struct TelemetryConfig {
-    pub console_filter: Option<String>,
-    pub otlp_log_filter: Option<String>,
-    pub trace_filter: Option<String>,
-    pub otlp_endpoint: Option<String>,
-    pub authorization_env: Option<String>,
-    pub service_name: String,
-    pub json_logs: bool,
-}
-
-impl Default for TelemetryConfig {
-    fn default() -> Self {
-        let defaults = &DEFAULT_CONFIG.telemetry;
-        Self {
-            console_filter: defaults.console_filter.clone(),
-            otlp_log_filter: defaults.otlp_log_filter.clone(),
-            trace_filter: defaults.trace_filter.clone(),
-            otlp_endpoint: defaults.otlp_endpoint.clone(),
-            authorization_env: defaults.authorization_env.clone(),
-            service_name: defaults.service_name.clone(),
-            json_logs: defaults.json_logs,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Default)]
+/// TOML DTO for both loading partial files and generating complete files.
+/// Options preserve omission for precedence; runtime conversion stays separate.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub(crate) struct FileConfig {
     pub(crate) data_dir: Option<PathBuf>,
     pub(crate) bind: Option<String>,
@@ -62,8 +39,10 @@ pub(crate) struct FileConfig {
     pub(crate) telemetry: Option<FileTelemetryConfig>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub(crate) struct FileTelemetryConfig {
+    // Missing fields must remain distinguishable from explicit values when
+    // init-config merges an existing file with CLI overrides and defaults.
     pub(crate) console_filter: Option<String>,
     pub(crate) otlp_log_filter: Option<String>,
     pub(crate) trace_filter: Option<String>,
@@ -73,50 +52,19 @@ pub(crate) struct FileTelemetryConfig {
     pub(crate) json_logs: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct WritableConfig {
-    pub(crate) data_dir: PathBuf,
-    pub(crate) bind: String,
-    pub(crate) public_url: String,
-    pub(crate) state_file: PathBuf,
-    pub(crate) command_timeout_ms: u64,
-    pub(crate) enroll_token_ttl_seconds: u64,
-    pub(crate) observation_retention_seconds: u64,
-    pub(crate) pid_file: PathBuf,
-    pub(crate) ui_dist_dir: PathBuf,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) bootstrap_enroll_tokens: Vec<String>,
-    pub(crate) telemetry: WritableTelemetry,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct WritableTelemetry {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) console_filter: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) otlp_log_filter: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) trace_filter: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) otlp_endpoint: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) authorization_env: Option<String>,
-    pub(crate) service_name: String,
-    pub(crate) json_logs: bool,
-}
-
-pub(crate) static DEFAULT_CONFIG: LazyLock<WritableConfig> = LazyLock::new(|| WritableConfig {
+// Relative template paths are resolved under data_dir by the runtime loader.
+pub(crate) static DEFAULT_CONFIG: LazyLock<DaemonConfig> = LazyLock::new(|| DaemonConfig {
     data_dir: crate::cli::DEFAULT_DATA_DIR.into(),
-    bind: "0.0.0.0:8080".to_string(),
+    bind: SocketAddr::from(([0, 0, 0, 0], 8080)),
     public_url: "http://127.0.0.1:8080".to_string(),
     state_file: "state.sqlite3".into(),
-    command_timeout_ms: 30_000,
-    enroll_token_ttl_seconds: 86_400,
-    observation_retention_seconds: 2_592_000,
+    command_timeout: Duration::from_millis(30_000),
+    enroll_token_ttl: Duration::from_secs(86_400),
+    observation_retention: Duration::from_secs(2_592_000),
     pid_file: "wakey-control-plane.pid".into(),
     ui_dist_dir: "ui/dist".into(),
     bootstrap_enroll_tokens: Vec::new(),
-    telemetry: WritableTelemetry {
+    telemetry: TelemetryConfig {
         console_filter: None,
         otlp_log_filter: None,
         trace_filter: None,
@@ -138,4 +86,42 @@ pub struct StateAccessSettings {
     pub data_dir: PathBuf,
     pub state_file: PathBuf,
     pub public_url: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FileConfig, FileTelemetryConfig};
+
+    #[test]
+    fn file_dto_round_trip_preserves_omission_and_explicit_values() {
+        let omitted: FileConfig = toml::from_str("").unwrap();
+        assert_eq!(omitted, FileConfig::default());
+        assert_eq!(toml::to_string(&omitted).unwrap(), "");
+
+        let explicit = FileConfig {
+            bootstrap_enroll_tokens: Some(Vec::new()),
+            observation_retention_seconds: Some(0),
+            telemetry: Some(FileTelemetryConfig {
+                json_logs: Some(false),
+                console_filter: Some("info".into()),
+                otlp_log_filter: Some("debug".into()),
+                trace_filter: Some("info".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let rendered = toml::to_string_pretty(&explicit).unwrap();
+        let restored: FileConfig = toml::from_str(&rendered).unwrap();
+        assert_eq!(restored, explicit);
+        assert_ne!(restored, omitted);
+    }
+
+    #[test]
+    fn legacy_token_alias_serializes_with_canonical_name() {
+        let file: FileConfig = toml::from_str("enroll_tokens = []").unwrap();
+        assert_eq!(file.bootstrap_enroll_tokens, Some(Vec::new()));
+        let rendered = toml::to_string(&file).unwrap();
+        assert!(rendered.contains("bootstrap_enroll_tokens = []"));
+        assert!(!rendered.starts_with("enroll_tokens"));
+    }
 }
