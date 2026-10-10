@@ -72,8 +72,20 @@ once after installing the updated unit. OpenWrt's HUP reload does not reload the
 process environment. For a foreground WSL test, export the variable in that shell
 and use `http://127.0.0.1:4317` with the SSH tunnel; do not put credentials in CLI args.
 
-`RUST_LOG` overrides the verbosity defaults for both local output and exports.
-For example, `RUST_LOG=warn` suppresses informational command spans as well as logs.
+Console logs, OTLP logs, and traces can have independent filters:
+
+```toml
+[telemetry]
+console_filter = "info"
+otlp_log_filter = "debug"
+trace_filter = "info"
+```
+
+For each signal, an explicit filter wins over `RUST_LOG`, which wins over CLI
+verbosity (`-v`). With no filters, environment override, or verbosity flags, the
+application defaults remain info-level with SDK warnings. Metrics are unaffected.
+Explicit filters must be valid and nonempty; changing them requires a restart.
+Without explicit filters, `RUST_LOG=warn` suppresses informational spans and logs.
 Use `wakey_agent=info,wakey=info,wakey_core=info,opentelemetry=warn` for the agent and
 `wakey_control_plane=info,wakey_core=info,opentelemetry=warn` for CC. Exporter warnings
 remain local to prevent export-failure feedback loops. Increasing verbosity exports the

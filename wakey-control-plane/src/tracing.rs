@@ -8,6 +8,9 @@ pub fn init(verbose: u8, telemetry: &TelemetryConfig) -> Result<TelemetryGuard> 
         authorization_env: telemetry.authorization_env.clone(),
         service_name: telemetry.service_name.clone(),
         json_logs: telemetry.json_logs,
+        console_filter: telemetry.console_filter.clone(),
+        otlp_log_filter: telemetry.otlp_log_filter.clone(),
+        trace_filter: telemetry.trace_filter.clone(),
     };
     wakey_core::telemetry::init(
         &config,

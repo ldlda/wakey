@@ -232,6 +232,9 @@ fn resolve_telemetry(file: Option<FileTelemetryConfig>) -> TelemetryConfig {
     let mut out = TelemetryConfig::default();
     if let Some(file) = file {
         out.authorization_env = file.authorization_env;
+        out.console_filter = file.console_filter;
+        out.otlp_log_filter = file.otlp_log_filter;
+        out.trace_filter = file.trace_filter;
         if let Some(endpoint) = file.otlp_endpoint {
             let trimmed = endpoint.trim().to_string();
             if !trimmed.is_empty() {

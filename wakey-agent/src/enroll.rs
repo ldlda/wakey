@@ -156,6 +156,7 @@ mod tests {
                 authorization_env: Some("WAKEY_OTLP_AUTHORIZATION".into()),
                 service_name: "router-agent".into(),
                 json_logs: true,
+                ..Default::default()
             },
             terminal: crate::config::TerminalConfig {
                 enabled: true,

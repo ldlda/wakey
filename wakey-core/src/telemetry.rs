@@ -28,6 +28,13 @@ pub struct TelemetryConfig {
     pub authorization_env: Option<String>,
     pub service_name: String,
     pub json_logs: bool,
+    /// Explicit per-signal filters override RUST_LOG and CLI verbosity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub console_filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub otlp_log_filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_filter: Option<String>,
 }
 
 /// Owns providers until all instrumented work has stopped; flush off the async workers.
@@ -59,8 +66,12 @@ pub fn init(
     default_filter: &str,
     instance: Option<&str>,
 ) -> Result<TelemetryGuard> {
-    let filter =
-        EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new(default_filter))?;
+    let rust_log = std::env::var("RUST_LOG").ok();
+    let console_filter = signal_filter(
+        config.console_filter.as_deref(),
+        rust_log.as_deref(),
+        default_filter,
+    )?;
     let service = if config.service_name.is_empty() {
         service
     } else {
@@ -72,6 +83,18 @@ pub fn init(
         .as_deref()
         .filter(|s| !s.trim().is_empty())
     {
+        // Filters belong to individual layers: a quiet console must not globally
+        // disable debug events needed by the OTLP log exporter.
+        let trace_filter = signal_filter(
+            config.trace_filter.as_deref(),
+            rust_log.as_deref(),
+            default_filter,
+        )?;
+        let log_filter = signal_filter(
+            config.otlp_log_filter.as_deref(),
+            rust_log.as_deref(),
+            default_filter,
+        )?;
         let metadata = authorization_metadata(config.authorization_env.as_deref(), |name| {
             std::env::var(name).ok()
         })?;
@@ -137,24 +160,33 @@ pub fn init(
         global::set_tracer_provider(traces.clone());
         global::set_meter_provider(metrics.clone());
         let _ = METRICS.set(Instruments::new());
-        let otel = tracing_opentelemetry::layer().with_tracer(traces.tracer(service.to_owned()));
+        let otel = tracing_opentelemetry::layer()
+            .with_tracer(traces.tracer(service.to_owned()))
+            .with_filter(trace_filter);
         // Exporter failures must remain local, never feed back into the failing exporter.
         let logs_layer =
             opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&logs)
+                .with_filter(log_filter)
                 .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
                     !metadata.target().starts_with("opentelemetry")
                 }));
-        let subscriber = tracing_subscriber::registry()
-            .with(filter)
-            .with(otel)
-            .with(logs_layer);
+        let subscriber = tracing_subscriber::registry().with(otel).with(logs_layer);
         if config.json_logs {
             subscriber
-                .with(fmt::layer().json().with_timer(local_timer()))
+                .with(
+                    fmt::layer()
+                        .json()
+                        .with_timer(local_timer())
+                        .with_filter(console_filter),
+                )
                 .try_init()?;
         } else {
             subscriber
-                .with(fmt::layer().with_timer(local_timer()))
+                .with(
+                    fmt::layer()
+                        .with_timer(local_timer())
+                        .with_filter(console_filter),
+                )
                 .try_init()?;
         }
         guard = TelemetryGuard {
@@ -164,16 +196,44 @@ pub fn init(
         };
     } else if config.json_logs {
         tracing_subscriber::registry()
-            .with(filter)
-            .with(fmt::layer().json().with_timer(local_timer()))
+            .with(
+                fmt::layer()
+                    .json()
+                    .with_timer(local_timer())
+                    .with_filter(console_filter),
+            )
             .try_init()?;
     } else {
         tracing_subscriber::registry()
-            .with(filter)
-            .with(fmt::layer().with_timer(local_timer()))
+            .with(
+                fmt::layer()
+                    .with_timer(local_timer())
+                    .with_filter(console_filter),
+            )
             .try_init()?;
     }
     Ok(guard)
+}
+
+fn signal_filter(
+    explicit: Option<&str>,
+    rust_log: Option<&str>,
+    default_filter: &str,
+) -> Result<EnvFilter> {
+    if let Some(value) = explicit {
+        anyhow::ensure!(
+            !value.trim().is_empty(),
+            "telemetry filter must not be empty"
+        );
+        return EnvFilter::try_new(value).context("invalid telemetry filter");
+    }
+    // Preserve the existing fallback for an absent or invalid RUST_LOG.
+    rust_log
+        .and_then(|value| EnvFilter::try_new(value).ok())
+        .map(Ok)
+        .unwrap_or_else(|| {
+            EnvFilter::try_new(default_filter).context("invalid default telemetry filter")
+        })
 }
 
 fn authorization_metadata(
@@ -364,6 +424,30 @@ impl Drop for ActiveTerminal {
 
 #[cfg(test)]
 mod auth_tests {
+    #[test]
+    fn explicit_signal_filters_override_environment_and_validate() {
+        assert_eq!(
+            super::signal_filter(Some("debug"), Some("warn"), "info")
+                .unwrap()
+                .to_string(),
+            "debug"
+        );
+        assert_eq!(
+            super::signal_filter(None, Some("warn"), "info")
+                .unwrap()
+                .to_string(),
+            "warn"
+        );
+        assert_eq!(
+            super::signal_filter(None, None, "info")
+                .unwrap()
+                .to_string(),
+            "info"
+        );
+        assert!(super::signal_filter(Some(""), None, "info").is_err());
+        assert!(super::signal_filter(Some("["), None, "info").is_err());
+    }
+
     use super::*;
 
     #[test]

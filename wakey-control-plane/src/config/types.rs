@@ -22,6 +22,9 @@ pub struct DaemonConfig {
 
 #[derive(Debug, Clone)]
 pub struct TelemetryConfig {
+    pub console_filter: Option<String>,
+    pub otlp_log_filter: Option<String>,
+    pub trace_filter: Option<String>,
     pub otlp_endpoint: Option<String>,
     pub authorization_env: Option<String>,
     pub service_name: String,
@@ -32,6 +35,9 @@ impl Default for TelemetryConfig {
     fn default() -> Self {
         let defaults = &DEFAULT_CONFIG.telemetry;
         Self {
+            console_filter: defaults.console_filter.clone(),
+            otlp_log_filter: defaults.otlp_log_filter.clone(),
+            trace_filter: defaults.trace_filter.clone(),
             otlp_endpoint: defaults.otlp_endpoint.clone(),
             authorization_env: defaults.authorization_env.clone(),
             service_name: defaults.service_name.clone(),
@@ -58,6 +64,9 @@ pub(crate) struct FileConfig {
 
 #[derive(Debug, Deserialize, Default)]
 pub(crate) struct FileTelemetryConfig {
+    pub(crate) console_filter: Option<String>,
+    pub(crate) otlp_log_filter: Option<String>,
+    pub(crate) trace_filter: Option<String>,
     pub(crate) otlp_endpoint: Option<String>,
     pub(crate) authorization_env: Option<String>,
     pub(crate) service_name: Option<String>,
@@ -83,6 +92,12 @@ pub(crate) struct WritableConfig {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct WritableTelemetry {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) console_filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) otlp_log_filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) trace_filter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) otlp_endpoint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) authorization_env: Option<String>,
@@ -102,6 +117,9 @@ pub(crate) static DEFAULT_CONFIG: LazyLock<WritableConfig> = LazyLock::new(|| Wr
     ui_dist_dir: "ui/dist".into(),
     bootstrap_enroll_tokens: Vec::new(),
     telemetry: WritableTelemetry {
+        console_filter: None,
+        otlp_log_filter: None,
+        trace_filter: None,
         otlp_endpoint: None,
         authorization_env: None,
         service_name: "wakey-control-plane".to_string(),

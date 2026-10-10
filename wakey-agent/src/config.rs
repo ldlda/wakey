@@ -283,6 +283,9 @@ mod tests {
                 authorization_env: Some("WAKEY_OTLP_AUTHORIZATION".into()),
                 service_name: "router-agent".into(),
                 json_logs: true,
+                console_filter: Some("info".into()),
+                otlp_log_filter: Some("debug".into()),
+                trace_filter: Some("info".into()),
             },
             terminal: TerminalConfig {
                 enabled: true,

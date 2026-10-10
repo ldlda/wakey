@@ -68,7 +68,7 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
     // Exercise the real global subscriber without mutating this process's environment
     // or inheriting a developer's RUST_LOG=warn/off setting.
     if std::env::var_os("WAKEY_OTLP_TEST_CHILD").is_none() {
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "exports_all_signals_and_preserves_remote_command_parent",
@@ -77,9 +77,19 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
             .env("WAKEY_OTLP_TEST_CHILD", "1")
             .env("RUST_LOG", "info")
             .env("WAKEY_OTLP_TEST_AUTH", "Basic dGVzdDp0ZXN0")
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success());
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for console in [&output.stdout, &output.stderr] {
+            assert!(
+                !String::from_utf8_lossy(console)
+                    .contains("debug log exported without console output")
+            );
+        }
         return;
     }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -109,6 +119,9 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
             authorization_env: Some("WAKEY_OTLP_TEST_AUTH".into()),
             service_name: "wakey-test".into(),
             json_logs: false,
+            console_filter: Some("info".into()),
+            otlp_log_filter: Some("debug".into()),
+            trace_filter: Some("info".into()),
         },
         "unused",
         "info",
@@ -130,6 +143,9 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
     });
     drop(child);
     drop(parent);
+    tracing::debug!("debug log exported without console output");
+    let hidden = tracing::debug_span!("debug_span_not_exported");
+    drop(hidden);
     tracing::warn!(target: "opentelemetry_sdk", "synthetic exporter failure remains local");
     let invalid_parent = tracing::info_span!("invalid_remote_parent");
     telemetry::set_remote_parent(
@@ -161,6 +177,11 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
     assert!(invalid_parent.parent_span_id.is_empty());
     assert_ne!(parent.trace_id, invalid_parent.trace_id);
     let logs = collector.logs.lock().unwrap();
+    assert!(
+        !spans
+            .iter()
+            .any(|span| span.name == "debug_span_not_exported")
+    );
     let records: Vec<_> = logs
         .iter()
         .flat_map(|r| &r.resource_logs)
@@ -176,6 +197,11 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
         !records
             .iter()
             .any(|r| format!("{:?}", r.body).contains("synthetic exporter failure"))
+    );
+    assert!(
+        records
+            .iter()
+            .any(|r| format!("{:?}", r.body).contains("debug log exported without console output"))
     );
     let metrics = collector.metrics.lock().unwrap();
     let names: Vec<_> = metrics

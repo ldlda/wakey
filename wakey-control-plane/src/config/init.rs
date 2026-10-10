@@ -113,6 +113,15 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         ui_dist_dir,
         bootstrap_enroll_tokens,
         telemetry: WritableTelemetry {
+            console_filter: base_telemetry
+                .console_filter
+                .or_else(|| defaults.telemetry.console_filter.clone()),
+            otlp_log_filter: base_telemetry
+                .otlp_log_filter
+                .or_else(|| defaults.telemetry.otlp_log_filter.clone()),
+            trace_filter: base_telemetry
+                .trace_filter
+                .or_else(|| defaults.telemetry.trace_filter.clone()),
             authorization_env: base_telemetry
                 .authorization_env
                 .or_else(|| defaults.telemetry.authorization_env.clone()),
@@ -227,6 +236,9 @@ bootstrap_enroll_tokens = ["old-token"]
 [telemetry]
 otlp_endpoint = "http://otel.example"
 authorization_env = "WAKEY_OTLP_AUTHORIZATION"
+console_filter = "info"
+otlp_log_filter = "debug"
+trace_filter = "info"
 service_name = "old-service"
 json_logs = true
 "#,
@@ -265,6 +277,12 @@ json_logs = true
             Some("/tmp/wakey-base/old.sqlite3")
         );
         assert_eq!(parsed["telemetry"]["json_logs"].as_bool(), Some(true));
+        assert_eq!(parsed["telemetry"]["console_filter"].as_str(), Some("info"));
+        assert_eq!(
+            parsed["telemetry"]["otlp_log_filter"].as_str(),
+            Some("debug")
+        );
+        assert_eq!(parsed["telemetry"]["trace_filter"].as_str(), Some("info"));
         assert_eq!(
             parsed["telemetry"]["authorization_env"].as_str(),
             Some("WAKEY_OTLP_AUTHORIZATION")
