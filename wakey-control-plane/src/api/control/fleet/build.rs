@@ -211,7 +211,8 @@ fn add_agent_device_to_entry(
         )
         .min();
     entry.label_ip = entry.label_ip.into_iter().chain(label_ip).min();
-    let device_offline = agent_device.device.presence() == Presence::Offline;
+    let device_presence = agent_device.presence();
+    let device_offline = device_presence == Presence::Offline;
     if let Some(summary) = device_known_device(&agent_device, context)
         && entry.known_device.is_none()
     {
@@ -262,7 +263,6 @@ fn add_agent_device_to_entry(
             .map(|current| current.max(last_seen))
             .unwrap_or(last_seen),
     );
-    let device_presence = agent_device.device.presence();
     entry.presence = std::cmp::max(entry.presence, device_presence);
 
     let agent_id = agent_device.device.agent_id.clone();

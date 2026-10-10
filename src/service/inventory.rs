@@ -189,11 +189,13 @@ pub fn local_observation_to_fact(
 }
 
 const fn presence_rank(presence: Presence) -> u8 {
+    // Match the core signal order: Unknown has no verdict, while Offline
+    // carries concrete evidence and belongs above it in the inventory list.
     match presence {
         Presence::Online => 3,
         Presence::LikelyOnline => 2,
-        Presence::Unknown => 1,
-        Presence::Offline => 0,
+        Presence::Offline => 1,
+        Presence::Unknown => 0,
     }
 }
 
@@ -222,6 +224,23 @@ mod tests {
             },
             nud_state: None,
         }]
+    }
+
+    #[test]
+    fn inventory_sorts_offline_before_unknown() {
+        let neighbors = [NeighborState::Incomplete, NeighborState::Failed]
+            .into_iter()
+            .enumerate()
+            .map(|(index, state)| NeighborEntry {
+                ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, index as u8 + 10)),
+                dev: None,
+                mac: None,
+                state,
+            })
+            .collect();
+        let devices = merge_devices(neighbors, Vec::new(), &InventoryQueryBuilder::new().build());
+        assert_eq!(devices[0].presence, Presence::Offline);
+        assert_eq!(devices[1].presence, Presence::Unknown);
     }
 
     #[test]

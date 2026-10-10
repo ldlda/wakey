@@ -453,6 +453,42 @@ fn unknown_ip_only_offline_device_is_hidden_by_default() {
 }
 
 #[test]
+fn endpoint_presence_overrides_conflicting_cached_summary() {
+    for connected in [false, true] {
+        for (cached, evidence) in [
+            (Presence::Unknown, Presence::Offline),
+            (Presence::Online, Presence::Unknown),
+            (Presence::Offline, Presence::Online),
+        ] {
+            let mut row = offline_ip_only_unknown("agent-a", "ip:192.168.1.2", "192.168.1.2", 20);
+            row.device.presence = cached.as_str().into();
+            let mut endpoint = endpoint_with_presence(
+                EndpointSource::Neighbor,
+                None,
+                Some("192.168.1.2"),
+                evidence,
+                20,
+            );
+            endpoint.hostname = None;
+            row.endpoints = vec![endpoint];
+            let ctx = if connected {
+                context(&["agent-a"])
+            } else {
+                context(&[])
+            };
+            let devices = build_fleet_devices(Vec::new(), vec![row], &ctx);
+            assert_eq!(devices[0].presence, evidence);
+            assert_eq!(devices[0].endpoints[0].presence, evidence);
+            assert_eq!(devices[0].agents[0].connected, connected);
+            if evidence == Presence::Offline {
+                assert_eq!(devices[0].display_name, "Offline device: 192.168.1.2");
+                assert!(devices[0].ips.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
 fn unnamed_endpoint_labels_preserve_presence_and_inactive_ips() {
     for (presence, mac, ip, expected) in [
         (

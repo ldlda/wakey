@@ -77,6 +77,13 @@ Current DHCP leases are summary-eligible and may support wake if they include a 
 
 `Device.presence` is derived from all endpoints, not only summary-eligible endpoints. This lets concrete offline evidence matter while allowing stronger live evidence to override it.
 
+The control plane derives stored snapshot presence and fleet presence from the
+maximum endpoint signal whenever endpoints exist. A cached summary must not
+override endpoint evidence; endpoint-less legacy rows fall back to their stored
+summary. Presence describes the last observation, not guaranteed current
+reachability. Agent disconnection does not rewrite endpoint presence or expire
+the retained snapshot.
+
 The main fleet API embeds endpoints inside each fleet device. API responses expose all endpoints, including offline and unknown endpoints. The UI may collapse offline/unknown endpoints in the primary row, but details must expose them for copy/debug/history.
 
 ## Wakeability and Wake Route Ordering

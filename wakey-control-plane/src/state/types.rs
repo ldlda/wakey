@@ -218,6 +218,24 @@ pub struct AgentDeviceWithChildren {
     pub facts: Vec<String>,
 }
 
+impl AgentDeviceWithChildren {
+    /// Last-observed presence, not a claim of current reachability or freshness.
+    pub fn presence(&self) -> Presence {
+        endpoint_presence(&self.endpoints, self.device.presence())
+    }
+}
+
+/// Endpoints are authoritative when present; endpoint-less legacy rows retain
+/// their summary until a new snapshot replaces them. Never merge the cached
+/// summary into endpoint evidence, as it may contain a contradictory signal.
+pub(crate) fn endpoint_presence(endpoints: &[DeviceEndpoint], fallback: Presence) -> Presence {
+    endpoints
+        .iter()
+        .map(|endpoint| endpoint.presence)
+        .max()
+        .unwrap_or(fallback)
+}
+
 fn endpoint_source_from_str(raw: &str) -> Option<EndpointSource> {
     match raw {
         "neighbor" => Some(EndpointSource::Neighbor),

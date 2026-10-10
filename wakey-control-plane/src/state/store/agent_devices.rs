@@ -37,7 +37,8 @@ impl Store {
             let device_key = device_key_from_id(device_id);
             incoming_keys.insert(device_key.clone());
 
-            let presence = presence_to_str(device.presence);
+            let endpoints = endpoints_for_storage(device);
+            let presence = presence_to_str(endpoint_presence(&endpoints, device.presence));
             let display_name: Option<String> = None;
 
             sqlx::query!(
@@ -118,7 +119,6 @@ impl Store {
             .await
             .context("failed deleting device endpoints")?;
 
-            let endpoints = endpoints_for_storage(device);
             if !endpoints.is_empty() {
                 let mut builder = sqlx::QueryBuilder::new(
                     "INSERT INTO agent_device_endpoints \
@@ -564,6 +564,41 @@ mod tests {
             observations: vec![],
             presence: Presence::Online,
         }
+    }
+
+    #[tokio::test]
+    async fn snapshot_presence_is_derived_from_stored_endpoints() {
+        let ts = TestStore::new().await;
+        let mut device = sample_device("aa:bb:cc:dd:ee:01", "192.168.1.10", "pc");
+        // Compatibility snapshots can lack endpoints but carry raw neighbors.
+        device.presence = Presence::Unknown;
+        device.neighbors[0].state = NeighborState::Failed;
+        ts.store()
+            .replace_agent_device_snapshot("agent-a", &[device.clone()])
+            .await
+            .unwrap();
+        let rows = ts
+            .store()
+            .list_agent_device_rows_for_agent("agent-a")
+            .await
+            .unwrap();
+        assert_eq!(rows[0].device.presence, "offline");
+        assert_eq!(rows[0].endpoints[0].presence, Presence::Offline);
+
+        device.presence = Presence::Online;
+        device.endpoints = rows[0].endpoints.clone();
+        device.endpoints[0].presence = Presence::Unknown;
+        ts.store()
+            .replace_agent_device_snapshot("agent-a", &[device])
+            .await
+            .unwrap();
+        let rows = ts
+            .store()
+            .list_agent_device_rows_for_agent("agent-a")
+            .await
+            .unwrap();
+        assert_eq!(rows[0].device.presence, "unknown");
+        assert_eq!(rows[0].endpoints[0].presence, Presence::Unknown);
     }
 
     #[tokio::test]
