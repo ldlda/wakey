@@ -447,9 +447,46 @@ fn unknown_ip_only_offline_device_is_hidden_by_default() {
     );
 
     assert_eq!(devices.len(), 1);
-    assert_eq!(devices[0].display_name, "(unknown device)");
+    assert_eq!(devices[0].display_name, "Offline device: 192.168.1.2");
     filter_fleet_devices(&mut devices, &ListFleetDevicesQuery::default());
     assert!(devices.is_empty());
+}
+
+#[test]
+fn unnamed_endpoint_labels_preserve_presence_and_inactive_ips() {
+    for (presence, mac, ip, expected) in [
+        (
+            Presence::Offline,
+            None,
+            Some("192.168.1.2"),
+            "Offline device: 192.168.1.2",
+        ),
+        (
+            Presence::Unknown,
+            None,
+            Some("192.168.1.2"),
+            "Device: 192.168.1.2",
+        ),
+        (
+            Presence::Offline,
+            Some("aa:bb:cc:dd:ee:01"),
+            None,
+            "Offline device: AA:BB:CC:DD:EE:01",
+        ),
+    ] {
+        let mut row = offline_ip_only_unknown("agent-a", "test", "192.168.1.2", 20);
+        row.ips.clear();
+        row.device.presence = presence.as_str().into();
+        let mut evidence = endpoint_with_presence(EndpointSource::Neighbor, mac, ip, presence, 20);
+        evidence.hostname = None;
+        row.endpoints = vec![evidence];
+        let devices = build_fleet_devices(Vec::new(), vec![row], &context(&["agent-a"]));
+        assert_eq!(devices[0].display_name, expected);
+        assert_eq!(devices[0].presence, presence);
+        if presence == Presence::Offline {
+            assert!(devices[0].ips.is_empty());
+        }
+    }
 }
 
 #[test]
@@ -473,7 +510,7 @@ fn visibility_all_keeps_unknown_ip_only_offline_device() {
         },
     );
     assert_eq!(devices.len(), 1);
-    assert_eq!(devices[0].display_name, "(unknown device)");
+    assert_eq!(devices[0].display_name, "Offline device: 192.168.1.2");
 }
 
 #[test]

@@ -25,6 +25,38 @@ pub struct DeviceIdentifierRequest {
     pub value: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RenameKnownDeviceRequest {
+    pub display_name: String,
+}
+
+pub async fn rename_known_device(
+    State(state): State<AppState>,
+    AxumPath(device_id): AxumPath<String>,
+    Json(req): Json<RenameKnownDeviceRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    match state
+        .store
+        .rename_known_device(&device_id, &req.display_name)
+        .await
+    {
+        Ok(Some(device)) => Ok((StatusCode::OK, Json(known_device_response(device)))),
+        Ok(None) => Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "known_device_not_found",
+            "known device not found",
+        )),
+        Err(err) => {
+            warn!(error = %err, "failed to rename known device");
+            Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "rename_known_device_failed",
+                err.to_string(),
+            ))
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KnownDeviceResponse {
     pub device_id: String,

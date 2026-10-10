@@ -27,11 +27,13 @@ export function FilterSelect({
   label,
   value,
   values,
+  labels,
   onChange,
 }: {
   label: string;
   value: string;
   values: readonly string[];
+  labels?: Readonly<Record<string, string>>;
   onChange: (value: string) => void;
 }) {
   return (
@@ -39,12 +41,12 @@ export function FilterSelect({
       <span>{label}</span>
       <Select value={value} onValueChange={(next) => next && onChange(next)}>
         <SelectTrigger>
-          <span>{value.replace("_", " ")}</span>
+          <span>{labels?.[value] ?? value.replace("_", " ")}</span>
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
           {values.map((item) => (
             <SelectItem key={item} value={item}>
-              {item.replace("_", " ")}
+              {labels?.[item] ?? item.replace("_", " ")}
             </SelectItem>
           ))}
         </SelectContent>

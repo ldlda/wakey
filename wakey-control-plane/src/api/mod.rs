@@ -15,7 +15,8 @@ pub use control::{
     StateStatsResponse, attach_device_identifier, create_known_device, detach_device_identifier,
     enroll, forget_known_device, get_known_device, healthz, issue_enroll_token, list_enroll_tokens,
     list_fleet_devices, list_known_devices, merge_known_device, refresh_fleet_devices,
-    revoke_agent, revoke_enroll_token, set_agent_nickname, state_stats, wake_fleet_device,
+    rename_known_device, revoke_agent, revoke_enroll_token, set_agent_nickname, state_stats,
+    wake_fleet_device,
 };
 pub use terminals::{
     agent_terminal_ws, attach_terminal, close_terminal, create_terminal, get_terminal,

@@ -26,6 +26,7 @@ pub(crate) struct AgentRuntimeStatus {
 struct FleetAccumulator {
     device_key: String,
     display_name: Option<String>,
+    label_ip: Option<IpAddr>,
     known_device: Option<KnownDeviceSummary>,
     pinned: bool,
     ips: BTreeSet<IpAddr>,
@@ -45,6 +46,7 @@ impl Default for FleetAccumulator {
         Self {
             device_key: String::new(),
             display_name: None,
+            label_ip: None,
             known_device: None,
             pinned: false,
             ips: BTreeSet::new(),
@@ -55,7 +57,8 @@ impl Default for FleetAccumulator {
             endpoints: Vec::new(),
             first_seen_unix: None,
             last_seen_unix: None,
-            presence: Presence::Offline,
+            // Start at the lowest signal so unknown-only evidence stays unknown.
+            presence: Presence::Unknown,
             routes: BTreeMap::new(),
         }
     }
@@ -194,6 +197,20 @@ fn add_agent_device_to_entry(
     agent_device: AgentDeviceWithChildren,
     context: &FleetBuildContext,
 ) {
+    // Retain address evidence for naming only, without promoting stale IPs into
+    // the active summary or wake-route candidates.
+    let label_ip = agent_device
+        .ips
+        .iter()
+        .copied()
+        .chain(
+            agent_device
+                .endpoints
+                .iter()
+                .filter_map(|endpoint| endpoint.key.ip),
+        )
+        .min();
+    entry.label_ip = entry.label_ip.into_iter().chain(label_ip).min();
     let device_offline = agent_device.device.presence() == Presence::Offline;
     if let Some(summary) = device_known_device(&agent_device, context)
         && entry.known_device.is_none()
@@ -473,8 +490,38 @@ impl FleetAccumulator {
         let display_name = self
             .display_name
             .or_else(|| self.hostnames.iter().next().cloned())
-            .or_else(|| self.macs.iter().next().map(|mac| mac.to_string()))
-            .or_else(|| self.ips.iter().next().map(|ip| ip.to_string()))
+            .or_else(|| {
+                // Summary IPs omit offline endpoints; labels must not discard
+                // their address evidence or imply that unknown means offline.
+                let address = self
+                    .ips
+                    .iter()
+                    .next()
+                    .copied()
+                    .or(self.label_ip)
+                    .or_else(|| {
+                        self.endpoints
+                            .iter()
+                            .filter_map(|endpoint| endpoint.ip)
+                            .min()
+                    })
+                    .map(|ip| ip.to_string())
+                    .or_else(|| self.macs.iter().next().map(|mac| mac.to_string()))
+                    .or_else(|| {
+                        self.endpoints
+                            .iter()
+                            .find_map(|endpoint| endpoint.mac)
+                            .map(|mac| mac.to_string())
+                    });
+                address.map(|address| {
+                    let prefix = if self.presence == Presence::Offline {
+                        "Offline device"
+                    } else {
+                        "Device"
+                    };
+                    format!("{prefix}: {address}")
+                })
+            })
             .unwrap_or_else(|| "(unknown device)".to_string());
 
         FleetDevice {

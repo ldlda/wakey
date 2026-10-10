@@ -356,6 +356,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rename_preserves_identity_and_forget_removes_identifiers_only() {
+        let ts = TestStore::new().await;
+        let store = ts.store();
+        let device = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "lda".into(),
+                pinned: true,
+                notes: Some("keep notes".into()),
+                identifiers: vec![DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "aa:bb:cc:dd:ee:01".into(),
+                }],
+            })
+            .await
+            .unwrap();
+        assert!(
+            store
+                .rename_known_device(&device.device_id, "   ")
+                .await
+                .is_err()
+        );
+        let renamed = store
+            .rename_known_device(&device.device_id, "  Windows PC  ")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(renamed.display_name, "Windows PC");
+        assert_eq!(renamed.device_id, device.device_id);
+        assert_eq!(renamed.identifiers.len(), 1);
+        assert_eq!(renamed.notes, device.notes);
+        assert!(renamed.pinned);
+        assert!(
+            store
+                .rename_known_device("missing", "name")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let observed = wakey_core::Device::from_parts(
+            vec![wakey_core::NeighborEntry {
+                mac: Some("aa:bb:cc:dd:ee:01".parse().unwrap()),
+                ip: "192.168.1.2".parse().unwrap(),
+                dev: None,
+                state: wakey_core::NeighborState::Reachable,
+            }],
+            Vec::new(),
+        );
+        store
+            .replace_agent_device_snapshot("agent-a", &[observed])
+            .await
+            .unwrap();
+        assert!(store.forget_known_device(&device.device_id).await.unwrap());
+        assert!(
+            store
+                .get_known_device(&device.device_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .lookup_known_device_by_identifier(DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "aa:bb:cc:dd:ee:01".into(),
+                })
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(store.list_agent_device_rows().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn known_device_can_hold_multiple_manual_mac_identifiers() {
         let ts = TestStore::new().await;
 

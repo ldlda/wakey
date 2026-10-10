@@ -91,6 +91,14 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
       if (seq !== loadSeqRef.current) return;
       setDevices(nextDevices);
       setKnownDevices(nextKnownDevices);
+      // Keep the open dialog current after rename/identifier mutations.
+      setDetails((current) =>
+        current
+          ? (nextDevices.find(
+              (device) => device.device_key === current.device_key,
+            ) ?? null)
+          : null,
+      );
     } catch (err) {
       if (seq !== loadSeqRef.current) return;
       toast.error("Failed to load fleet", { description: String(err) });
@@ -263,6 +271,7 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
               label="Identity"
               value={known}
               values={knownFilters}
+              labels={{ known: "saved", unknown: "unsaved" }}
               onChange={(value) => setKnown(value as KnownFilter)}
             />
             <label
@@ -404,9 +413,9 @@ function FleetDeviceRow({
         <div className="truncate font-medium">{device.display_name}</div>
         <div className="mt-1 flex flex-wrap gap-1">
           {device.known_device ? (
-            <Badge variant="secondary">known</Badge>
+            <Badge variant="secondary">saved</Badge>
           ) : (
-            <Badge variant="outline">unknown</Badge>
+            <Badge variant="outline">unsaved</Badge>
           )}
           {device.pinned && <Badge variant="outline">pinned</Badge>}
           {device.sources.map((source) => (

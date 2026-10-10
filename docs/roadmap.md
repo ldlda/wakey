@@ -22,10 +22,10 @@ live browser recovery and shutdown behavior are not established by those checks.
 
 ## Device Management And Presentation
 
-- [ ] Make **forget remembered device** reachable in the frontend. Verify the existing backend before adding routes: remove the known identity and its identifiers, not agent observations. An observed device may reappear as unknown.
-- [ ] Add remembered-device rename support, with backend validation and frontend editing.
+- [x] Make **forget remembered device** reachable in the frontend, with confirmation. The existing backend removes the known identity and its identifiers, not agent observations. An observed device may reappear as unknown.
+- [x] Add remembered-device rename support, with backend validation and frontend editing (`PATCH /api/v1/control/devices/{device_id}`). Pinned state and identifiers are preserved.
 - [ ] Check and complete editing of remembered-device notes.
-- [ ] Replace generic unnamed-row labels with useful fallbacks. Offline IP-only rows: `Offline device: <ip>`; unknown-presence IP-only rows: `Device: <ip>`. Use MAC fallback when no IP exists; retain a generic label only when neither exists.
+- [x] Replace generic unnamed-row labels with useful fallbacks. Offline IP-only rows: `Offline device: <ip>`; unknown-presence IP-only rows: `Device: <ip>`. Use MAC fallback when no IP exists; retain a generic label only when neither exists. Inactive endpoint addresses can label a row without becoming active IPs or wake routes. Unknown-only fleet groups remain unknown.
 - [ ] Review frontend visibility defaults. Keep an explicit all-rows option; do not hide evidence just to fix poor labels. The user deliberately enabled all-row querying.
 
 Identifier detachment already exists in the current frontend source; it is **not**

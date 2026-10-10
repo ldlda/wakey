@@ -409,6 +409,27 @@ export function createKnownDevice(input: {
   });
 }
 
+export function renameKnownDevice(
+  deviceId: string,
+  displayName: string,
+): Promise<KnownDevice> {
+  return request<KnownDevice>(
+    `/api/v1/control/devices/${encodeURIComponent(deviceId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ display_name: displayName }),
+    },
+  );
+}
+
+export function forgetKnownDevice(
+  deviceId: string,
+): Promise<{ device_id: string; forgotten: boolean }> {
+  return request(`/api/v1/control/devices/${encodeURIComponent(deviceId)}`, {
+    method: "DELETE",
+  });
+}
+
 export function attachDeviceIdentifier(
   deviceId: string,
   identifier: { kind: string; value: string },

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Minus, Plus, Zap } from "lucide-react";
+import { Copy, Minus, Plus, Zap, Pencil, Trash2, Check, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -7,6 +7,8 @@ import {
   createKnownDevice,
   detachDeviceIdentifier,
   mergeKnownDevice,
+  renameKnownDevice,
+  forgetKnownDevice,
   type FleetDevice,
   type FleetDeviceEndpoint,
   type KnownDevice,
@@ -68,6 +70,8 @@ export function FleetDeviceDetailsDialog({
   const [addValue, setAddValue] = useState("");
   const [error, setError] = useState("");
   const [actionBusy, setActionBusy] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [forgetConfirm, setForgetConfirm] = useState(false);
 
   const rowIdentifiers = device ? identifiersFor(device) : [];
 
@@ -181,6 +185,24 @@ export function FleetDeviceDetailsDialog({
     await wrap(async () => {
       await detachDeviceIdentifier(fullKnown!.device_id, identifierKey);
       toast.success("Identifier removed");
+    });
+  }
+
+  async function handleRename() {
+    if (!fullKnown || !displayName.trim()) return;
+    await wrap(async () => {
+      await renameKnownDevice(fullKnown.device_id, displayName.trim());
+      setEditingName(false);
+      toast.success("Device renamed");
+    });
+  }
+
+  async function handleForget() {
+    if (!fullKnown) return;
+    await wrap(async () => {
+      await forgetKnownDevice(fullKnown.device_id);
+      toast.success("Remembered device forgotten");
+      onOpenChange(false);
     });
   }
 
@@ -309,15 +331,112 @@ export function FleetDeviceDetailsDialog({
           {fullKnown && (
             <div className="grid gap-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Badge variant="secondary">known</Badge>
+                <Badge variant="secondary">saved</Badge>
                 {fullKnown.pinned && <Badge variant="outline">pinned</Badge>}
                 <span className="font-medium">{fullKnown.display_name}</span>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Rename device"
+                  aria-label="Rename device"
+                  disabled={actionBusy}
+                  onClick={() => {
+                    setDisplayName(fullKnown.display_name);
+                    setEditingName(true);
+                    setForgetConfirm(false);
+                  }}
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Forget remembered device"
+                  aria-label="Forget remembered device"
+                  disabled={actionBusy}
+                  onClick={() => {
+                    setForgetConfirm(true);
+                    setEditingName(false);
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
                 {fullKnown.notes && (
                   <span className="text-muted-foreground">
                     : {fullKnown.notes}
                   </span>
                 )}
               </div>
+
+              {editingName && (
+                <form
+                  className="flex items-center gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleRename();
+                  }}
+                >
+                  <Input
+                    aria-label="Device name"
+                    autoFocus
+                    value={displayName}
+                    disabled={actionBusy}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                  />
+                  <Button
+                    type="submit"
+                    size="icon-sm"
+                    title="Save name"
+                    aria-label="Save name"
+                    disabled={actionBusy || !displayName.trim()}
+                  >
+                    <Check className="size-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Cancel rename"
+                    aria-label="Cancel rename"
+                    disabled={actionBusy}
+                    onClick={() => setEditingName(false)}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </form>
+              )}
+              {forgetConfirm && (
+                <div
+                  className="grid gap-2"
+                  role="group"
+                  aria-label="Confirm forget device"
+                >
+                  <p className="text-sm">
+                    Forget “{fullKnown.display_name}” and its remembered
+                    identifiers? Agent observations remain; it may reappear as
+                    an unsaved device.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={actionBusy}
+                      onClick={() => void handleForget()}
+                    >
+                      <Trash2 className="size-4" />
+                      Forget device
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={actionBusy}
+                      onClick={() => setForgetConfirm(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* Current identifiers with remove buttons */}
               <div className="rounded-md border bg-muted/30 p-3">
@@ -434,7 +553,7 @@ export function FleetDeviceDetailsDialog({
               <Separator />
               <div className="grid gap-1.5">
                 <p className="text-xs text-muted-foreground">
-                  Merge this known device into another:
+                  Merge this saved device into another:
                 </p>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                   <Select
@@ -479,7 +598,7 @@ export function FleetDeviceDetailsDialog({
               {/* Remember as new known device */}
               <div className="grid gap-1.5">
                 <p className="text-xs text-muted-foreground">
-                  Remember as a new known device:
+                  Remember as a new saved device:
                 </p>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                   <Input
@@ -505,7 +624,7 @@ export function FleetDeviceDetailsDialog({
               {/* Attach to existing known device */}
               <div className="grid gap-1.5">
                 <p className="text-xs text-muted-foreground">
-                  Or attach to an existing known device:
+                  Or attach to an existing saved device:
                 </p>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                   <Select
@@ -518,7 +637,7 @@ export function FleetDeviceDetailsDialog({
                           ? knownDevices.find(
                               (kd) => kd.device_id === targetDeviceId,
                             )?.display_name
-                          : "Select known device"}
+                          : "Select saved device"}
                       </span>
                     </SelectTrigger>
                     <SelectContent

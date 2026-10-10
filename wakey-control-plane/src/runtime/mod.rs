@@ -113,7 +113,9 @@ fn control_api_routes() -> Router<AppState> {
         )
         .route(
             "/api/v1/control/devices/{device_id}",
-            get(api::get_known_device).delete(api::forget_known_device),
+            get(api::get_known_device)
+                .patch(api::rename_known_device)
+                .delete(api::forget_known_device),
         )
         .route(
             "/api/v1/control/devices/{device_id}/merge",

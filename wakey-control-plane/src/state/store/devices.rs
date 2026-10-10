@@ -64,6 +64,29 @@ impl Store {
         }
     }
 
+    #[tracing::instrument(name = "db_rename_known_device", skip_all)]
+    pub async fn rename_known_device(
+        &self,
+        device_id: &str,
+        display_name: &str,
+    ) -> Result<Option<KnownDevice>> {
+        let display_name = normalize_required_text(display_name, "display_name")?;
+        let now = i64::try_from(now_unix()).context("known device timestamp overflow")?;
+        let result = sqlx::query!(
+            "UPDATE known_devices SET display_name = ?1, updated_at_unix = ?2 WHERE device_id = ?3",
+            display_name,
+            now,
+            device_id
+        )
+        .execute(&self.pool)
+        .await
+        .context("failed renaming known device")?;
+        if result.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get_known_device(device_id).await
+    }
+
     #[tracing::instrument(name = "db_forget_known_device", skip_all)]
     pub async fn forget_known_device(&self, device_id: &str) -> Result<bool> {
         let result = sqlx::query!("DELETE FROM known_devices WHERE device_id = ?1", device_id)
