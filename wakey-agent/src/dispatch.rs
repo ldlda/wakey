@@ -89,9 +89,9 @@ pub async fn inventory_for_config(
     .instrument(tracing::info_span!("inventory_dhcp_leases"))
     .await?;
     tracing::Span::current().record("leases", leases.len());
-    match wakey::wakey_linux::observations::prune_stale_observations_from_path(
+    match wakey::wakey_linux::observations::prune_expired(
         &config.observation_store_path,
-        config.observation_retention_days,
+        config.observation_retention,
     )
     .instrument(tracing::info_span!("inventory_observation_prune"))
     .await

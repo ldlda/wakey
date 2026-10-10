@@ -143,10 +143,10 @@ mod tests {
             server_url: "https://old.example.com".into(),
             agent_id: "old-agent".into(),
             agent_token: "old-token".into(),
-            reconnect_base_ms: 2_000,
-            reconnect_max_ms: 60_000,
-            observation_sync_interval_seconds: 30,
-            observation_retention_days: 11,
+            reconnect_base: std::time::Duration::from_secs(2),
+            reconnect_max: std::time::Duration::from_secs(60),
+            observation_sync_interval: std::time::Duration::from_secs(30),
+            observation_retention: std::time::Duration::from_secs(11 * 86_400),
             pid_file: "/tmp/custom-wakey-agent.pid".into(),
             dhcp_leases_path: "/tmp/custom-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/custom-names.json".into(),
@@ -164,7 +164,7 @@ mod tests {
                 args: vec!["-l".into()],
                 current_dir: Some("/root".into()),
                 max_sessions: 2,
-                session_ttl_seconds: 600,
+                session_ttl: std::time::Duration::from_secs(600),
             },
         };
 
@@ -176,7 +176,10 @@ mod tests {
         assert_eq!(config.agent_id, "agent-123");
         assert_eq!(config.agent_token, "token-xyz");
         assert_eq!(config.server_url, "https://control.example.com");
-        assert_eq!(config.observation_retention_days, 11);
+        assert_eq!(
+            config.observation_retention,
+            base_config.observation_retention
+        );
         assert_eq!(config.pid_file, base_config.pid_file);
         assert_eq!(config.dhcp_leases_path, base_config.dhcp_leases_path);
         assert_eq!(config.terminal, base_config.terminal);

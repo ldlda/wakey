@@ -9,6 +9,7 @@ anyhow = { workspace = true }
 axum = { version = "0.8", features = ["ws", "json"] }
 clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
+humantime-serde = "1"
 macaddr = { workspace = true }
 nix = { version = "0.31", default-features = false, features = [
     "signal",

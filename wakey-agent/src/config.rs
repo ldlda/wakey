@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::Duration;
+use wakey_core::config_duration::{self, LegacyDuration};
 
 use crate::protocol::{
     DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
@@ -19,19 +21,25 @@ const DEFAULT_MAC_NAME_CACHE_PATH: &str = "/tmp/wakey_mac_names.json";
 const DEFAULT_OBSERVATION_STORE_PATH: &str = "/tmp/wakey_observations.json";
 pub const DEFAULT_OBSERVATION_RETENTION_DAYS: u64 = 7;
 
+// Derive canonical serde functions once; the trait adapter below translates
+// legacy keys without maintaining another copy of every config field.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(remote = "Self")]
 pub struct AgentConfig {
     pub server_url: String,
     pub agent_id: String,
     pub agent_token: String,
-    #[serde(default = "default_reconnect_base_ms")]
-    pub reconnect_base_ms: u64,
-    #[serde(default = "default_reconnect_max_ms")]
-    pub reconnect_max_ms: u64,
-    #[serde(default = "default_observation_sync_interval_seconds")]
-    pub observation_sync_interval_seconds: u64,
-    #[serde(default = "default_observation_retention_days")]
-    pub observation_retention_days: u64,
+    #[serde(default = "default_reconnect_base", with = "humantime_serde")]
+    pub reconnect_base: Duration,
+    #[serde(default = "default_reconnect_max", with = "humantime_serde")]
+    pub reconnect_max: Duration,
+    #[serde(
+        default = "default_observation_sync_interval",
+        with = "humantime_serde"
+    )]
+    pub observation_sync_interval: Duration,
+    #[serde(default = "default_observation_retention", with = "humantime_serde")]
+    pub observation_retention: Duration,
     #[serde(default = "default_pid_file")]
     pub pid_file: PathBuf,
     #[serde(default = "default_dhcp_leases_path")]
@@ -47,7 +55,7 @@ pub struct AgentConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[serde(remote = "Self", deny_unknown_fields)]
 pub struct TerminalConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -60,8 +68,8 @@ pub struct TerminalConfig {
     #[serde(default = "default_terminal_max_sessions")]
     pub max_sessions: usize,
     /// Maximum lifetime of a PTY process. Zero disables automatic expiry.
-    #[serde(default = "default_terminal_session_ttl_seconds")]
-    pub session_ttl_seconds: u64,
+    #[serde(default = "default_terminal_session_ttl", with = "humantime_serde")]
+    pub session_ttl: Duration,
 }
 
 impl Default for TerminalConfig {
@@ -72,7 +80,7 @@ impl Default for TerminalConfig {
             args: Vec::new(),
             current_dir: None,
             max_sessions: default_terminal_max_sessions(),
-            session_ttl_seconds: default_terminal_session_ttl_seconds(),
+            session_ttl: default_terminal_session_ttl(),
         }
     }
 }
@@ -81,10 +89,10 @@ pub static DEFAULT_CONFIG: LazyLock<AgentConfig> = LazyLock::new(|| AgentConfig 
     server_url: "https://wakey.ldlda.com".to_string(),
     agent_id: "REPLACE_ME_AGENT_ID".to_string(),
     agent_token: "REPLACE_ME_AGENT_TOKEN".to_string(),
-    reconnect_base_ms: default_reconnect_base_ms(),
-    reconnect_max_ms: default_reconnect_max_ms(),
-    observation_sync_interval_seconds: default_observation_sync_interval_seconds(),
-    observation_retention_days: default_observation_retention_days(),
+    reconnect_base: default_reconnect_base(),
+    reconnect_max: default_reconnect_max(),
+    observation_sync_interval: default_observation_sync_interval(),
+    observation_retention: default_observation_retention(),
     pid_file: default_pid_file(),
     dhcp_leases_path: default_dhcp_leases_path(),
     mac_name_cache_path: default_mac_name_cache_path(),
@@ -99,16 +107,10 @@ impl fmt::Debug for AgentConfig {
             .field("server_url", &self.server_url)
             .field("agent_id", &self.agent_id)
             .field("agent_token", &"<redacted>")
-            .field("reconnect_base_ms", &self.reconnect_base_ms)
-            .field("reconnect_max_ms", &self.reconnect_max_ms)
-            .field(
-                "observation_sync_interval_seconds",
-                &self.observation_sync_interval_seconds,
-            )
-            .field(
-                "observation_retention_days",
-                &self.observation_retention_days,
-            )
+            .field("reconnect_base", &self.reconnect_base)
+            .field("reconnect_max", &self.reconnect_max)
+            .field("observation_sync_interval", &self.observation_sync_interval)
+            .field("observation_retention", &self.observation_retention)
             .field("pid_file", &self.pid_file)
             .field("dhcp_leases_path", &self.dhcp_leases_path)
             .field("mac_name_cache_path", &self.mac_name_cache_path)
@@ -119,20 +121,20 @@ impl fmt::Debug for AgentConfig {
     }
 }
 
-const fn default_reconnect_base_ms() -> u64 {
-    1_000
+const fn default_reconnect_base() -> Duration {
+    Duration::from_secs(1)
 }
 
-const fn default_reconnect_max_ms() -> u64 {
-    30_000
+const fn default_reconnect_max() -> Duration {
+    Duration::from_secs(30)
 }
 
-const fn default_observation_sync_interval_seconds() -> u64 {
-    60
+const fn default_observation_sync_interval() -> Duration {
+    Duration::from_secs(60)
 }
 
-const fn default_observation_retention_days() -> u64 {
-    DEFAULT_OBSERVATION_RETENTION_DAYS
+const fn default_observation_retention() -> Duration {
+    Duration::from_secs(DEFAULT_OBSERVATION_RETENTION_DAYS * 86_400)
 }
 
 fn default_pid_file() -> PathBuf {
@@ -159,17 +161,43 @@ const fn default_terminal_max_sessions() -> usize {
     DEFAULT_TERMINAL_MAX_SESSIONS
 }
 
-const fn default_terminal_session_ttl_seconds() -> u64 {
-    DEFAULT_TERMINAL_SESSION_TTL_SECONDS
+const fn default_terminal_session_ttl() -> Duration {
+    Duration::from_secs(DEFAULT_TERMINAL_SESSION_TTL_SECONDS)
 }
 
 impl TerminalConfig {
     pub(crate) fn session_ttl(&self) -> Result<Option<std::time::Duration>> {
-        checked_terminal_session_ttl(self.session_ttl_seconds).map_err(anyhow::Error::msg)
+        anyhow::ensure!(
+            self.session_ttl.subsec_nanos() == 0,
+            "terminal.session_ttl must use whole seconds (the terminal protocol uses seconds)"
+        );
+        checked_terminal_session_ttl(self.session_ttl.as_secs()).map_err(anyhow::Error::msg)
     }
 }
 
 impl AgentConfig {
+    /// Validate scheduling bounds and second-based storage/protocol boundaries.
+    /// Zero is allowed for hook retention and terminal TTL, not active timers.
+    fn validate(&self) -> Result<()> {
+        for (name, duration) in [
+            ("reconnect_base", self.reconnect_base),
+            ("reconnect_max", self.reconnect_max),
+            ("observation_sync_interval", self.observation_sync_interval),
+        ] {
+            anyhow::ensure!(!duration.is_zero(), "{name} must be positive");
+            anyhow::ensure!(
+                std::time::Instant::now().checked_add(duration).is_some(),
+                "{name} exceeds the platform timer range"
+            );
+        }
+        anyhow::ensure!(
+            self.observation_retention.subsec_nanos() == 0,
+            "observation_retention must use whole seconds (hook timestamps use seconds)"
+        );
+        self.terminal.session_ttl()?;
+        Ok(())
+    }
+
     pub fn local_path_envs(&self) -> Vec<(&'static str, &Path)> {
         vec![
             (WAKEY_DHCP_LEASES_ENV, self.dhcp_leases_path.as_path()),
@@ -191,13 +219,99 @@ pub fn apply_local_path_env_to_command(cmd: &mut std::process::Command, config: 
 pub fn load_config(path: &Path) -> Result<AgentConfig> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read agent config {}", path.display()))?;
-    let config: AgentConfig = toml::from_str(&content)
+    let raw: toml::Value = toml::from_str(&content)
         .with_context(|| format!("failed to parse agent config {}", path.display()))?;
-    config.terminal.session_ttl()?;
+    let mut value = serde_json::to_value(raw)?;
+    let mut deprecated = config_duration::normalize(&mut value, AGENT_DURATION_KEYS)
+        .map_err(anyhow::Error::msg)?
+        .into_iter()
+        .map(|key| ("", key))
+        .collect::<Vec<_>>();
+    if let Some(terminal) = value.get_mut("terminal") {
+        deprecated.extend(
+            config_duration::normalize(terminal, TERMINAL_DURATION_KEYS)
+                .map_err(anyhow::Error::msg)?
+                .into_iter()
+                .map(|key| ("terminal.", key)),
+        );
+    }
+    let config: AgentConfig = serde_json::from_value(value)
+        .with_context(|| format!("failed to parse agent config {}", path.display()))?;
+    config.validate()?;
+    for (prefix, key) in deprecated {
+        // Initial config loading precedes tracing setup; stderr also keeps
+        // init-config stdout valid TOML and never prints config secrets.
+        eprintln!(
+            "warning: {}: `{prefix}{}` is deprecated; use `{prefix}{}` with a duration string",
+            path.display(),
+            key.old,
+            key.new
+        );
+    }
     Ok(config)
 }
 
+const AGENT_DURATION_KEYS: &[LegacyDuration] = &[
+    LegacyDuration {
+        old: "reconnect_base_ms",
+        new: "reconnect_base",
+        unit: Duration::from_millis(1),
+    },
+    LegacyDuration {
+        old: "reconnect_max_ms",
+        new: "reconnect_max",
+        unit: Duration::from_millis(1),
+    },
+    LegacyDuration {
+        old: "observation_sync_interval_seconds",
+        new: "observation_sync_interval",
+        unit: Duration::from_secs(1),
+    },
+    LegacyDuration {
+        old: "observation_retention_days",
+        new: "observation_retention",
+        unit: Duration::from_secs(86_400),
+    },
+];
+const TERMINAL_DURATION_KEYS: &[LegacyDuration] = &[LegacyDuration {
+    old: "session_ttl_seconds",
+    new: "session_ttl",
+    unit: Duration::from_secs(1),
+}];
+
+impl Serialize for AgentConfig {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        Self::serialize(self, serializer)
+    }
+}
+impl<'de> Deserialize<'de> for AgentConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        config_duration::deserialize_legacy(deserializer, AGENT_DURATION_KEYS, Self::deserialize)
+    }
+}
+impl Serialize for TerminalConfig {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        Self::serialize(self, serializer)
+    }
+}
+impl<'de> Deserialize<'de> for TerminalConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        config_duration::deserialize_legacy(deserializer, TERMINAL_DURATION_KEYS, Self::deserialize)
+    }
+}
+
 pub fn save_config(path: &Path, config: &AgentConfig) -> Result<()> {
+    config.validate()?;
     let content = toml::to_string_pretty(config).context("failed to serialize agent config")?;
     write_config_atomically(path, &content)
 }
@@ -262,6 +376,62 @@ fn write_config_atomically(path: &Path, content: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    const HEADER: &str =
+        "server_url = 'https://example.com'\nagent_id = 'agent-1'\nagent_token = 'secret'\n";
+
+    #[test]
+    fn legacy_duration_keys_convert_and_serialize_canonically() {
+        let legacy: AgentConfig = toml::from_str(&format!("{HEADER}\nreconnect_base_ms = 123\nreconnect_max_ms = 456\nobservation_sync_interval_seconds = 7\nobservation_retention_days = 3\n[terminal]\nsession_ttl_seconds = 600\n")).unwrap();
+        let canonical: AgentConfig = toml::from_str(&format!("{HEADER}\nreconnect_base = '123ms'\nreconnect_max = '456ms'\nobservation_sync_interval = '7s'\nobservation_retention = '3d'\n[terminal]\nsession_ttl = '10m'\n")).unwrap();
+        assert_eq!(legacy, canonical);
+        legacy.validate().unwrap();
+        let output = toml::to_string(&legacy).unwrap();
+        for key in AGENT_DURATION_KEYS {
+            assert!(!output.contains(key.old));
+            assert!(output.contains(key.new));
+        }
+        assert!(!output.contains("session_ttl_seconds"));
+        assert_eq!(toml::from_str::<AgentConfig>(&output).unwrap(), canonical);
+    }
+
+    #[test]
+    fn config_rejects_ambiguous_units_and_invalid_timer_values() {
+        for fields in [
+            "reconnect_base = '1s'\nreconnect_base_ms = 1000",
+            "observation_retention = '7d'\nobservation_retention_days = 7",
+            "reconnect_base = 1000",
+            "observation_retention_days = -1",
+            "observation_retention_days = 9223372036854775807",
+            "reconnect_base = 'nonsense'",
+            "[terminal]\nsession_ttl = '1h'\nsession_ttl_seconds = 3600",
+        ] {
+            assert!(
+                toml::from_str::<AgentConfig>(&format!("{HEADER}{fields}")).is_err(),
+                "{fields}"
+            );
+        }
+        for fields in [
+            "observation_sync_interval = '0s'",
+            "reconnect_base = '0s'",
+            "[terminal]\nsession_ttl = '500ms'",
+        ] {
+            let config: AgentConfig = toml::from_str(&format!("{HEADER}{fields}")).unwrap();
+            assert!(config.validate().is_err(), "{fields}");
+        }
+        let config: AgentConfig = toml::from_str(&format!(
+            "{HEADER}observation_retention = '0d'\n[terminal]\nsession_ttl = '0s'"
+        ))
+        .unwrap();
+        config.validate().unwrap();
+        assert!(config.observation_retention.is_zero());
+        assert_eq!(config.terminal.session_ttl().unwrap(), None);
+        let oversized = AgentConfig {
+            reconnect_max: Duration::from_secs(u64::MAX),
+            ..config
+        };
+        assert!(oversized.validate().is_err());
+    }
+
     #[test]
     fn config_roundtrip() {
         let dir = std::env::temp_dir().join(format!("wakey-agent-config-{}", std::process::id()));
@@ -270,10 +440,10 @@ mod tests {
             server_url: "https://example.com".into(),
             agent_id: "agent-1".into(),
             agent_token: "secret".into(),
-            reconnect_base_ms: 123,
-            reconnect_max_ms: 456,
-            observation_sync_interval_seconds: 7,
-            observation_retention_days: 3,
+            reconnect_base: Duration::from_millis(123),
+            reconnect_max: Duration::from_millis(456),
+            observation_sync_interval: Duration::from_secs(7),
+            observation_retention: Duration::from_secs(3 * 86_400),
             pid_file: "/tmp/test-wakey-agent.pid".into(),
             dhcp_leases_path: "/tmp/test-dhcp.leases".into(),
             mac_name_cache_path: "/tmp/test-names.json".into(),
@@ -293,7 +463,7 @@ mod tests {
                 args: vec!["-l".into()],
                 current_dir: Some("/tmp".into()),
                 max_sessions: 2,
-                session_ttl_seconds: 600,
+                session_ttl: Duration::from_secs(600),
             },
         };
 
@@ -323,8 +493,8 @@ agent_token = "secret"
         .expect("config should parse");
 
         assert_eq!(
-            config.observation_retention_days,
-            DEFAULT_OBSERVATION_RETENTION_DAYS
+            config.observation_retention,
+            DEFAULT_CONFIG.observation_retention
         );
         assert_eq!(config.terminal, TerminalConfig::default());
     }
@@ -348,8 +518,8 @@ max_sessions = 2
         assert!(config.terminal.args.is_empty());
         assert!(config.terminal.current_dir.is_none());
         assert_eq!(
-            config.terminal.session_ttl_seconds,
-            DEFAULT_TERMINAL_SESSION_TTL_SECONDS
+            config.terminal.session_ttl,
+            TerminalConfig::default().session_ttl
         );
     }
 
@@ -374,18 +544,18 @@ max_session = 67
     #[test]
     fn terminal_ttl_zero_is_unlimited_and_positive_is_exact() {
         let mut terminal = TerminalConfig {
-            session_ttl_seconds: 0,
+            session_ttl: Duration::ZERO,
             ..TerminalConfig::default()
         };
         assert_eq!(terminal.session_ttl().expect("unlimited TTL"), None);
 
-        terminal.session_ttl_seconds = 67;
+        terminal.session_ttl = Duration::from_secs(67);
         assert_eq!(
             terminal.session_ttl().expect("finite TTL"),
             Some(std::time::Duration::from_secs(67))
         );
 
-        terminal.session_ttl_seconds = u64::MAX;
+        terminal.session_ttl = Duration::from_secs(u64::MAX);
         assert!(terminal.session_ttl().is_err());
     }
 }

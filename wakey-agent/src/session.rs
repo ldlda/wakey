@@ -18,16 +18,16 @@ pub async fn run(config: AgentConfig) -> Result<()> {
     // Terminal workers belong to the agent process, not a single control socket.
     // Keeping this manager outside the reconnect loop lets PTYs survive CC loss.
     let (terminal_manager, mut terminal_events) = TerminalManager::new(&config);
-    let mut backoff = config.reconnect_base_ms.max(100);
+    let mut backoff = config.reconnect_base.max(Duration::from_millis(100));
     loop {
         match run_once(&config, &terminal_manager, &mut terminal_events).await {
             Ok(()) => {
-                backoff = config.reconnect_base_ms.max(100);
+                backoff = config.reconnect_base.max(Duration::from_millis(100));
             }
             Err(err) => {
-                warn!(agent_id = %config.agent_id, error = %err, backoff_ms = backoff, "agent session ended; reconnecting");
-                sleep(Duration::from_millis(backoff)).await;
-                backoff = next_backoff_ms(backoff, config.reconnect_max_ms);
+                warn!(agent_id = %config.agent_id, error = %err, backoff_ms = backoff.as_millis() as u64, "agent session ended; reconnecting");
+                sleep(backoff).await;
+                backoff = next_backoff(backoff, config.reconnect_max);
             }
         }
     }
@@ -94,7 +94,7 @@ async fn run_once(
                         .enabled
                         .then_some(TerminalCapabilityOptions {
                             max_sessions: config.terminal.max_sessions.max(1),
-                            session_ttl_seconds: config.terminal.session_ttl_seconds,
+                            session_ttl_seconds: config.terminal.session_ttl.as_secs(),
                         }),
                 },
             },
@@ -117,9 +117,7 @@ async fn run_once(
 
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut snapshot_sync = interval(Duration::from_secs(
-        config.observation_sync_interval_seconds.max(1),
-    ));
+    let mut snapshot_sync = interval(config.observation_sync_interval);
     snapshot_sync.set_missed_tick_behavior(MissedTickBehavior::Skip);
     snapshot_sync.reset();
     loop {
@@ -238,9 +236,9 @@ where
     Ok(count)
 }
 
-pub fn next_backoff_ms(current_ms: u64, max_ms: u64) -> u64 {
-    let cap = max_ms.max(current_ms);
-    current_ms.saturating_mul(2).min(cap)
+pub fn next_backoff(current: Duration, max: Duration) -> Duration {
+    let cap = max.max(current);
+    current.saturating_mul(2).min(cap)
 }
 
 async fn handle_server_message<S>(
@@ -474,7 +472,7 @@ mod tests {
     use serde_json::Value;
     use tokio_tungstenite::tungstenite::Message;
 
-    use super::{next_backoff_ms, send_command_result, websocket_url};
+    use super::{next_backoff, send_command_result, websocket_url};
     use crate::protocol::{CommandResult, RequestId};
 
     struct RecordingSink {
@@ -533,14 +531,28 @@ mod tests {
 
     #[test]
     fn backoff_doubles_until_cap() {
-        assert_eq!(next_backoff_ms(1_000, 30_000), 2_000);
-        assert_eq!(next_backoff_ms(16_000, 30_000), 30_000);
-        assert_eq!(next_backoff_ms(30_000, 30_000), 30_000);
+        use std::time::Duration;
+        assert_eq!(
+            next_backoff(Duration::from_secs(1), Duration::from_secs(30)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            next_backoff(Duration::from_secs(16), Duration::from_secs(30)),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            next_backoff(Duration::from_secs(30), Duration::from_secs(30)),
+            Duration::from_secs(30)
+        );
     }
 
     #[test]
     fn backoff_never_shrinks_when_max_is_lower() {
-        assert_eq!(next_backoff_ms(8_000, 1_000), 8_000);
+        use std::time::Duration;
+        assert_eq!(
+            next_backoff(Duration::from_secs(8), Duration::from_secs(1)),
+            Duration::from_secs(8)
+        );
     }
 
     #[tokio::test]

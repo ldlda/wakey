@@ -248,7 +248,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
                         }
                         Err(err) => warn!(error = %err, "periodic gc failed"),
                     }
-                    match app_state.store.gc_retention(daemon.observation_retention).await {
+                    match app_state.store.gc_retention(daemon.history_retention).await {
                         Ok(stats) => {
                             if stats.audit_events_removed > 0 || stats.alert_transitions_removed > 0 {
                                 info!(

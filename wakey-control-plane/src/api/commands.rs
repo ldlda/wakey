@@ -172,11 +172,9 @@ pub async fn relay_agent_command(
         ));
     }
 
-    let timeout = std::time::Duration::from_millis(
-        timeout_ms
-            .unwrap_or(state.command_timeout.as_millis() as u64)
-            .max(1),
-    );
+    let timeout = timeout_ms
+        .map(|value| std::time::Duration::from_millis(value.max(1)))
+        .unwrap_or(state.command_timeout);
     let outcome = tokio::time::timeout(timeout, pending_rx).await;
     let response = match outcome {
         Ok(Ok(AgentReply::Result(result))) => {

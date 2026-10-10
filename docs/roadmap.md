@@ -22,6 +22,8 @@ live browser recovery and shutdown behavior are not established by those checks.
 
 ## Device Management And Presentation
 
+- [x] Endpoint-derived presence on snapshot writes and fleet reads; endpoint-less legacy rows retain their summary. CLI ordering matches the core signal order.
+
 - [x] Make **forget remembered device** reachable in the frontend, with confirmation. The existing backend removes the known identity and its identifiers, not agent observations. An observed device may reappear as unknown.
 - [x] Add remembered-device rename support, with backend validation and frontend editing (`PATCH /api/v1/control/devices/{device_id}`). Pinned state and identifiers are preserved.
 - [ ] Check and complete editing of remembered-device notes.
@@ -33,6 +35,8 @@ the requested whole-device removal. No automatic identity promotion or deletion
 of remembered identifiers based on observation expiry.
 
 ## Telemetry Follow-Ups
+
+- [x] Human-readable agent/CC config durations with unit-aware legacy loading, stderr deprecation warnings, and canonical init-config output. See [configuration durations](config-durations.md). History retention remains separate from future device expiry.
 
 - [x] Separate console, OTLP log, and trace filters using per-layer filtering. Explicit signal config overrides `RUST_LOG`, then CLI verbosity supplies defaults. Unconfigured defaults remain info-level; exporter-failure logs stay local. Live validation pending.
 - [ ] Record hostname-resolution success/failure without exporting hostnames or resolved addresses. Current spans show timing but do not explicitly classify the result.

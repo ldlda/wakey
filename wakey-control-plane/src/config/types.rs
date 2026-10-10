@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use wakey_core::config_duration::{self, LegacyDuration};
 pub use wakey_core::telemetry::TelemetryConfig;
 
 #[derive(Debug, Clone)]
@@ -14,7 +15,7 @@ pub struct DaemonConfig {
     pub state_file: PathBuf,
     pub command_timeout: Duration,
     pub enroll_token_ttl: Duration,
-    pub observation_retention: Duration,
+    pub history_retention: Duration,
     pub pid_file: PathBuf,
     pub ui_dist_dir: PathBuf,
     pub bootstrap_enroll_tokens: Vec<String>,
@@ -24,19 +25,52 @@ pub struct DaemonConfig {
 /// TOML DTO for both loading partial files and generating complete files.
 /// Options preserve omission for precedence; runtime conversion stays separate.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(remote = "Self")]
 pub(crate) struct FileConfig {
     pub(crate) data_dir: Option<PathBuf>,
     pub(crate) bind: Option<String>,
     pub(crate) public_url: Option<String>,
     pub(crate) state_file: Option<PathBuf>,
-    pub(crate) command_timeout_ms: Option<u64>,
-    pub(crate) enroll_token_ttl_seconds: Option<u64>,
-    pub(crate) observation_retention_seconds: Option<u64>,
+    #[serde(default, with = "humantime_serde::option")]
+    pub(crate) command_timeout: Option<Duration>,
+    #[serde(default, with = "humantime_serde::option")]
+    pub(crate) enroll_token_ttl: Option<Duration>,
+    #[serde(default, with = "humantime_serde::option")]
+    pub(crate) history_retention: Option<Duration>,
     pub(crate) pid_file: Option<PathBuf>,
     pub(crate) ui_dist_dir: Option<PathBuf>,
     #[serde(alias = "enroll_tokens")]
     pub(crate) bootstrap_enroll_tokens: Option<Vec<String>>,
     pub(crate) telemetry: Option<FileTelemetryConfig>,
+}
+
+pub(crate) const DURATION_KEYS: &[LegacyDuration] = &[
+    LegacyDuration {
+        old: "command_timeout_ms",
+        new: "command_timeout",
+        unit: Duration::from_millis(1),
+    },
+    LegacyDuration {
+        old: "enroll_token_ttl_seconds",
+        new: "enroll_token_ttl",
+        unit: Duration::from_secs(1),
+    },
+    LegacyDuration {
+        old: "observation_retention_seconds",
+        new: "history_retention",
+        unit: Duration::from_secs(1),
+    },
+];
+
+impl Serialize for FileConfig {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        Self::serialize(self, serializer)
+    }
+}
+impl<'de> Deserialize<'de> for FileConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        config_duration::deserialize_legacy(deserializer, DURATION_KEYS, Self::deserialize)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -60,7 +94,7 @@ pub(crate) static DEFAULT_CONFIG: LazyLock<DaemonConfig> = LazyLock::new(|| Daem
     state_file: "state.sqlite3".into(),
     command_timeout: Duration::from_millis(30_000),
     enroll_token_ttl: Duration::from_secs(86_400),
-    observation_retention: Duration::from_secs(2_592_000),
+    history_retention: Duration::from_secs(2_592_000),
     pid_file: "wakey-control-plane.pid".into(),
     ui_dist_dir: "ui/dist".into(),
     bootstrap_enroll_tokens: Vec::new(),
@@ -100,7 +134,7 @@ mod tests {
 
         let explicit = FileConfig {
             bootstrap_enroll_tokens: Some(Vec::new()),
-            observation_retention_seconds: Some(0),
+            history_retention: Some(std::time::Duration::ZERO),
             telemetry: Some(FileTelemetryConfig {
                 json_logs: Some(false),
                 console_filter: Some("info".into()),
@@ -123,5 +157,33 @@ mod tests {
         let rendered = toml::to_string(&file).unwrap();
         assert!(rendered.contains("bootstrap_enroll_tokens = []"));
         assert!(!rendered.starts_with("enroll_tokens"));
+    }
+
+    #[test]
+    fn legacy_durations_match_new_keys_and_emit_only_strings() {
+        let legacy: FileConfig = toml::from_str("command_timeout_ms = 1234\nenroll_token_ttl_seconds = 3600\nobservation_retention_seconds = 2592000").unwrap();
+        let canonical: FileConfig = toml::from_str(
+            "command_timeout = '1234ms'\nenroll_token_ttl = '1h'\nhistory_retention = '30d'",
+        )
+        .unwrap();
+        assert_eq!(legacy, canonical);
+        let output = toml::to_string(&legacy).unwrap();
+        for key in super::DURATION_KEYS {
+            assert!(!output.contains(key.old));
+            assert!(output.contains(key.new));
+        }
+        assert_eq!(toml::from_str::<FileConfig>(&output).unwrap(), canonical);
+    }
+
+    #[test]
+    fn file_durations_reject_duplicates_and_bare_numbers() {
+        for key in super::DURATION_KEYS {
+            let both = format!("{} = '1s'\n{} = 1", key.new, key.old);
+            assert!(toml::from_str::<FileConfig>(&both).is_err());
+            let number = format!("{} = 1", key.new);
+            assert!(toml::from_str::<FileConfig>(&number).is_err());
+            let negative = format!("{} = -1", key.old);
+            assert!(toml::from_str::<FileConfig>(&negative).is_err());
+        }
     }
 }

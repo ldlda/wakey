@@ -72,6 +72,7 @@ pub struct ServeArgs {
     #[arg(long)]
     pub enroll_token_ttl_seconds: Option<u64>,
 
+    /// Audit/alert history retention in seconds (legacy CLI name; not device retention).
     #[arg(long)]
     pub observation_retention_seconds: Option<u64>,
 
@@ -129,6 +130,7 @@ pub struct InitConfigArgs {
     #[arg(long)]
     pub enroll_token_ttl_seconds: Option<u64>,
 
+    /// Audit/alert history retention in seconds (legacy CLI name; not device retention).
     #[arg(long)]
     pub observation_retention_seconds: Option<u64>,
 

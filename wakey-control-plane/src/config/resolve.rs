@@ -51,26 +51,22 @@ impl DaemonConfig {
             .unwrap_or_else(|| defaults.state_file.clone());
         let state_file = resolve_path(&data_dir, state_file_raw);
 
-        let command_timeout = Duration::from_millis(
-            args.command_timeout_ms
-                .or(file.command_timeout_ms)
-                .unwrap_or(defaults.command_timeout.as_millis() as u64)
-                .max(1),
-        );
-
-        let enroll_token_ttl = Duration::from_secs(
-            args.enroll_token_ttl_seconds
-                .or(file.enroll_token_ttl_seconds)
-                .unwrap_or(defaults.enroll_token_ttl.as_secs())
-                .max(1),
-        );
-
-        let observation_retention = Duration::from_secs(
-            args.observation_retention_seconds
-                .or(file.observation_retention_seconds)
-                .unwrap_or(defaults.observation_retention.as_secs())
-                .max(1),
-        );
+        let command_timeout = args
+            .command_timeout_ms
+            .map(Duration::from_millis)
+            .or(file.command_timeout)
+            .unwrap_or(defaults.command_timeout);
+        let enroll_token_ttl = args
+            .enroll_token_ttl_seconds
+            .map(Duration::from_secs)
+            .or(file.enroll_token_ttl)
+            .unwrap_or(defaults.enroll_token_ttl);
+        let history_retention = args
+            .observation_retention_seconds
+            .map(Duration::from_secs)
+            .or(file.history_retention)
+            .unwrap_or(defaults.history_retention);
+        validate_durations(command_timeout, enroll_token_ttl, history_retention)?;
 
         let pid_file_raw = args
             .pid_file
@@ -101,7 +97,7 @@ impl DaemonConfig {
             state_file,
             command_timeout,
             enroll_token_ttl,
-            observation_retention,
+            history_retention,
             pid_file,
             ui_dist_dir,
             bootstrap_enroll_tokens,
@@ -140,12 +136,12 @@ pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<Issue
         &args.target,
     )?;
 
-    let ttl = Duration::from_secs(
-        args.ttl_seconds
-            .or(file.enroll_token_ttl_seconds)
-            .unwrap_or(defaults.enroll_token_ttl.as_secs())
-            .max(1),
-    );
+    let ttl = args
+        .ttl_seconds
+        .map(Duration::from_secs)
+        .or(file.enroll_token_ttl)
+        .unwrap_or(defaults.enroll_token_ttl);
+    validate_durations(defaults.command_timeout, ttl, defaults.history_retention)?;
 
     Ok(IssueTokenSettings {
         data_dir: state.data_dir,
@@ -206,8 +202,52 @@ pub(crate) fn load_file_config(path: &Path) -> Result<FileConfig> {
 
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read config file {}", path.display()))?;
-    toml::from_str::<FileConfig>(&raw)
-        .with_context(|| format!("failed to parse config file {}", path.display()))
+    let raw: toml::Value = toml::from_str(&raw)
+        .with_context(|| format!("failed to parse config file {}", path.display()))?;
+    let mut value = serde_json::to_value(raw)?;
+    let deprecated =
+        wakey_core::config_duration::normalize(&mut value, super::types::DURATION_KEYS)
+            .map_err(anyhow::Error::msg)?;
+    let config = serde_json::from_value(value)
+        .with_context(|| format!("failed to parse config file {}", path.display()))?;
+    for key in deprecated {
+        // Daemon config is loaded before telemetry initialization. Keep these
+        // warnings on stderr, including when init-config emits TOML on stdout.
+        eprintln!(
+            "warning: {}: `{}` is deprecated; use `{}` with a duration string",
+            path.display(),
+            key.old,
+            key.new
+        );
+    }
+    Ok(config)
+}
+
+pub(crate) fn validate_durations(
+    command_timeout: Duration,
+    enroll_token_ttl: Duration,
+    history_retention: Duration,
+) -> Result<()> {
+    for (name, value) in [
+        ("command_timeout", command_timeout),
+        ("enroll_token_ttl", enroll_token_ttl),
+        ("history_retention", history_retention),
+    ] {
+        anyhow::ensure!(!value.is_zero(), "{name} must be positive");
+        anyhow::ensure!(
+            std::time::Instant::now().checked_add(value).is_some(),
+            "{name} exceeds the platform timer range"
+        );
+    }
+    anyhow::ensure!(
+        enroll_token_ttl.subsec_nanos() == 0,
+        "enroll_token_ttl must use whole seconds"
+    );
+    anyhow::ensure!(
+        history_retention.subsec_nanos() == 0,
+        "history_retention must use whole seconds"
+    );
+    Ok(())
 }
 
 fn resolve_admin_public_url(
@@ -346,6 +386,44 @@ mod tests {
         assert_eq!(
             resolved.telemetry.service_name,
             defaults.telemetry.service_name
+        );
+    }
+
+    #[test]
+    fn invalid_duration_policies_are_rejected_without_clamping() {
+        use std::time::Duration;
+        let defaults = &*DEFAULT_CONFIG;
+        assert!(
+            super::validate_durations(
+                Duration::ZERO,
+                defaults.enroll_token_ttl,
+                defaults.history_retention
+            )
+            .is_err()
+        );
+        assert!(
+            super::validate_durations(
+                defaults.command_timeout,
+                Duration::from_millis(500),
+                defaults.history_retention
+            )
+            .is_err()
+        );
+        assert!(
+            super::validate_durations(
+                defaults.command_timeout,
+                defaults.enroll_token_ttl,
+                Duration::ZERO
+            )
+            .is_err()
+        );
+        assert!(
+            super::validate_durations(
+                Duration::from_secs(u64::MAX),
+                defaults.enroll_token_ttl,
+                defaults.history_retention
+            )
+            .is_err()
         );
     }
 }

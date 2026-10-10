@@ -165,17 +165,27 @@ pub async fn prune_stale_observations_from_path(
     path: impl AsRef<Path>,
     retention_days: u64,
 ) -> io::Result<usize> {
-    if retention_days == 0 {
-        return Ok(0);
-    }
-    let max_age_seconds = retention_days.saturating_mul(24 * 60 * 60);
-    prune_observations_older_than_from_path(path, now_unix().saturating_sub(max_age_seconds)).await
+    prune_expired(
+        path,
+        std::time::Duration::from_secs(retention_days.saturating_mul(24 * 60 * 60)),
+    )
+    .await
 }
 
-async fn prune_observations_older_than_from_path(
+/// Remove hook observations older than `retention` from the given store.
+/// Zero disables expiry; age is measured from each row's last-seen timestamp.
+pub async fn prune_expired(
     path: impl AsRef<Path>,
-    cutoff_unix: u64,
+    retention: std::time::Duration,
 ) -> io::Result<usize> {
+    if retention.is_zero() {
+        return Ok(0);
+    }
+    let max_age_seconds = retention.as_secs();
+    prune_before(path, now_unix().saturating_sub(max_age_seconds)).await
+}
+
+async fn prune_before(path: impl AsRef<Path>, cutoff_unix: u64) -> io::Result<usize> {
     let path = path.as_ref();
     let mut store = load_observation_store_from_path(path).await?;
     let before = store.dhcp_clients.len() + store.neighbors.len();
@@ -648,7 +658,7 @@ mod tests {
         .await
         .expect("fixture should write");
 
-        let removed = prune_observations_older_than_from_path(&observation_path, 15)
+        let removed = prune_before(&observation_path, 15)
             .await
             .expect("prune should succeed");
 

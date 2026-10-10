@@ -290,7 +290,10 @@ fn init_config(args: InitConfigArgs) -> Result<()> {
         cfg.agent_token = agent_token;
     }
     if let Some(days) = args.observation_retention_days {
-        cfg.observation_retention_days = days;
+        cfg.observation_retention = std::time::Duration::from_secs(
+            days.checked_mul(86_400)
+                .ok_or_else(|| anyhow::anyhow!("observation retention is too large"))?,
+        );
     }
 
     if let Some(path) = &args.config {

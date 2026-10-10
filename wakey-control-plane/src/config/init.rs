@@ -87,28 +87,31 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         args.bootstrap_enroll_tokens.clone()
     };
 
+    let command_timeout = args
+        .command_timeout_ms
+        .map(std::time::Duration::from_millis)
+        .or(base.command_timeout)
+        .unwrap_or(defaults.command_timeout);
+    let enroll_token_ttl = args
+        .enroll_token_ttl_seconds
+        .map(std::time::Duration::from_secs)
+        .or(base.enroll_token_ttl)
+        .unwrap_or(defaults.enroll_token_ttl);
+    let history_retention = args
+        .observation_retention_seconds
+        .map(std::time::Duration::from_secs)
+        .or(base.history_retention)
+        .unwrap_or(defaults.history_retention);
+    super::resolve::validate_durations(command_timeout, enroll_token_ttl, history_retention)?;
+
     let body = FileConfig {
         data_dir: Some(data_dir),
         bind: Some(bind.to_string()),
         public_url: Some(public_url),
         state_file: Some(state_file),
-        command_timeout_ms: Some(
-            args.command_timeout_ms
-                .or(base.command_timeout_ms)
-                .unwrap_or(defaults.command_timeout.as_millis() as u64)
-                .max(1),
-        ),
-        enroll_token_ttl_seconds: Some(
-            args.enroll_token_ttl_seconds
-                .or(base.enroll_token_ttl_seconds)
-                .unwrap_or(defaults.enroll_token_ttl.as_secs())
-                .max(1),
-        ),
-        observation_retention_seconds: Some(
-            args.observation_retention_seconds
-                .or(base.observation_retention_seconds)
-                .unwrap_or(defaults.observation_retention.as_secs()),
-        ),
+        command_timeout: Some(command_timeout),
+        enroll_token_ttl: Some(enroll_token_ttl),
+        history_retention: Some(history_retention),
         pid_file: Some(pid_file),
         ui_dist_dir: Some(ui_dist_dir),
         // Preserve the previous generated template's omission of an empty list.
@@ -275,8 +278,17 @@ json_logs = true
         let parsed: toml::Value = toml::from_str(&rendered).expect("parse derived config");
         assert_eq!(parsed["public_url"].as_str(), Some("https://new.example"));
         assert_eq!(parsed["bind"].as_str(), Some("127.0.0.1:9090"));
-        assert_eq!(parsed["command_timeout_ms"].as_integer(), Some(999));
-        assert_eq!(parsed["enroll_token_ttl_seconds"].as_integer(), Some(5678));
+        let converted: super::FileConfig = toml::from_str(&rendered).unwrap();
+        assert_eq!(
+            converted.command_timeout,
+            Some(std::time::Duration::from_millis(999))
+        );
+        assert_eq!(
+            converted.enroll_token_ttl,
+            Some(std::time::Duration::from_secs(5678))
+        );
+        assert!(parsed.get("command_timeout_ms").is_none());
+        assert!(parsed.get("enroll_token_ttl_seconds").is_none());
         assert_eq!(
             parsed["state_file"].as_str(),
             Some("/tmp/wakey-base/old.sqlite3")
@@ -335,10 +347,8 @@ json_logs = true
             parsed["state_file"].as_str(),
             defaults.data_dir.join(&defaults.state_file).to_str()
         );
-        assert_eq!(
-            parsed["command_timeout_ms"].as_integer(),
-            Some(defaults.command_timeout.as_millis() as i64)
-        );
+        let converted: super::FileConfig = toml::from_str(&rendered).unwrap();
+        assert_eq!(converted.command_timeout, Some(defaults.command_timeout));
         assert_eq!(
             parsed["telemetry"]["service_name"].as_str(),
             Some(defaults.telemetry.service_name.as_str())

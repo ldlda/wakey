@@ -224,7 +224,7 @@ impl TerminalManager {
                     cancel: Some(cancel_tx),
                     relay_credentials: relay_tx.clone(),
                     created_at_unix,
-                    session_ttl_seconds: config.terminal.session_ttl_seconds,
+                    session_ttl_seconds: config.terminal.session_ttl.as_secs(),
                 },
             );
         }
