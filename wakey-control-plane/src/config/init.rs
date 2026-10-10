@@ -103,6 +103,8 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         .or(base.history_retention)
         .unwrap_or(defaults.history_retention);
     super::resolve::validate_durations(command_timeout, enroll_token_ttl, history_retention)?;
+    let device_retention = base.device_retention.unwrap_or(defaults.device_retention);
+    super::resolve::validate_device_retention(device_retention)?;
 
     let body = FileConfig {
         data_dir: Some(data_dir),
@@ -112,6 +114,7 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
         command_timeout: Some(command_timeout),
         enroll_token_ttl: Some(enroll_token_ttl),
         history_retention: Some(history_retention),
+        device_retention: Some(device_retention),
         pid_file: Some(pid_file),
         ui_dist_dir: Some(ui_dist_dir),
         // Preserve the previous generated template's omission of an empty list.
@@ -237,6 +240,7 @@ public_url = "https://old.example/"
 state_file = "old.sqlite3"
 command_timeout_ms = 1234
 enroll_token_ttl_seconds = 5678
+device_retention = "0d"
 pid_file = "old.pid"
 ui_dist_dir = "/opt/wakey/ui"
 bootstrap_enroll_tokens = ["old-token"]
@@ -288,6 +292,7 @@ json_logs = true
             Some(std::time::Duration::from_secs(5678))
         );
         assert!(parsed.get("command_timeout_ms").is_none());
+        assert_eq!(converted.device_retention, Some(std::time::Duration::ZERO));
         assert!(parsed.get("enroll_token_ttl_seconds").is_none());
         assert_eq!(
             parsed["state_file"].as_str(),
@@ -349,6 +354,7 @@ json_logs = true
         );
         let converted: super::FileConfig = toml::from_str(&rendered).unwrap();
         assert_eq!(converted.command_timeout, Some(defaults.command_timeout));
+        assert_eq!(converted.device_retention, Some(defaults.device_retention));
         assert_eq!(
             parsed["telemetry"]["service_name"].as_str(),
             Some(defaults.telemetry.service_name.as_str())

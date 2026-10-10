@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM agent_devices WHERE last_seen_unix < ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "cc4b885c31f965013ccaa6f8ae33f6c8d68898654fc0873682c8212339088306"
+}

@@ -67,6 +67,8 @@ impl DaemonConfig {
             .or(file.history_retention)
             .unwrap_or(defaults.history_retention);
         validate_durations(command_timeout, enroll_token_ttl, history_retention)?;
+        let device_retention = file.device_retention.unwrap_or(defaults.device_retention);
+        validate_device_retention(device_retention)?;
 
         let pid_file_raw = args
             .pid_file
@@ -98,6 +100,7 @@ impl DaemonConfig {
             command_timeout,
             enroll_token_ttl,
             history_retention,
+            device_retention,
             pid_file,
             ui_dist_dir,
             bootstrap_enroll_tokens,
@@ -223,6 +226,20 @@ pub(crate) fn load_file_config(path: &Path) -> Result<FileConfig> {
     Ok(config)
 }
 
+/// Device expiry uses whole-second snapshot timestamps, not an active timer.
+/// Unlike history retention, zero is a supported opt-out.
+pub(crate) fn validate_device_retention(retention: Duration) -> Result<()> {
+    anyhow::ensure!(
+        retention.subsec_nanos() == 0,
+        "device_retention must use whole seconds"
+    );
+    anyhow::ensure!(
+        i64::try_from(retention.as_secs()).is_ok(),
+        "device_retention is too large"
+    );
+    Ok(())
+}
+
 pub(crate) fn validate_durations(
     command_timeout: Duration,
     enroll_token_ttl: Duration,
@@ -327,11 +344,12 @@ fn resolve_state_access(
 
 #[cfg(test)]
 mod tests {
-    use super::{DaemonConfig, normalize_public_url, resolve_path};
+    use super::{DaemonConfig, normalize_public_url, resolve_path, validate_device_retention};
     use crate::cli::ServeArgs;
     use crate::config::types::DEFAULT_CONFIG;
     use std::path::Path;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
     fn normalize_public_url_trims_trailing_slash() {
@@ -383,10 +401,19 @@ mod tests {
             defaults.data_dir.join(&defaults.state_file)
         );
         assert_eq!(resolved.command_timeout, defaults.command_timeout);
+        assert_eq!(resolved.device_retention, defaults.device_retention);
         assert_eq!(
             resolved.telemetry.service_name,
             defaults.telemetry.service_name
         );
+    }
+
+    #[test]
+    fn device_retention_accepts_disabled_and_whole_seconds_only() {
+        assert!(validate_device_retention(Duration::ZERO).is_ok());
+        assert!(validate_device_retention(DEFAULT_CONFIG.device_retention).is_ok());
+        assert!(validate_device_retention(Duration::from_millis(1_500)).is_err());
+        assert!(validate_device_retention(Duration::from_secs(u64::MAX)).is_err());
     }
 
     #[test]

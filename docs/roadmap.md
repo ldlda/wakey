@@ -36,7 +36,8 @@ of remembered identifiers based on observation expiry.
 
 ## Telemetry Follow-Ups
 
-- [x] Human-readable agent/CC config durations with unit-aware legacy loading, stderr deprecation warnings, and canonical init-config output. See [configuration durations](config-durations.md). History retention remains separate from future device expiry.
+- [x] Human-readable agent/CC config durations with unit-aware legacy loading, stderr deprecation warnings, and canonical init-config output. See [configuration durations](config-durations.md).
+- [x] CC device retention by last snapshot inclusion (`device_retention = "60d"`, zero disables), independent of audit history and preserving saved identities.
 
 - [x] Separate console, OTLP log, and trace filters using per-layer filtering. Explicit signal config overrides `RUST_LOG`, then CLI verbosity supplies defaults. Unconfigured defaults remain info-level; exporter-failure logs stay local. Live validation pending.
 - [ ] Record hostname-resolution success/failure without exporting hostnames or resolved addresses. Current spans show timing but do not explicitly classify the result.

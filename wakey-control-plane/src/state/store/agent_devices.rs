@@ -6,6 +6,35 @@ use super::helpers::core::*;
 use crate::state::types::*;
 
 impl Store {
+    /// Expire agent-reported devices, preserving all operator-saved identities.
+    /// `last_seen_unix` on the parent is CC snapshot inclusion time, not proof
+    /// of online presence. Cascades remove child addresses, endpoints and facts.
+    #[tracing::instrument(name = "db_prune_devices", skip_all)]
+    pub async fn prune_devices(&self, retention: std::time::Duration) -> Result<u64> {
+        self.prune_devices_at(retention, now_unix()).await
+    }
+
+    async fn prune_devices_at(&self, retention: std::time::Duration, now: u64) -> Result<u64> {
+        if retention.is_zero() {
+            return Ok(0);
+        }
+        let cutoff = i64::try_from(now.saturating_sub(retention.as_secs()))
+            .context("device retention cutoff overflow")?;
+        let mut tx = self.begin_write().await?;
+        let removed = sqlx::query!(
+            "DELETE FROM agent_devices WHERE last_seen_unix < ?1",
+            cutoff
+        )
+        .execute(&mut *tx)
+        .await
+        .context("failed pruning expired agent devices")?
+        .rows_affected();
+        tx.commit()
+            .await
+            .context("failed committing device retention cleanup")?;
+        Ok(removed)
+    }
+
     /// Replace the complete device snapshot for an agent.
     ///
     /// This is the only write path for agent device state. Every sync source
@@ -564,6 +593,151 @@ mod tests {
             observations: vec![],
             presence: Presence::Online,
         }
+    }
+
+    #[tokio::test]
+    async fn device_retention_uses_snapshot_age_and_preserves_saved_identity() {
+        use crate::state::types::{DeviceIdentifierInput, KnownDeviceInput};
+
+        let ts = TestStore::new().await;
+        let store = ts.store();
+        let mut device = sample_device("aa:bb:cc:dd:ee:01", "192.168.1.10", "pc");
+        device.neighbors[0].state = NeighborState::Failed;
+        device.observations.push(DeviceObservationFact {
+            kind: "neigh".into(),
+            action: "remove".into(),
+            mac: device.macs.first().copied(),
+            ip: device.ips.first().copied(),
+            hostname: None,
+            first_seen_unix: Some(1),
+            last_seen_unix: Some(1),
+        });
+        let saved = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "saved pc".into(),
+                pinned: true,
+                notes: None,
+                identifiers: vec![DeviceIdentifierInput {
+                    kind: "mac".into(),
+                    value: "aa:bb:cc:dd:ee:01".into(),
+                }],
+            })
+            .await
+            .unwrap();
+
+        // Explicit timestamps exercise the exact boundary and future rows
+        // without sleeping or relying on the test machine's wall clock.
+        for (agent, seen) in [("expired", 99_i64), ("boundary", 100), ("fresh", 101)] {
+            store
+                .replace_agent_device_snapshot(agent, &[device.clone()])
+                .await
+                .unwrap();
+            sqlx::query("UPDATE agent_devices SET last_seen_unix = ?1 WHERE agent_id = ?2")
+                .bind(seen)
+                .bind(agent)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE agent_device_endpoints SET last_seen_unix = 1 WHERE agent_id = ?1")
+                .bind(agent)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            store.prune_devices_at(Duration::ZERO, 1_000).await.unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .prune_devices_at(Duration::from_secs(900), 1_000)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .prune_devices_at(Duration::from_secs(900), 1_000)
+                .await
+                .unwrap(),
+            0
+        );
+
+        for table in [
+            "agent_devices",
+            "agent_device_macs",
+            "agent_device_ips",
+            "agent_device_hostnames",
+            "agent_device_endpoints",
+            "agent_device_facts",
+        ] {
+            let count: i64 = sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM {table} WHERE agent_id = 'expired'"
+            ))
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+            assert_eq!(count, 0, "expired rows remain in {table}");
+        }
+        for agent in ["boundary", "fresh"] {
+            let rows = store.list_agent_device_rows_for_agent(agent).await.unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].presence(), Presence::Offline);
+        }
+        let retained = store
+            .get_known_device(&saved.device_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.identifiers.len(), 1);
+        assert!(retained.pinned);
+        // Retention longer than the current epoch must not wrap the cutoff.
+        assert_eq!(
+            store
+                .prune_devices_at(Duration::from_secs(2_000), 1_000)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn a_new_snapshot_renews_device_retention_even_when_offline() {
+        let ts = TestStore::new().await;
+        let store = ts.store();
+        let mut device = sample_device("aa:bb:cc:dd:ee:01", "192.168.1.10", "pc");
+        device.neighbors[0].state = NeighborState::Failed;
+        store
+            .replace_agent_device_snapshot("agent-a", &[device.clone()])
+            .await
+            .unwrap();
+        sqlx::query("UPDATE agent_devices SET last_seen_unix = 1")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store
+            .replace_agent_device_snapshot("agent-a", &[device])
+            .await
+            .unwrap();
+        let rows = store
+            .list_agent_device_rows_for_agent("agent-a")
+            .await
+            .unwrap();
+        let included_at = u64::try_from(rows[0].device.last_seen_unix).unwrap();
+        assert_eq!(
+            store
+                .prune_devices_at(Duration::from_secs(60), included_at + 60)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .prune_devices_at(Duration::from_secs(60), included_at + 61)
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]

@@ -31,12 +31,25 @@ Reconnect scheduling retains its existing 100ms minimum backoff.
 command_timeout = "30s"
 enroll_token_ttl = "1d"
 history_retention = "30d"
+device_retention = "60d"
 ```
 
 All three settings must be positive. Enrollment TTL and history retention must
 resolve to whole seconds. Command timeout can use subsecond values.
 `history_retention` deletes old audit events and alert transitions, not device
-snapshots or saved identities. Device retention is a separate follow-up.
+snapshots or saved identities.
+
+`device_retention` expires agent-collected device rows and their child endpoints,
+addresses, names and facts. The default is `"60d"`; `"0d"` disables expiry.
+It must resolve to whole seconds. Age is measured from the last CC-received
+snapshot that included the device, not endpoint timestamps or online presence.
+An offline device included in new snapshots therefore stays retained. Saved
+devices and their manually attached identifiers are never deleted by this cleanup.
+Complete snapshots still remove devices omitted by that agent immediately;
+retention handles old rows left behind when an agent stops syncing.
+Expired rows are removed by the Unix daemon's existing maintenance loop every
+five minutes, including an initial tick at startup. Restart CC to apply changes
+to this setting; the state-only reload does not reload configuration.
 
 ## Legacy Files
 

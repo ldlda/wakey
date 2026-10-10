@@ -16,6 +16,8 @@ pub struct DaemonConfig {
     pub command_timeout: Duration,
     pub enroll_token_ttl: Duration,
     pub history_retention: Duration,
+    /// Maximum age since an agent snapshot included a device; zero disables expiry.
+    pub device_retention: Duration,
     pub pid_file: PathBuf,
     pub ui_dist_dir: PathBuf,
     pub bootstrap_enroll_tokens: Vec<String>,
@@ -37,6 +39,8 @@ pub(crate) struct FileConfig {
     pub(crate) enroll_token_ttl: Option<Duration>,
     #[serde(default, with = "humantime_serde::option")]
     pub(crate) history_retention: Option<Duration>,
+    #[serde(default, with = "humantime_serde::option")]
+    pub(crate) device_retention: Option<Duration>,
     pub(crate) pid_file: Option<PathBuf>,
     pub(crate) ui_dist_dir: Option<PathBuf>,
     #[serde(alias = "enroll_tokens")]
@@ -95,6 +99,7 @@ pub(crate) static DEFAULT_CONFIG: LazyLock<DaemonConfig> = LazyLock::new(|| Daem
     command_timeout: Duration::from_millis(30_000),
     enroll_token_ttl: Duration::from_secs(86_400),
     history_retention: Duration::from_secs(2_592_000),
+    device_retention: Duration::from_secs(60 * 86_400),
     pid_file: "wakey-control-plane.pid".into(),
     ui_dist_dir: "ui/dist".into(),
     bootstrap_enroll_tokens: Vec::new(),
@@ -184,6 +189,22 @@ mod tests {
             assert!(toml::from_str::<FileConfig>(&number).is_err());
             let negative = format!("{} = -1", key.old);
             assert!(toml::from_str::<FileConfig>(&negative).is_err());
+        }
+    }
+
+    #[test]
+    fn device_retention_round_trips_and_requires_units() {
+        for text in ["60d", "0d"] {
+            let file: FileConfig = toml::from_str(&format!("device_retention = '{text}'")).unwrap();
+            let output = toml::to_string(&file).unwrap();
+            assert_eq!(toml::from_str::<FileConfig>(&output).unwrap(), file);
+        }
+        for input in [
+            "device_retention = 60",
+            "device_retention = 1.5",
+            "device_retention = '-1d'",
+        ] {
+            assert!(toml::from_str::<FileConfig>(input).is_err());
         }
     }
 }

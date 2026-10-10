@@ -260,6 +260,11 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
                         }
                         Err(err) => warn!(error = %err, "periodic retention gc failed"),
                     }
+                    match app_state.store.prune_devices(daemon.device_retention).await {
+                        Ok(removed) if removed > 0 => info!(removed, "periodic gc pruned expired agent devices"),
+                        Ok(_) => {},
+                        Err(err) => warn!(error = %err, "periodic device retention gc failed"),
+                    }
                 }
                 join = &mut server => {
                     let _ = remove_pid_file(&daemon.pid_file);
