@@ -224,6 +224,7 @@ where
         &ClientMessage::DeviceSnapshot {
             agent_id: config.agent_id.clone(),
             devices: inventory.devices,
+            trace_context: wakey_core::telemetry::current_trace_context(),
         },
     )
     .await?;

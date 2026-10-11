@@ -451,6 +451,50 @@ mod auth_tests {
     use super::*;
 
     #[test]
+    fn trace_context_connects_collection_to_remote_persistence() {
+        let provider = SdkTracerProvider::builder().build();
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("snapshot-test")));
+        // Scoped subscriber and synchronous entered guards keep this isolated
+        // from other tests without installing a global exporter or collector.
+        tracing::subscriber::with_default(subscriber, || {
+            let collect = tracing::info_span!("collect_device_snapshot");
+            let carrier = {
+                let _entered = collect.enter();
+                current_trace_context()
+            };
+            let collection = carrier["traceparent"].split('-').collect::<Vec<_>>();
+            let store = tracing::info_span!("store_device_snapshot");
+            set_remote_parent(&store, &carrier);
+            let persisted = {
+                let _entered = store.enter();
+                current_trace_context()
+            };
+            let persistence = persisted["traceparent"].split('-').collect::<Vec<_>>();
+            assert_eq!(collection[1], persistence[1], "trace IDs must match");
+            assert_ne!(
+                collection[2], persistence[2],
+                "spans must have distinct IDs"
+            );
+
+            let unrelated = tracing::info_span!("unrelated");
+            set_remote_parent(&unrelated, &BTreeMap::new());
+            set_remote_parent(
+                &unrelated,
+                &[("traceparent".into(), "invalid".into())]
+                    .into_iter()
+                    .collect(),
+            );
+            let _entered = unrelated.enter();
+            let local = current_trace_context();
+            assert_ne!(
+                collection[1],
+                local["traceparent"].split('-').nth(1).unwrap()
+            );
+        });
+    }
+
+    #[test]
     fn authorization_supports_both_schemes_and_redacts_debug() {
         for header in ["Basic dGVzdDp0ZXN0", "Bearer test-token"] {
             let metadata =

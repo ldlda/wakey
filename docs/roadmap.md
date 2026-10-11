@@ -43,7 +43,7 @@ of remembered identifiers based on observation expiry.
 - [x] Separate console, OTLP log, and trace filters using per-layer filtering. Explicit signal config overrides `RUST_LOG`, then CLI verbosity supplies defaults. Unconfigured defaults remain info-level; exporter-failure logs stay local. Live validation pending.
 - [ ] Record hostname-resolution success/failure without exporting hostnames or resolved addresses. Current spans show timing but do not explicitly classify the result.
 - [ ] Investigate the slow resolver with a reproducible device-side check. Timing isolated the phase, not the cause; do not treat instrumentation as a fix.
-- [ ] Propagate trace context for periodic snapshots so agent collection and CC persistence can be inspected together. Commands already have this linkage.
+- [x] Propagate optional W3C trace context for periodic/requested WS snapshots so agent collection and CC persistence can be inspected together. Wire compatibility and context linkage tested; live validation pending.
 - [ ] Add current-state device gauges: stored rows per agent and grouped fleet devices split known/unknown. Define scope and update lifecycle first; never derive gauges from the last filtered UI query.
 - [ ] Decide whether snapshots need persistence acknowledgements. The existing sent-device counter does not prove CC storage; any confirmed-storage metric needs an authoritative measurement point.
 
@@ -52,6 +52,7 @@ or current fleet size. Metric labels should remain bounded; no per-device labels
 
 ## Validation And Reliability
 
+- [ ] Bound fleet-cache rebuild retries under sustained mutations; current stale-build rejection can keep a request waiting while inputs continuously change. Do not silently serve stale wake routes as a fallback.
 - [ ] Reproduce/check Ctrl-C cleanup on the test device: process groups, PTYs, relay tasks, and telemetry shutdown. Leftovers were suspected, not confirmed.
 - [ ] Exercise collector unavailability and recovery with running agent/CC instances. Verify normal operations continue and telemetry queues remain bounded; outage losses are expected under the current best-effort policy.
 - [ ] Validate terminal recovery instrumentation live: generation timing/size, transport attach/resume, and backpressure episodes ending in drain or disconnect.

@@ -96,7 +96,11 @@ existing debug events too; inspect them before enabling it broadly.
 - `relay_command` on CC propagates W3C context in an optional command field.
   `execute_command` on the agent adopts it; older messages/agents remain compatible.
 - `collect_device_snapshot` and `store_device_snapshot` measure collection and
-  persistence separately. Snapshot traces are not yet linked across the wire.
+  persistence as linked spans across the agent WebSocket. The snapshot carries
+  optional W3C context from collection; CC adopts it after authentication checks.
+  Periodic and requested syncs use the same path. Old messages and empty/invalid
+  context remain valid but do not create a cross-process link. Both processes
+  need tracing enabled and suitable filters/sampling to see both sides.
 - Terminal create/attach/close/resume spans describe lifecycle operations, not
   output chunks. Trace-linked OTLP logs use the SDK's tracing-context bridge.
 - Inventory source spans separate neighbor, DHCP lease, and hook-store reads

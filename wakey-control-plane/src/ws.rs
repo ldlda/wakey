@@ -38,6 +38,8 @@ enum IncomingClientMessage {
     DeviceSnapshot {
         agent_id: String,
         devices: Vec<Device>,
+        #[serde(default)]
+        trace_context: std::collections::BTreeMap<String, String>,
     },
     Result {
         request_id: RequestId,
@@ -305,13 +307,20 @@ async fn process_agent_text(
             ensure_current_session(state, &agent_id, connection_id).await?;
             debug!(agent_id = %agent_id, "heartbeat received");
         }
-        IncomingClientMessage::DeviceSnapshot { agent_id, devices } => {
+        IncomingClientMessage::DeviceSnapshot {
+            agent_id,
+            devices,
+            trace_context,
+        } => {
             if connection.authed_agent_id.as_deref() != Some(agent_id.as_str()) {
                 anyhow::bail!("device_snapshot for unauthenticated or mismatched agent");
             }
             ensure_current_session(state, &agent_id, connection_id).await?;
             let mut operation = wakey_core::telemetry::Operation::new("snapshot_store");
             let span = tracing::info_span!("store_device_snapshot", agent_id = %agent_id, devices = devices.len());
+            // Continue collection's trace rather than parenting persistence to
+            // the long-lived agent connection. Empty/invalid context is ignored.
+            wakey_core::telemetry::set_remote_parent(&span, &trace_context);
             match tracing::Instrument::instrument(
                 state
                     .store
@@ -456,6 +465,42 @@ mod tests {
     use super::{
         AgentConnectionState, IncomingClientMessage, is_current_session, validate_auth_identity,
     };
+
+    #[test]
+    fn device_snapshot_trace_context_is_optional_and_cross_crate_compatible() {
+        let legacy: IncomingClientMessage =
+            serde_json::from_str(r#"{"type":"device_snapshot","agent_id":"agent-a","devices":[]}"#)
+                .unwrap();
+        let IncomingClientMessage::DeviceSnapshot { trace_context, .. } = legacy else {
+            panic!("expected snapshot");
+        };
+        assert!(trace_context.is_empty());
+
+        let expected = [(
+            "traceparent".to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        )]
+        .into_iter()
+        .collect();
+        let message = wakey_agent::protocol::ClientMessage::DeviceSnapshot {
+            agent_id: "agent-a".into(),
+            devices: vec![],
+            trace_context: expected,
+        };
+        let IncomingClientMessage::DeviceSnapshot {
+            agent_id,
+            trace_context,
+            ..
+        } = serde_json::from_str(&serde_json::to_string(&message).unwrap()).unwrap()
+        else {
+            panic!("expected snapshot");
+        };
+        assert_eq!(agent_id, "agent-a");
+        assert_eq!(
+            trace_context["traceparent"],
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        );
+    }
 
     #[test]
     fn current_session_check_rejects_stale_connection_ids() {

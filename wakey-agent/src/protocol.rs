@@ -301,6 +301,9 @@ pub enum ClientMessage {
     DeviceSnapshot {
         agent_id: String,
         devices: Vec<Device>,
+        /// W3C trace context for the collection that produced this snapshot.
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        trace_context: std::collections::BTreeMap<String, String>,
     },
     Result {
         request_id: RequestId,
@@ -427,11 +430,13 @@ mod tests {
         let msg = ClientMessage::DeviceSnapshot {
             agent_id: "agent-a".into(),
             devices: vec![],
+            trace_context: Default::default(),
         };
 
         let json = serde_json::to_string(&msg).expect("serialize");
         assert!(json.contains("\"type\":\"device_snapshot\""));
         assert!(json.contains("\"devices\""));
+        assert!(!json.contains("trace_context"));
     }
 
     #[test]

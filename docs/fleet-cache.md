@@ -17,6 +17,9 @@ and reuse it. The helper checks the key again after building: if inputs changed
 while database reads/grouping were in flight, it discards the result and retries.
 Build errors are returned, not cached; cancelling a reader releases the lock.
 The previous view is not served as a fallback after a rebuild error.
+Retries currently have no fixed limit. Sustained mutations faster than rebuilding
+can delay the rebuilding reader and readers waiting on its lock; bounding this
+behavior is tracked as a reliability follow-up.
 
 Wake uses the same view, but command dispatch still checks the current session;
 a cached route cannot grant access to a disconnected agent.
