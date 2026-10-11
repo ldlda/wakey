@@ -4,17 +4,16 @@ use axum::Json;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use futures_util::StreamExt;
-use tracing::{Instrument, info, warn};
-use wakey_agent::protocol::{AgentCommand, InventoryRequest};
+use tracing::warn;
 
 use crate::api::ApiError;
-use crate::api::commands::{RelayCommandResponse, relay_agent_command};
 use crate::runtime::AppState;
 
 mod build;
+mod refresh;
 mod types;
 mod wake;
+pub use refresh::refresh_fleet_devices;
 pub use wake::wake_fleet_device;
 
 #[cfg(test)]
@@ -24,10 +23,7 @@ use build::{
     AgentRuntimeStatus, FleetBuildContext, build_fleet_devices, filter_fleet_devices,
     known_device_summary,
 };
-use types::{
-    FleetDevice, ListFleetDevicesQuery, RefreshFleetAgentResult, RefreshFleetDevicesRequest,
-    RefreshFleetDevicesResponse,
-};
+use types::{FleetDevice, ListFleetDevicesQuery};
 
 pub(crate) type FleetCache =
     crate::runtime::view_cache::ViewCache<(u64, BTreeSet<String>), Vec<FleetDevice>>;
@@ -80,8 +76,6 @@ pub(crate) async fn sample_fleet_counts(
     Err(crate::runtime::view_cache::RebuildLimit.into())
 }
 
-const REFRESH_CONCURRENCY: usize = 8;
-
 fn fleet_error(err: anyhow::Error, fallback_code: &str) -> ApiError {
     if err.is::<crate::runtime::view_cache::RebuildLimit>() {
         return ApiError::new(
@@ -108,146 +102,6 @@ pub async fn list_fleet_devices(
             warn!(error = %err, "failed to list fleet devices");
             Err(fleet_error(err, "list_fleet_devices_failed"))
         }
-    }
-}
-
-#[tracing::instrument(name = "fleet_refresh", skip_all, fields(agents = tracing::field::Empty, succeeded = tracing::field::Empty, failed = tracing::field::Empty, accepted = tracing::field::Empty))]
-pub async fn refresh_fleet_devices(
-    State(state): State<AppState>,
-    Json(req): Json<RefreshFleetDevicesRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    let agent_ids = if req.agent_ids.is_empty() {
-        let sessions = state.sessions.read().await;
-        sessions.keys().cloned().collect::<Vec<_>>()
-    } else {
-        req.agent_ids.clone()
-    };
-    let agent_ids = normalize_refresh_agent_ids(agent_ids);
-    tracing::Span::current().record("agents", agent_ids.len());
-
-    let results = futures_util::stream::iter(agent_ids.into_iter().map(|agent_id| {
-        let state = state.clone();
-        // Each concurrent future carries its own span through relay and storage.
-        let span = tracing::info_span!("fleet_refresh_agent", agent_id = %agent_id, outcome = tracing::field::Empty, accepted = tracing::field::Empty);
-        async move {
-            let response = relay_agent_command(
-                &state,
-                &agent_id,
-                AgentCommand::Inventory(InventoryRequest {
-                    query: None,
-                    name: None,
-                    ips: Vec::new(),
-                    devs: Vec::new(),
-                    nuds: Vec::new(),
-                    macs: Vec::new(),
-                }),
-                req.timeout_ms,
-            )
-            .await;
-            let result = refresh_fleet_agent_result(&state, &agent_id, response).await;
-            tracing::Span::current().record("outcome", result.status.as_str());
-            tracing::Span::current().record("accepted", result.accepted);
-            if result.status != "ok" {
-                // The response retains diagnostic detail; do not export payloads.
-                warn!("fleet agent refresh failed");
-            }
-            result
-        }
-        .instrument(span)
-    }))
-    .buffer_unordered(REFRESH_CONCURRENCY)
-    .collect::<Vec<_>>()
-    .await;
-
-    let mut results = results;
-    results.sort_by(|a, b| a.agent_id.cmp(&b.agent_id));
-    let total_accepted = results.iter().map(|result| result.accepted).sum::<usize>();
-    let succeeded = results
-        .iter()
-        .filter(|result| result.status == "ok")
-        .count();
-    let span = tracing::Span::current();
-    span.record("succeeded", succeeded);
-    span.record("failed", results.len() - succeeded);
-    span.record("accepted", total_accepted);
-    info!("fleet refresh completed");
-
-    Ok((
-        StatusCode::OK,
-        Json(RefreshFleetDevicesResponse {
-            total_accepted,
-            agents: results,
-        }),
-    ))
-}
-
-fn normalize_refresh_agent_ids(mut agent_ids: Vec<String>) -> Vec<String> {
-    agent_ids.sort();
-    agent_ids.dedup();
-    agent_ids
-}
-
-async fn refresh_fleet_agent_result(
-    state: &AppState,
-    agent_id: &str,
-    response: Result<RelayCommandResponse, ApiError>,
-) -> RefreshFleetAgentResult {
-    match response {
-        Ok(response) if response.status == "ok" => {
-            let Some(result) = response.result else {
-                return RefreshFleetAgentResult {
-                    agent_id: agent_id.to_string(),
-                    status: "error".into(),
-                    accepted: 0,
-                    error: Some("inventory command returned no result".into()),
-                };
-            };
-            match serde_json::from_value::<wakey_core::DeviceInventory>(result)
-                .map(|inventory| inventory.devices)
-            {
-                Ok(devices) => {
-                    match state
-                        .store
-                        .replace_agent_device_snapshot(agent_id, &devices)
-                        .await
-                    {
-                        Ok(accepted) => RefreshFleetAgentResult {
-                            agent_id: agent_id.to_string(),
-                            status: "ok".into(),
-                            accepted,
-                            error: None,
-                        },
-                        Err(err) => RefreshFleetAgentResult {
-                            agent_id: agent_id.to_string(),
-                            status: "error".into(),
-                            accepted: 0,
-                            error: Some(err.to_string()),
-                        },
-                    }
-                }
-                Err(err) => RefreshFleetAgentResult {
-                    agent_id: agent_id.to_string(),
-                    status: "error".into(),
-                    accepted: 0,
-                    error: Some(err.to_string()),
-                },
-            }
-        }
-        Ok(response) => RefreshFleetAgentResult {
-            agent_id: agent_id.to_string(),
-            status: "error".into(),
-            accepted: 0,
-            error: response
-                .error
-                .map(|error| error.message)
-                .or_else(|| Some("inventory command failed".into())),
-        },
-        Err(err) => RefreshFleetAgentResult {
-            agent_id: agent_id.to_string(),
-            status: "error".into(),
-            accepted: 0,
-            error: Some(format!("{}: {}", err.status, err.message)),
-        },
     }
 }
 

@@ -8,7 +8,7 @@ use super::build::{
     AgentRuntimeStatus, FleetBuildContext, build_fleet_devices, filter_fleet_devices,
     known_device_summary,
 };
-use super::normalize_refresh_agent_ids;
+use super::refresh::normalize_refresh_agent_ids;
 use super::types::ListFleetDevicesQuery;
 use crate::state::{AgentDeviceRow, AgentDeviceWithChildren, DeviceIdentifier, KnownDevice};
 
