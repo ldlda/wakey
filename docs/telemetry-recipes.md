@@ -20,6 +20,7 @@ that includes recent activity and allow at least two exports for rate queries.
 | --- | --- | --- |
 | Counter | Cumulative events or bytes since process startup | `rate` for per-second throughput; `increase` for a window's estimated total |
 | UpDownCounter | Adds and subtracts from a current quantity | Read the current value directly; do not use `rate` for active sessions |
+| Gauge | Measures a current value, such as stored device rows | Read directly; do not use `rate` or `increase` |
 | Histogram | Distribution of individual measurements | `_sum / _count` for an average; `_bucket` for estimated percentiles |
 
 Counter resets on restart are handled by `rate` and `increase`. Apply those
@@ -130,6 +131,63 @@ sum by (job, instance) (increase(wakey_snapshot_devices_total[1h]))
 
 Repeated snapshots count the same devices again. This is collection volume,
 **not unique devices, current fleet size, or confirmed CC persistence**.
+
+## Current Devices And Endpoints
+
+These gauges are emitted by CC. Counts are sampled at startup and every 30 seconds,
+independently of UI requests, and exported on the normal metrics schedule. Allow
+up to two intervals for a change to appear. The snapshot counter above cannot
+substitute for these gauges.
+
+A **device** is a grouped device identity. An **endpoint** is one observed address
+entry with an IP, optional MAC/interface, source, and presence. One PC can have
+multiple IPv4/IPv6 endpoints, and different sources or agents can observe the
+same address. An endpoint here is not an HTTP API route.
+
+| Panel | Scope | Suggested visualization |
+| --- | --- | --- |
+| Stored devices by agent | Device rows currently retained in CC for each agent; not globally unique identities | Bar gauge, one value per agent |
+| Stored endpoints by agent | Endpoint rows currently retained in CC for each agent, including inactive entries; not unique IPs | Bar gauge, one value per agent |
+| Fleet devices | Grouped fleet identities, split into saved and unsaved | Stat, one value per category |
+
+Stored device rows by agent:
+
+```promql
+sum by (job, agent_id) (wakey_stored_devices{job="wakey-control-plane"})
+```
+
+Stored endpoint rows by agent:
+
+```promql
+sum by (job, agent_id) (wakey_stored_endpoints{job="wakey-control-plane"})
+```
+
+Grouped fleet devices by manual identity status:
+
+```promql
+sum by (job, identity) (wakey_fleet_devices{job="wakey-control-plane"})
+```
+
+Adjust the `job` selector to your actual service label. These queries assume one
+CC owns the fleet; do not sum replicas of the same database as distinct devices.
+Enrolled agents with no stored rows report zero. After revocation, an agent can
+remain represented while its device rows are retained. When neither enrollment
+nor stored rows exist, the sampler stops reporting that agent label.
+
+Use Grafana's **short** unit with zero decimal places. Read the gauges directly;
+do not apply `rate` or `increase`. Counts must reflect unfiltered CC state, not
+the last UI search or visibility filter. An agent going offline does not by
+itself delete its stored rows, so these counts are not online-device counts.
+
+Do not sum per-agent device counts and label that value "unique fleet devices":
+the same device can be observed by more than one agent. Likewise, an endpoint
+count is not a count of distinct IP addresses. Saved/unsaved describes manual
+identity management, not online/offline/unknown presence.
+
+Failed refreshes suppress observations until sampling recovers; they do not report
+zero or keep exporting an old sample. Prometheus may still show its last value
+until that series becomes stale. Export callbacks only read the in-memory sample;
+they never wait on database work. Sampling is disabled when OTLP is disabled.
 
 ## Empty or Strange Results
 

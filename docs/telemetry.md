@@ -140,6 +140,9 @@ queries, rates, averages, percentiles, and Grafana units.
 | `wakey.operations` | Completed command/snapshot attempts, labeled by operation and outcome |
 | `wakey.operation.duration` | Corresponding duration histogram in seconds |
 | `wakey.snapshot.devices` | Cumulative devices in snapshots successfully sent by the agent |
+| `wakey.stored.devices` | CC gauge of retained device rows, labeled by `agent_id` |
+| `wakey.stored.endpoints` | CC gauge of retained endpoint rows, including inactive entries, labeled by `agent_id` |
+| `wakey.fleet.devices` | CC gauge of unfiltered grouped identities, labeled by `identity` (`saved` or `unsaved`) |
 | `wakey.terminal.active` | Agent PTY workers currently alive |
 | `wakey.terminal.input.bytes` | Input bytes received by the terminal relay |
 | `wakey.terminal.output.bytes` | Output bytes read from the PTY, including while detached |
@@ -149,6 +152,12 @@ Metric labels do not include request/session IDs, MACs, or IPs. New spans use
 `skip_all` and explicitly select safe fields; terminal bytes and credentials are
 not attached. Profiles, host CPU/RSS metrics, connected-agent gauges, and export-loss
 dashboards are not part of this initial slice.
+
+Current-state fleet gauges sample independently every 30 seconds, with bounded
+revision retries to avoid mixed-state counts. Enrolled empty agents report zero;
+removed labels disappear when no enrollment or retained rows remain. Failed samples
+are omitted, not converted to zeros. No per-device labels are emitted. See the
+recipe book for scopes, queries, and the distinction between devices and endpoints.
 
 ## Failure policy
 

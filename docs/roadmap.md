@@ -45,7 +45,7 @@ of remembered identifiers based on observation expiry.
 - [ ] Record hostname-resolution success/failure without exporting hostnames or resolved addresses. Current spans show timing but do not explicitly classify the result.
 - [ ] Investigate the slow resolver with a reproducible device-side check. Timing isolated the phase, not the cause; do not treat instrumentation as a fix.
 - [x] Propagate optional W3C trace context for periodic/requested WS snapshots so agent collection and CC persistence can be inspected together. Wire compatibility and context linkage tested; live validation pending.
-- [ ] Add current-state device gauges: stored rows per agent and grouped fleet devices split known/unknown. Define scope and update lifecycle first; never derive gauges from the last filtered UI query.
+- [x] Add current-state gauges: retained device/endpoint rows per agent and unfiltered grouped fleet identities split saved/unsaved. Sample independently every 30 seconds with bounded revision checks; replace labels and suppress failed samples. Collector and state lifecycle tests included; dashboard recipes ready.
 - [ ] Decide whether snapshots need persistence acknowledgements. The existing sent-device counter does not prove CC storage; any confirmed-storage metric needs an authoritative measurement point.
 
 The existing snapshot counter is cumulative collection volume, not unique devices

@@ -7,6 +7,7 @@ mod commands;
 mod control;
 mod terminals;
 pub(crate) use control::FleetCache;
+pub(crate) use control::sample_fleet_counts;
 
 pub use alerts::{AlertsHub, active_alerts, alert_history, alerts_stream, run_alert_evaluator};
 pub use audit::list_audit_events;

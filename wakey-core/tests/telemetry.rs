@@ -3,6 +3,7 @@
 use opentelemetry_proto::tonic::collector::{
     logs::v1 as logs, metrics::v1 as metrics, trace::v1 as traces,
 };
+use opentelemetry_proto::tonic::metrics::v1::{metric, number_data_point};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tonic::{Request, Response, Status};
@@ -212,6 +213,36 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
     )
     .unwrap();
 
+    let fleet_metrics = telemetry::FleetMetrics::new().unwrap();
+    fleet_metrics.replace(Some(telemetry::FleetCounts {
+        agents: [(
+            "removed-agent".into(),
+            telemetry::AgentDeviceCounts {
+                devices: 9,
+                endpoints: 20,
+            },
+        )]
+        .into(),
+        saved: 9,
+        unsaved: 0,
+    }));
+    fleet_metrics.replace(None);
+    fleet_metrics.replace(Some(telemetry::FleetCounts {
+        agents: [
+            (
+                "router".into(),
+                telemetry::AgentDeviceCounts {
+                    devices: 2,
+                    endpoints: 7,
+                },
+            ),
+            ("empty-agent".into(), Default::default()),
+        ]
+        .into(),
+        saved: 1,
+        unsaved: 1,
+    }));
+
     let parent = tracing::info_span!("relay_command");
     let context = parent.in_scope(telemetry::current_trace_context);
     assert!(context.contains_key("traceparent"));
@@ -306,7 +337,48 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
         "wakey.operation.duration",
         "wakey.snapshot.devices",
         "wakey.terminal.active",
+        "wakey.stored.devices",
+        "wakey.stored.endpoints",
+        "wakey.fleet.devices",
     ] {
         assert!(names.contains(&name), "missing {name}");
+    }
+    let latest = metrics.last().unwrap();
+    for (name, label, expected) in [
+        (
+            "wakey.stored.devices",
+            "agent_id",
+            vec![("router", 2), ("empty-agent", 0)],
+        ),
+        (
+            "wakey.stored.endpoints",
+            "agent_id",
+            vec![("router", 7), ("empty-agent", 0)],
+        ),
+        (
+            "wakey.fleet.devices",
+            "identity",
+            vec![("saved", 1), ("unsaved", 1)],
+        ),
+    ] {
+        let metric = latest
+            .resource_metrics
+            .iter()
+            .flat_map(|r| &r.scope_metrics)
+            .flat_map(|s| &s.metrics)
+            .find(|m| m.name == name)
+            .unwrap();
+        let Some(metric::Data::Gauge(gauge)) = &metric.data else {
+            panic!("{name} must be a gauge");
+        };
+        assert_eq!(gauge.data_points.len(), expected.len());
+        for (value, count) in expected {
+            let point = gauge.data_points.iter().find(|p| p.attributes.iter().any(|a| {
+                a.key == label && a.value.as_ref().and_then(|v| v.value.as_ref())
+                    == Some(&opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(value.into()))
+            })).unwrap();
+            assert_eq!(point.value, Some(number_data_point::Value::AsInt(count)));
+            assert_eq!(point.attributes.len(), 1, "no device/address labels");
+        }
     }
 }

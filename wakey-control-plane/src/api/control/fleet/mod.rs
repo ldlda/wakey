@@ -49,6 +49,35 @@ async fn fleet_view(state: &AppState) -> anyhow::Result<std::sync::Arc<Vec<Fleet
         .await
 }
 
+/// Count stored rows separately from grouped identities. Reject mixed revisions;
+/// filtered UI results must never become the source of current-state metrics.
+pub(crate) async fn sample_fleet_counts(
+    state: &AppState,
+) -> anyhow::Result<wakey_core::telemetry::FleetCounts> {
+    for _ in 0..3 {
+        let revision = state.store.fleet_revision();
+        let mut counts = wakey_core::telemetry::FleetCounts::default();
+        for (agent, _) in state.store.list_agents_with_nicknames().await? {
+            counts.agents.entry(agent).or_default();
+        }
+        for row in state.store.list_agent_device_rows().await? {
+            let agent = counts.agents.entry(row.device.agent_id).or_default();
+            agent.devices += 1;
+            agent.endpoints += row.endpoints.len() as u64;
+        }
+        let fleet = fleet_view(state).await?;
+        counts.saved = fleet
+            .iter()
+            .filter(|device| device.known_device.is_some())
+            .count() as u64;
+        counts.unsaved = fleet.len() as u64 - counts.saved;
+        if state.store.fleet_revision() == revision {
+            return Ok(counts);
+        }
+    }
+    Err(crate::runtime::view_cache::RebuildLimit.into())
+}
+
 const REFRESH_CONCURRENCY: usize = 8;
 
 fn fleet_error(err: anyhow::Error, fallback_code: &str) -> ApiError {

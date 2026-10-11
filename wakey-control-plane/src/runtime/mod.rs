@@ -24,6 +24,7 @@ use crate::state;
 use crate::ws;
 
 mod admin;
+mod fleet_metrics;
 mod process;
 pub mod terminals;
 pub(crate) mod view_cache;
@@ -196,6 +197,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     };
 
     tokio::spawn(api::run_alert_evaluator(app_state.clone()));
+    let _fleet_metrics = fleet_metrics::FleetMetricsTask::start(app_state.clone());
 
     // Keep route classes explicit so edge policy can map directly:
     // - public_api_routes: intended internet-facing agent endpoints

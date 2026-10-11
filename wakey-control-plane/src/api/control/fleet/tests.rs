@@ -53,11 +53,18 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
         fleet: Arc::new(super::FleetCache::default()),
     };
     let store = &state.store;
+    assert_eq!(
+        super::sample_fleet_counts(&state).await.unwrap(),
+        Default::default()
+    );
     let token = store
         .issue_enroll_token(Duration::from_secs(60))
         .await
         .unwrap();
     let agent = store.enroll(&token.enroll_token).await.unwrap();
+    let empty = super::sample_fleet_counts(&state).await.unwrap();
+    assert_eq!(empty.agents[&agent.agent_id].devices, 0);
+    assert_eq!(empty.agents[&agent.agent_id].endpoints, 0);
     let observed = wakey_core::Device::from_parts(
         vec![wakey_core::NeighborEntry {
             ip: "192.168.1.10".parse().unwrap(),
@@ -73,6 +80,10 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
         .unwrap();
     let initial = super::fleet_view(&state).await.unwrap();
     assert_eq!(initial.len(), 1);
+    let counts = super::sample_fleet_counts(&state).await.unwrap();
+    assert_eq!(counts.agents[&agent.agent_id].devices, 1);
+    assert_eq!(counts.agents[&agent.agent_id].endpoints, 1);
+    assert_eq!((counts.saved, counts.unsaved), (0, 1));
     assert!(Arc::ptr_eq(
         &initial,
         &super::fleet_view(&state).await.unwrap()
@@ -148,6 +159,8 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
             .unwrap()
             .is_empty()
     );
+    let counts = super::sample_fleet_counts(&state).await.unwrap();
+    assert_eq!((counts.saved, counts.unsaved), (1, 0));
     let all = ListFleetDevicesQuery {
         visibility: Some("all".into()),
         ..Default::default()
@@ -162,6 +175,8 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
         .await
         .unwrap();
     assert_eq!(super::fleet_view(&state).await.unwrap().len(), 2);
+    let counts = super::sample_fleet_counts(&state).await.unwrap();
+    assert_eq!((counts.saved, counts.unsaved), (1, 1));
     store
         .attach_device_identifier(
             &saved.device_id,
@@ -195,6 +210,8 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
             .len(),
         1
     );
+    let counts = super::sample_fleet_counts(&state).await.unwrap();
+    assert_eq!((counts.saved, counts.unsaved), (2, 0));
     assert_eq!(
         super::load_fleet_devices(&state, &all).await.unwrap().len(),
         2
@@ -212,6 +229,9 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
     );
 
     state.sessions.write().await.clear();
+    let counts = super::sample_fleet_counts(&state).await.unwrap();
+    assert_eq!(counts.agents[&agent.agent_id].devices, 1);
+    assert_eq!((counts.saved, counts.unsaved), (0, 1));
     assert!(
         super::fleet_view(&state).await.unwrap()[0]
             .recommended_route
@@ -234,6 +254,41 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
         .await
         .unwrap();
     assert!(super::fleet_view(&state).await.unwrap().is_empty());
+    assert_eq!(
+        super::sample_fleet_counts(&state).await.unwrap(),
+        Default::default()
+    );
+    // Identical devices on two agents count twice as stored rows, once as a fleet identity.
+    // Offline endpoints are retained too; these metrics are not reachability counters.
+    let offline = wakey_core::Device::from_parts(
+        vec![wakey_core::NeighborEntry {
+            ip: "192.168.1.10".parse().unwrap(),
+            mac: Some("aa:bb:cc:dd:ee:01".parse().unwrap()),
+            dev: Some("br-lan".into()),
+            state: wakey_core::NeighborState::Failed,
+        }],
+        vec![],
+    );
+    for id in ["agent-a", "agent-b"] {
+        store
+            .replace_agent_device_snapshot(id, std::slice::from_ref(&offline))
+            .await
+            .unwrap();
+    }
+    let counts = super::sample_fleet_counts(&state).await.unwrap();
+    assert_eq!(counts.agents.len(), 2);
+    for count in counts.agents.values() {
+        assert_eq!(count.devices, 1);
+        assert_eq!(count.endpoints, 1);
+    }
+    assert_eq!((counts.saved, counts.unsaved), (0, 1));
+    store
+        .replace_agent_device_snapshot("agent-a", &[])
+        .await
+        .unwrap();
+    let counts = super::sample_fleet_counts(&state).await.unwrap();
+    assert!(!counts.agents.contains_key("agent-a"));
+    assert_eq!(counts.agents["agent-b"].devices, 1);
     drop(state);
     std::fs::remove_dir_all(dir).unwrap();
 }

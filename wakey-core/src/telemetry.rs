@@ -291,6 +291,8 @@ fn local_timer() -> fmt::time::OffsetTime<time::format_description::well_known::
 // Construct instruments once, after the real provider exists. Disabled telemetry
 // therefore does no per-PTY-read allocations or instrument registration.
 static METRICS: OnceLock<Instruments> = OnceLock::new();
+mod fleet;
+pub use fleet::{AgentDeviceCounts, FleetCounts, FleetMetrics};
 struct Instruments {
     operations: opentelemetry::metrics::Counter<u64>,
     duration: opentelemetry::metrics::Histogram<f64>,
