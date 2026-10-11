@@ -75,6 +75,14 @@ Current DHCP leases are summary-eligible and may support wake if they include a 
 
 `Device.ips` and `Device.macs` stay as summaries. Summary IPs come from concrete live-ish sources such as current neighbor rows and current DHCP lease rows. Hook-derived and offline IPs remain visible through endpoints but are collapsed out of primary UI summaries by default.
 
+Fleet display labels prefer the saved device name, then a hostname, then a MAC,
+then an IP. Generated address labels use `Device: <address>` without presence
+prefixes; the badge carries presence. An inactive IP is only a naming fallback
+when no name or MAC exists, never evidence of a current address or a wake route.
+Offline neighbor evidence does not establish that a DHCP address has expired or
+been reassigned. If a concrete source observes that endpoint again, its eligible
+IP returns to the summary; manually remembered identifiers are not removed by this.
+
 `Device.presence` is derived from all endpoints, not only summary-eligible endpoints. This lets concrete offline evidence matter while allowing stronger live evidence to override it.
 
 The control plane derives stored snapshot presence and fleet presence from the

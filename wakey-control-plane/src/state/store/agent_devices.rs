@@ -5,6 +5,8 @@ use super::Store;
 use super::helpers::core::*;
 use crate::state::types::*;
 
+mod snapshot;
+
 impl Store {
     /// Expire agent-reported devices, preserving all operator-saved identities.
     /// `last_seen_unix` on the parent is CC snapshot inclusion time, not proof
@@ -52,7 +54,6 @@ impl Store {
 
         let mut incoming_keys = std::collections::HashSet::with_capacity(devices.len());
         let snapshot_time = now_unix();
-        let snapshot_time_i64 = i64::try_from(snapshot_time).context("snapshot time overflow")?;
 
         let existing_keys: Vec<String> = sqlx::query_scalar!(
             "SELECT device_key FROM agent_devices WHERE agent_id = ?1",
@@ -69,173 +70,7 @@ impl Store {
             let device_key = device_key_from_id(device_id);
             incoming_keys.insert(device_key.clone());
 
-            let endpoints = endpoints_for_storage(device);
-            let presence = presence_to_str(endpoint_presence(&endpoints, device.presence));
-            let display_name: Option<String> = None;
-
-            sqlx::query!(
-                "INSERT INTO agent_devices (agent_id, device_key, presence, display_name, first_seen_unix, last_seen_unix)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT (agent_id, device_key) DO UPDATE SET
-                    presence = excluded.presence,
-                    display_name = excluded.display_name,
-                    last_seen_unix = excluded.last_seen_unix",
-                agent_id,
-                device_key,
-                presence,
-                display_name,
-                snapshot_time_i64,
-                snapshot_time_i64
-            )
-            .execute(&mut *tx)
-            .await
-            .context("failed upserting agent device")?;
-
-            // Replace child rows.
-            sqlx::query!(
-                "DELETE FROM agent_device_macs WHERE agent_id = ?1 AND device_key = ?2",
-                agent_id,
-                device_key
-            )
-            .execute(&mut *tx)
-            .await
-            .context("failed deleting device macs")?;
-
-            if !device.macs.is_empty() {
-                let mut builder = sqlx::QueryBuilder::new(
-                    "INSERT INTO agent_device_macs (agent_id, device_key, mac) ",
-                );
-                builder.push_values(&device.macs, |mut b, mac| {
-                    b.push_bind(agent_id)
-                        .push_bind(device_key.clone())
-                        .push_bind(mac.to_string().to_ascii_lowercase());
-                });
-                builder
-                    .build()
-                    .execute(&mut *tx)
-                    .await
-                    .context("failed inserting device macs")?;
-            }
-
-            sqlx::query!(
-                "DELETE FROM agent_device_ips WHERE agent_id = ?1 AND device_key = ?2",
-                agent_id,
-                device_key
-            )
-            .execute(&mut *tx)
-            .await
-            .context("failed deleting device ips")?;
-
-            if !device.ips.is_empty() {
-                let mut builder = sqlx::QueryBuilder::new(
-                    "INSERT INTO agent_device_ips (agent_id, device_key, ip) ",
-                );
-                builder.push_values(&device.ips, |mut b, ip| {
-                    b.push_bind(agent_id)
-                        .push_bind(device_key.clone())
-                        .push_bind(ip.to_string());
-                });
-                builder
-                    .build()
-                    .execute(&mut *tx)
-                    .await
-                    .context("failed inserting device ips")?;
-            }
-
-            sqlx::query(
-                "DELETE FROM agent_device_endpoints WHERE agent_id = ?1 AND device_key = ?2",
-            )
-            .bind(agent_id)
-            .bind(&device_key)
-            .execute(&mut *tx)
-            .await
-            .context("failed deleting device endpoints")?;
-
-            if !endpoints.is_empty() {
-                let mut builder = sqlx::QueryBuilder::new(
-                    "INSERT INTO agent_device_endpoints \
-                     (agent_id, device_key, endpoint_key, source, mac, ip, hostname, interface, presence, first_seen_unix, last_seen_unix) ",
-                );
-                builder.push_values(endpoints, |mut b, endpoint| {
-                    let first_seen = endpoint.first_seen_unix.unwrap_or(snapshot_time);
-                    let last_seen = endpoint.last_seen_unix.unwrap_or(snapshot_time);
-                    b.push_bind(agent_id)
-                        .push_bind(device_key.clone())
-                        .push_bind(endpoint_storage_key(&endpoint))
-                        .push_bind(endpoint_source_to_str(endpoint.key.source))
-                        .push_bind(
-                            endpoint
-                                .key
-                                .mac
-                                .map(|mac| mac.to_string().to_ascii_lowercase()),
-                        )
-                        .push_bind(endpoint.key.ip.map(|ip| ip.to_string()))
-                        .push_bind(endpoint.hostname.clone())
-                        .push_bind(endpoint.interface.clone())
-                        .push_bind(presence_to_str(endpoint.presence))
-                        .push_bind(i64::try_from(first_seen).unwrap_or(i64::MAX))
-                        .push_bind(i64::try_from(last_seen).unwrap_or(i64::MAX));
-                });
-                builder
-                    .build()
-                    .execute(&mut *tx)
-                    .await
-                    .context("failed inserting device endpoints")?;
-            }
-
-            sqlx::query!(
-                "DELETE FROM agent_device_hostnames WHERE agent_id = ?1 AND device_key = ?2",
-                agent_id,
-                device_key
-            )
-            .execute(&mut *tx)
-            .await
-            .context("failed deleting device hostnames")?;
-
-            if !device.names.is_empty() {
-                let mut builder = sqlx::QueryBuilder::new(
-                    "INSERT INTO agent_device_hostnames (agent_id, device_key, hostname) ",
-                );
-                builder.push_values(&device.names, |mut b, hostname| {
-                    b.push_bind(agent_id)
-                        .push_bind(device_key.clone())
-                        .push_bind(hostname);
-                });
-                builder
-                    .build()
-                    .execute(&mut *tx)
-                    .await
-                    .context("failed inserting device hostnames")?;
-            }
-
-            sqlx::query!(
-                "DELETE FROM agent_device_facts WHERE agent_id = ?1 AND device_key = ?2",
-                agent_id,
-                device_key
-            )
-            .execute(&mut *tx)
-            .await
-            .context("failed deleting device facts")?;
-
-            if !device.observations.is_empty() {
-                let mut facts_json = Vec::with_capacity(device.observations.len());
-                for obs in &device.observations {
-                    facts_json.push(serde_json::to_string(obs).context("failed serializing fact")?);
-                }
-                let mut builder = sqlx::QueryBuilder::new(
-                    "INSERT INTO agent_device_facts (agent_id, device_key, fact_json) ",
-                );
-                builder.push_values(facts_json, |mut b, fact| {
-                    b.push_bind(agent_id)
-                        .push_bind(device_key.clone())
-                        .push_bind(fact);
-                });
-                builder
-                    .build()
-                    .execute(&mut *tx)
-                    .await
-                    .context("failed inserting device facts")?;
-            }
+            snapshot::write_device(&mut tx, agent_id, &device_key, device, snapshot_time).await?;
         }
 
         for old_key in existing_keys {
@@ -782,6 +617,56 @@ mod tests {
             .unwrap();
         assert_eq!(rows[0].device.presence, "unknown");
         assert_eq!(rows[0].endpoints[0].presence, Presence::Unknown);
+    }
+
+    #[tokio::test]
+    async fn child_write_failure_rolls_back_the_whole_snapshot_without_invalidating_fleet() {
+        let ts = TestStore::new().await;
+        let store = ts.store();
+        let original = sample_device("aa:bb:cc:dd:ee:01", "192.168.1.10", "original");
+        store
+            .replace_agent_device_snapshot("agent-a", &[original])
+            .await
+            .unwrap();
+        let before = store
+            .list_agent_device_rows_for_agent("agent-a")
+            .await
+            .unwrap()
+            .remove(0);
+        let revision = store.fleet_revision();
+
+        let mut updated = sample_device("aa:bb:cc:dd:ee:01", "192.168.1.20", "updated");
+        updated.neighbors[0].state = NeighborState::Failed;
+        let mut invalid = sample_device("aa:bb:cc:dd:ee:02", "192.168.1.30", "duplicate");
+        // The second device fails late, after the first device and several child
+        // tables were written. Every helper must share the outer transaction.
+        invalid.names.push("duplicate".into());
+        let error = store
+            .replace_agent_device_snapshot("agent-a", &[updated, invalid])
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed inserting device hostnames")
+        );
+        assert_eq!(store.fleet_revision(), revision);
+
+        let mut rows = store
+            .list_agent_device_rows_for_agent("agent-a")
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1, "the failed new device must not survive");
+        let after = rows.remove(0);
+        assert_eq!(after.device.device_key, before.device.device_key);
+        assert_eq!(after.device.presence, before.device.presence);
+        assert_eq!(after.device.first_seen_unix, before.device.first_seen_unix);
+        assert_eq!(after.device.last_seen_unix, before.device.last_seen_unix);
+        assert_eq!(after.macs, before.macs);
+        assert_eq!(after.ips, before.ips);
+        assert_eq!(after.hostnames, before.hostnames);
+        assert_eq!(after.endpoints, before.endpoints);
+        assert_eq!(after.facts, before.facts);
     }
 
     #[tokio::test]

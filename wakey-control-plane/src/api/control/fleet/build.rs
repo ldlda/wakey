@@ -2,9 +2,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::net::IpAddr;
 
 use macaddr::MacAddr;
-use wakey_core::{EndpointSource, Presence};
+use wakey_core::Presence;
 
 use crate::state::{AgentDeviceWithChildren, DeviceIdentifier, KnownDevice, KnownDeviceSummary};
+
+mod addresses;
+mod routes;
+use addresses::add_address_evidence;
+use routes::{add_endpoint_routes, add_legacy_routes, compare_route_quality};
 
 use super::types::{
     FleetDevice, FleetDeviceAgent, FleetDeviceEndpoint, FleetWakeRoute, ListFleetDevicesQuery,
@@ -26,7 +31,9 @@ pub(crate) struct AgentRuntimeStatus {
 struct FleetAccumulator {
     device_key: String,
     display_name: Option<String>,
-    label_ip: Option<IpAddr>,
+    /// Naming-only evidence, used when no name, MAC, or summary IP is available.
+    /// Must not contribute to summary IPs or wake routes.
+    fallback_ip: Option<IpAddr>,
     known_device: Option<KnownDeviceSummary>,
     pinned: bool,
     ips: BTreeSet<IpAddr>,
@@ -46,7 +53,7 @@ impl Default for FleetAccumulator {
         Self {
             device_key: String::new(),
             display_name: None,
-            label_ip: None,
+            fallback_ip: None,
             known_device: None,
             pinned: false,
             ips: BTreeSet::new(),
@@ -197,23 +204,22 @@ fn add_agent_device_to_entry(
     agent_device: AgentDeviceWithChildren,
     context: &FleetBuildContext,
 ) {
-    // Retain address evidence for naming only, without promoting stale IPs into
-    // the active summary or wake-route candidates.
-    let label_ip = agent_device
-        .ips
-        .iter()
-        .copied()
-        .chain(
-            agent_device
-                .endpoints
-                .iter()
-                .filter_map(|endpoint| endpoint.key.ip),
-        )
-        .min();
-    entry.label_ip = entry.label_ip.into_iter().chain(label_ip).min();
-    let device_presence = agent_device.presence();
-    let device_offline = device_presence == Presence::Offline;
-    if let Some(summary) = device_known_device(&agent_device, context)
+    add_address_evidence(entry, &agent_device);
+    add_names_and_identity(entry, &agent_device, context);
+    let status = add_agent_summary(entry, &agent_device, context);
+    if agent_device.endpoints.is_empty() {
+        add_legacy_routes(entry, &agent_device, &status);
+    } else {
+        add_endpoint_routes(entry, &agent_device, &status);
+    }
+}
+
+fn add_names_and_identity(
+    entry: &mut FleetAccumulator,
+    agent_device: &AgentDeviceWithChildren,
+    context: &FleetBuildContext,
+) {
+    if let Some(summary) = device_known_device(agent_device, context)
         && entry.known_device.is_none()
     {
         if let Some(ref name) = agent_device.device.display_name {
@@ -222,33 +228,19 @@ fn add_agent_device_to_entry(
         entry.pinned = summary.pinned;
         entry.known_device = Some(summary);
     }
-    if agent_device.endpoints.is_empty() {
-        for mac in &agent_device.macs {
-            entry.macs.insert(*mac);
-        }
-        if !device_offline {
-            for ip in &agent_device.ips {
-                entry.ips.insert(*ip);
-            }
-        }
-    } else {
-        for endpoint in &agent_device.endpoints {
-            if let Some(mac) = endpoint.key.mac {
-                entry.macs.insert(mac);
-            }
-            if endpoint_ip_is_summary_eligible(endpoint.key.source, endpoint.presence)
-                && let Some(ip) = endpoint.key.ip
-            {
-                entry.ips.insert(ip);
-            }
-        }
-    }
     for hostname in &agent_device.hostnames {
         if entry.display_name.is_none() {
             entry.display_name = Some(hostname.clone());
         }
         entry.hostnames.insert(hostname.clone());
     }
+}
+
+fn add_agent_summary(
+    entry: &mut FleetAccumulator,
+    agent_device: &AgentDeviceWithChildren,
+    context: &FleetBuildContext,
+) -> AgentRuntimeStatus {
     let first_seen = agent_device.device.first_seen();
     let last_seen = agent_device.device.last_seen();
     entry.first_seen_unix = Some(
@@ -263,7 +255,7 @@ fn add_agent_device_to_entry(
             .map(|current| current.max(last_seen))
             .unwrap_or(last_seen),
     );
-    entry.presence = std::cmp::max(entry.presence, device_presence);
+    entry.presence = std::cmp::max(entry.presence, agent_device.presence());
 
     let agent_id = agent_device.device.agent_id.clone();
     let status = context
@@ -288,105 +280,7 @@ fn add_agent_device_to_entry(
             connected: status.connected,
             last_seen_unix: last_seen,
         });
-
-    if agent_device.endpoints.is_empty() {
-        entry.sources.insert("device".to_string());
-    }
-
-    for endpoint in &agent_device.endpoints {
-        let source = endpoint_source_label(endpoint.key.source).to_string();
-        entry.sources.insert(source.clone());
-        let endpoint_last_seen = endpoint.last_seen_unix.unwrap_or(last_seen);
-        let endpoint_first_seen = endpoint.first_seen_unix.or(Some(first_seen));
-        entry.endpoints.push(FleetDeviceEndpoint {
-            agent_id: agent_id.clone(),
-            nickname: status.nickname.clone(),
-            connected: status.connected,
-            source: source.clone(),
-            mac: endpoint.key.mac,
-            ip: endpoint.key.ip,
-            hostname: endpoint.hostname.clone(),
-            interface: endpoint.interface.clone(),
-            presence: endpoint.presence,
-            first_seen_unix: endpoint_first_seen,
-            last_seen_unix: Some(endpoint_last_seen),
-        });
-
-        let rid = route_id(
-            &agent_id,
-            endpoint.key.mac.as_ref(),
-            endpoint.key.ip.as_ref(),
-        );
-        let wakeable = status.connected && endpoint.key.mac.is_some();
-        insert_route(
-            entry,
-            FleetWakeRoute {
-                route_id: rid,
-                agent_id: agent_id.clone(),
-                nickname: status.nickname.clone(),
-                connected: status.connected,
-                mac: endpoint.key.mac,
-                ip: endpoint.key.ip,
-                hostname: endpoint.hostname.clone(),
-                interface: endpoint.interface.clone(),
-                source,
-                presence: endpoint.presence,
-                last_seen_unix: endpoint_last_seen,
-                wakeable,
-            },
-        );
-    }
-
-    if agent_device.endpoints.is_empty() && !agent_device.macs.is_empty() {
-        for mac in &agent_device.macs {
-            let ip_for_mac = agent_device.ips.first().copied();
-            let hostname_for_mac = agent_device.hostnames.first().cloned();
-            let rid = route_id(&agent_id, Some(mac), ip_for_mac.as_ref());
-            let wakeable = status.connected;
-            insert_route(
-                entry,
-                FleetWakeRoute {
-                    route_id: rid,
-                    agent_id: agent_id.clone(),
-                    nickname: status.nickname.clone(),
-                    connected: status.connected,
-                    mac: Some(*mac),
-                    ip: ip_for_mac,
-                    hostname: hostname_for_mac,
-                    interface: None,
-                    source: "device".to_string(),
-                    presence: device_presence,
-                    last_seen_unix: last_seen,
-                    wakeable,
-                },
-            );
-        }
-    }
-
-    if agent_device.endpoints.is_empty()
-        && agent_device.macs.is_empty()
-        && let Some(ip) = agent_device.ips.first()
-    {
-        let hostname = agent_device.hostnames.first().cloned();
-        let rid = route_id(&agent_id, None, Some(ip));
-        insert_route(
-            entry,
-            FleetWakeRoute {
-                route_id: rid,
-                agent_id: agent_id.clone(),
-                nickname: status.nickname.clone(),
-                connected: status.connected,
-                mac: None,
-                ip: Some(*ip),
-                hostname,
-                interface: None,
-                source: "device".to_string(),
-                presence: device_presence,
-                last_seen_unix: last_seen,
-                wakeable: false,
-            },
-        );
-    }
+    status
 }
 
 fn add_identifier_to_entry(entry: &mut FleetAccumulator, identifier: &DeviceIdentifier) {
@@ -439,37 +333,6 @@ fn device_known_device(
         })
 }
 
-fn endpoint_ip_is_summary_eligible(source: EndpointSource, presence: Presence) -> bool {
-    match source {
-        EndpointSource::DhcpLease => true,
-        EndpointSource::Neighbor => presence != Presence::Offline,
-        EndpointSource::HookNeighbor | EndpointSource::HookDhcp => false,
-    }
-}
-
-fn insert_route(entry: &mut FleetAccumulator, candidate: FleetWakeRoute) {
-    match entry.routes.entry(candidate.route_id.clone()) {
-        std::collections::btree_map::Entry::Vacant(slot) => {
-            slot.insert(candidate);
-        }
-        std::collections::btree_map::Entry::Occupied(mut slot) => {
-            if compare_route_quality(&candidate, slot.get()).is_gt() {
-                slot.insert(candidate);
-            }
-        }
-    }
-}
-
-fn compare_route_quality(a: &FleetWakeRoute, b: &FleetWakeRoute) -> std::cmp::Ordering {
-    a.connected
-        .cmp(&b.connected)
-        .then_with(|| a.wakeable.cmp(&b.wakeable))
-        .then_with(|| a.ip.is_some().cmp(&b.ip.is_some()))
-        .then_with(|| a.presence.cmp(&b.presence))
-        .then_with(|| a.last_seen_unix.cmp(&b.last_seen_unix))
-        .then_with(|| source_quality_rank(&a.source).cmp(&source_quality_rank(&b.source)))
-}
-
 pub(crate) fn known_device_summary(device: &KnownDevice) -> KnownDeviceSummary {
     KnownDeviceSummary {
         device_id: device.device_id.clone(),
@@ -480,6 +343,7 @@ pub(crate) fn known_device_summary(device: &KnownDevice) -> KnownDeviceSummary {
 
 impl FleetAccumulator {
     fn into_response(self) -> FleetDevice {
+        let display_name = self.display_label();
         let mut route_candidates = self.routes.into_values().collect::<Vec<_>>();
         route_candidates
             .sort_by(|a, b| compare_route_quality(b, a).then_with(|| a.agent_id.cmp(&b.agent_id)));
@@ -487,43 +351,6 @@ impl FleetAccumulator {
             .iter()
             .find(|route| route.wakeable)
             .cloned();
-        let display_name = self
-            .display_name
-            .or_else(|| self.hostnames.iter().next().cloned())
-            .or_else(|| {
-                // Summary IPs omit offline endpoints; labels must not discard
-                // their address evidence or imply that unknown means offline.
-                let address = self
-                    .ips
-                    .iter()
-                    .next()
-                    .copied()
-                    .or(self.label_ip)
-                    .or_else(|| {
-                        self.endpoints
-                            .iter()
-                            .filter_map(|endpoint| endpoint.ip)
-                            .min()
-                    })
-                    .map(|ip| ip.to_string())
-                    .or_else(|| self.macs.iter().next().map(|mac| mac.to_string()))
-                    .or_else(|| {
-                        self.endpoints
-                            .iter()
-                            .find_map(|endpoint| endpoint.mac)
-                            .map(|mac| mac.to_string())
-                    });
-                address.map(|address| {
-                    let prefix = if self.presence == Presence::Offline {
-                        "Offline device"
-                    } else {
-                        "Device"
-                    };
-                    format!("{prefix}: {address}")
-                })
-            })
-            .unwrap_or_else(|| "(unknown device)".to_string());
-
         FleetDevice {
             device_key: self.device_key,
             display_name,
@@ -542,34 +369,6 @@ impl FleetAccumulator {
             recommended_route,
         }
     }
-}
-
-fn endpoint_source_label(source: EndpointSource) -> &'static str {
-    match source {
-        EndpointSource::Neighbor => "neighbor",
-        EndpointSource::DhcpLease => "dhcp_lease",
-        EndpointSource::HookNeighbor => "hook_neighbor",
-        EndpointSource::HookDhcp => "hook_dhcp",
-    }
-}
-
-fn source_quality_rank(source: &str) -> u8 {
-    match source {
-        "neighbor" => 4,
-        "dhcp_lease" => 3,
-        "hook_neighbor" => 2,
-        "hook_dhcp" => 1,
-        _ => 0,
-    }
-}
-
-fn route_id(agent_id: &str, mac: Option<&MacAddr>, ip: Option<&IpAddr>) -> String {
-    format!(
-        "{}|{}|{}",
-        agent_id,
-        mac.map(|m| m.to_string()).unwrap_or_default(),
-        ip.map(|i| i.to_string()).unwrap_or_default()
-    )
 }
 
 fn normalize_filter(value: Option<&str>) -> Option<String> {
