@@ -5,6 +5,7 @@ use super::Store;
 use super::helpers::core::*;
 use crate::state::types::*;
 
+mod read;
 mod snapshot;
 
 impl Store {
@@ -95,240 +96,21 @@ impl Store {
         Ok(incoming_keys.len())
     }
 
-    /// List all agent device rows with their child MAC/IP/hostname/fact rows.
+    /// List all agent devices and their child rows from one consistent read view.
     #[tracing::instrument(name = "db_list_fleet_devices", skip_all)]
     pub async fn list_agent_device_rows(&self) -> Result<Vec<AgentDeviceWithChildren>> {
-        let devices = sqlx::query_as!(
-            AgentDeviceRow,
-            r#"SELECT agent_id, device_key, presence, display_name,
-                    first_seen_unix, last_seen_unix
-             FROM agent_devices
-             ORDER BY agent_id, device_key"#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent devices")?;
-
-        let macs = sqlx::query_as!(
-            AgentDeviceMacRow,
-            r#"SELECT agent_id as "agent_id!", device_key as "device_key!", mac as "mac!"
-             FROM agent_device_macs"#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device macs")?;
-
-        let ips = sqlx::query_as!(
-            AgentDeviceIpRow,
-            r#"SELECT agent_id as "agent_id!", device_key as "device_key!", ip as "ip!"
-             FROM agent_device_ips"#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device ips")?;
-
-        let hostnames = sqlx::query_as!(
-            AgentDeviceHostnameRow,
-            r#"SELECT agent_id as "agent_id!", device_key as "device_key!", hostname as "hostname!"
-             FROM agent_device_hostnames"#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device hostnames")?;
-
-        let endpoints = sqlx::query_as::<_, AgentDeviceEndpointRow>(
-            r#"SELECT agent_id, device_key, endpoint_key, source, mac, ip,
-                    hostname, interface, presence, first_seen_unix, last_seen_unix
-             FROM agent_device_endpoints"#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device endpoints")?;
-
-        let facts = sqlx::query_as!(
-            AgentDeviceFactRow,
-            r#"SELECT agent_id as "agent_id!", device_key as "device_key!", fact_json as "fact_json!"
-             FROM agent_device_facts"#,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device facts")?;
-
-        Ok(assemble_device_rows(
-            devices, macs, ips, hostnames, endpoints, facts,
-        ))
+        read::load(&self.pool, None).await
     }
 
-    /// List agent device rows for a single agent.
+    /// List one agent's devices using the same assembly path as fleet reads.
     #[allow(dead_code)]
     #[tracing::instrument(name = "db_list_agent_devices", skip_all)]
     pub async fn list_agent_device_rows_for_agent(
         &self,
         agent_id: &str,
     ) -> Result<Vec<AgentDeviceWithChildren>> {
-        let devices = sqlx::query_as!(
-            AgentDeviceRow,
-            r#"SELECT agent_id, device_key, presence, display_name,
-                    first_seen_unix, last_seen_unix
-             FROM agent_devices
-             WHERE agent_id = ?1
-             ORDER BY device_key"#,
-            agent_id,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent devices for agent")?;
-
-        let macs = sqlx::query_as!(
-            AgentDeviceMacRow,
-            r#"SELECT agent_id as "agent_id!", device_key as "device_key!", mac as "mac!"
-             FROM agent_device_macs
-             WHERE agent_id = ?1"#,
-            agent_id,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device macs for agent")?;
-
-        let ips = sqlx::query_as!(
-            AgentDeviceIpRow,
-            r#"SELECT agent_id as "agent_id!", device_key as "device_key!", ip as "ip!"
-             FROM agent_device_ips
-             WHERE agent_id = ?1"#,
-            agent_id,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device ips for agent")?;
-
-        let hostnames = sqlx::query_as!(
-            AgentDeviceHostnameRow,
-            r#"SELECT agent_id as "agent_id!", device_key as "device_key!", hostname as "hostname!"
-             FROM agent_device_hostnames
-             WHERE agent_id = ?1"#,
-            agent_id,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device hostnames for agent")?;
-
-        let endpoints = sqlx::query_as::<_, AgentDeviceEndpointRow>(
-            r#"SELECT agent_id, device_key, endpoint_key, source, mac, ip,
-                    hostname, interface, presence, first_seen_unix, last_seen_unix
-             FROM agent_device_endpoints
-             WHERE agent_id = ?1"#,
-        )
-        .bind(agent_id)
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device endpoints for agent")?;
-
-        let facts = sqlx::query_as!(
-            AgentDeviceFactRow,
-            r#"SELECT agent_id as "agent_id!", device_key as "device_key!", fact_json as "fact_json!"
-             FROM agent_device_facts
-             WHERE agent_id = ?1"#,
-            agent_id,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed listing agent device facts for agent")?;
-
-        Ok(assemble_device_rows(
-            devices, macs, ips, hostnames, endpoints, facts,
-        ))
+        read::load(&self.pool, Some(agent_id)).await
     }
-}
-
-fn assemble_device_rows(
-    devices: Vec<AgentDeviceRow>,
-    macs: Vec<AgentDeviceMacRow>,
-    ips: Vec<AgentDeviceIpRow>,
-    hostnames: Vec<AgentDeviceHostnameRow>,
-    endpoints: Vec<AgentDeviceEndpointRow>,
-    facts: Vec<AgentDeviceFactRow>,
-) -> Vec<AgentDeviceWithChildren> {
-    use std::collections::BTreeMap;
-
-    let mut mac_map: BTreeMap<(&str, &str), Vec<&AgentDeviceMacRow>> = BTreeMap::new();
-    for row in &macs {
-        mac_map
-            .entry((row.agent_id.as_str(), row.device_key.as_str()))
-            .or_default()
-            .push(row);
-    }
-    let mut ip_map: BTreeMap<(&str, &str), Vec<&AgentDeviceIpRow>> = BTreeMap::new();
-    for row in &ips {
-        ip_map
-            .entry((row.agent_id.as_str(), row.device_key.as_str()))
-            .or_default()
-            .push(row);
-    }
-    let mut hostname_map: BTreeMap<(&str, &str), Vec<String>> = BTreeMap::new();
-    for row in &hostnames {
-        hostname_map
-            .entry((row.agent_id.as_str(), row.device_key.as_str()))
-            .or_default()
-            .push(row.hostname.clone());
-    }
-    let mut endpoint_map: BTreeMap<(&str, &str), Vec<DeviceEndpoint>> = BTreeMap::new();
-    for row in &endpoints {
-        if let Some(endpoint) = row.to_endpoint() {
-            endpoint_map
-                .entry((row.agent_id.as_str(), row.device_key.as_str()))
-                .or_default()
-                .push(endpoint);
-        }
-    }
-    let mut fact_map: BTreeMap<(&str, &str), Vec<String>> = BTreeMap::new();
-    for row in &facts {
-        fact_map
-            .entry((row.agent_id.as_str(), row.device_key.as_str()))
-            .or_default()
-            .push(row.fact_json.clone());
-    }
-
-    devices
-        .into_iter()
-        .map(|device| {
-            let key = (device.agent_id.as_str(), device.device_key.as_str());
-            let macs: Vec<macaddr::MacAddr> = mac_map
-                .get(&key)
-                .into_iter()
-                .flatten()
-                .filter_map(|row| match macaddr::MacAddr::try_from(*row) {
-                    Ok(mac) => Some(mac),
-                    Err(e) => {
-                        ::tracing::warn!(error = %e, agent_id = %device.agent_id, device_key = %device.device_key, raw_mac = %row.mac, "failed to parse mac from agent_device_macs row");
-                        None
-                    }
-                })
-                .collect();
-            let ips: Vec<std::net::IpAddr> = ip_map
-                .get(&key)
-                .into_iter()
-                .flatten()
-                .filter_map(|row| match std::net::IpAddr::try_from(*row) {
-                    Ok(ip) => Some(ip),
-                    Err(e) => {
-                        ::tracing::warn!(error = %e, agent_id = %device.agent_id, device_key = %device.device_key, raw_ip = %row.ip, "failed to parse ip from agent_device_ips row");
-                        None
-                    }
-                })
-                .collect();
-            let hostnames = hostname_map.get(&key).cloned().unwrap_or_default();
-            let endpoints = endpoint_map.get(&key).cloned().unwrap_or_default();
-            let facts = fact_map.get(&key).cloned().unwrap_or_default();
-            AgentDeviceWithChildren {
-                macs,
-                ips,
-                hostnames,
-                endpoints,
-                facts,
-                device,
-            }
-        })
-        .collect()
 }
 
 pub fn device_key_from_id(device_id: &DeviceId) -> String {
