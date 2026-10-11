@@ -27,6 +27,28 @@ use types::{
     RefreshFleetDevicesResponse, WakeFleetDeviceRequest, WakeFleetDeviceResponse,
 };
 
+pub(crate) type FleetCache =
+    crate::runtime::view_cache::ViewCache<(u64, BTreeSet<String>), Vec<FleetDevice>>;
+
+async fn fleet_view(state: &AppState) -> anyhow::Result<std::sync::Arc<Vec<FleetDevice>>> {
+    state
+        .fleet
+        .get_or_try_init(
+            || async {
+                let connected = state
+                    .sessions
+                    .read()
+                    .await
+                    .keys()
+                    .cloned()
+                    .collect::<BTreeSet<_>>();
+                (state.store.fleet_revision(), connected)
+            },
+            || build_fleet_view(state),
+        )
+        .await
+}
+
 const REFRESH_CONCURRENCY: usize = 8;
 
 #[tracing::instrument(name = "fleet_list", skip_all)]
@@ -289,6 +311,21 @@ async fn load_fleet_devices(
     state: &AppState,
     query: &ListFleetDevicesQuery,
 ) -> anyhow::Result<Vec<FleetDevice>> {
+    let cached = fleet_view(state).await?;
+    // Cache the complete view. Query-specific visibility, search and limits
+    // must never affect what another client (or a wake request) can retrieve.
+    let mut devices = cached.as_ref().clone();
+    tracing::Span::current().record("grouped", devices.len());
+    filter_fleet_devices(&mut devices, query);
+    tracing::Span::current().record("filtered", devices.len());
+    let limit = query.limit.unwrap_or(500).clamp(1, 1000);
+    devices.truncate(limit);
+    tracing::Span::current().record("returned", devices.len());
+    Ok(devices)
+}
+
+#[tracing::instrument(name = "fleet_rebuild", skip_all)]
+async fn build_fleet_view(state: &AppState) -> anyhow::Result<Vec<FleetDevice>> {
     let known_devices = state.store.list_known_devices().await?;
     let agent_devices = state.store.list_agent_device_rows().await?;
     let connected = {
@@ -322,13 +359,5 @@ async fn load_fleet_devices(
         agent_status,
         identifier_map,
     };
-    let mut devices = build_fleet_devices(known_devices, agent_devices, &context);
-    tracing::Span::current().record("grouped", devices.len());
-    filter_fleet_devices(&mut devices, query);
-    tracing::Span::current().record("filtered", devices.len());
-    let limit = query.limit.unwrap_or(500).clamp(1, 1000);
-    // this is going to be 10 million times harder if i decide to do this lazily
-    devices.truncate(limit);
-    tracing::Span::current().record("returned", devices.len());
-    Ok(devices)
+    Ok(build_fleet_devices(known_devices, agent_devices, &context))
 }

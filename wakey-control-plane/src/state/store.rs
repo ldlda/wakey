@@ -16,8 +16,20 @@ use crate::state::types::{
 pub struct Store {
     db_path: PathBuf,
     pool: SqlitePool,
+    fleet_revision: std::sync::atomic::AtomicU64,
 }
 impl Store {
+    pub(crate) fn fleet_revision(&self) -> u64 {
+        self.fleet_revision
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Call after a successful fleet-relevant write, never before its commit.
+    fn touch_fleet(&self) {
+        self.fleet_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+
     /// Begins a new transaction with an IMMEDIATE write lock.
     ///
     /// Use this for all transactions that perform writes to avoid SQLite upgrade deadlocks.

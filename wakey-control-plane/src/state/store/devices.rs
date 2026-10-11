@@ -37,6 +37,7 @@ impl Store {
         tx.commit()
             .await
             .context("failed committing known device transaction")?;
+        self.touch_fleet();
         self.get_known_device(&device_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("created known device disappeared"))
@@ -84,6 +85,7 @@ impl Store {
         if result.rows_affected() == 0 {
             return Ok(None);
         }
+        self.touch_fleet();
         self.get_known_device(device_id).await
     }
 
@@ -93,6 +95,9 @@ impl Store {
             .execute(&self.pool)
             .await
             .context("failed deleting known device")?;
+        if result.rows_affected() > 0 {
+            self.touch_fleet();
+        }
         Ok(result.rows_affected() > 0)
     }
 
@@ -159,6 +164,7 @@ impl Store {
         tx.commit()
             .await
             .context("failed committing known device merge transaction")?;
+        self.touch_fleet();
         self.get_known_device(target_device_id).await
     }
 
@@ -195,6 +201,7 @@ impl Store {
         tx.commit()
             .await
             .context("failed committing device identifier transaction")?;
+        self.touch_fleet();
         self.get_known_device(device_id).await
     }
 
@@ -237,6 +244,7 @@ impl Store {
         tx.commit()
             .await
             .context("failed committing device identifier detach transaction")?;
+        self.touch_fleet();
         self.get_known_device(device_id).await
     }
 

@@ -12,5 +12,6 @@ pub use enroll::{
     enroll, healthz, issue_enroll_token, list_enroll_tokens, revoke_agent, revoke_enroll_token,
     set_agent_nickname,
 };
+pub(crate) use fleet::FleetCache;
 pub use fleet::{list_fleet_devices, refresh_fleet_devices, wake_fleet_device};
 pub use stats::{StateStatsResponse, state_stats};

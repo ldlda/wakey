@@ -32,6 +32,9 @@ impl Store {
         tx.commit()
             .await
             .context("failed committing device retention cleanup")?;
+        if removed > 0 {
+            self.touch_fleet();
+        }
         Ok(removed)
     }
 
@@ -251,6 +254,7 @@ impl Store {
         tx.commit()
             .await
             .context("failed committing device snapshot")?;
+        self.touch_fleet();
 
         tracing::Span::current().record("accepted", incoming_keys.len());
         Ok(incoming_keys.len())
@@ -644,10 +648,12 @@ mod tests {
                 .await
                 .unwrap();
         }
+        let before_cleanup = store.fleet_revision();
         assert_eq!(
             store.prune_devices_at(Duration::ZERO, 1_000).await.unwrap(),
             0
         );
+        assert_eq!(store.fleet_revision(), before_cleanup);
         assert_eq!(
             store
                 .prune_devices_at(Duration::from_secs(900), 1_000)
@@ -655,6 +661,8 @@ mod tests {
                 .unwrap(),
             1
         );
+        let after_cleanup = store.fleet_revision();
+        assert_ne!(after_cleanup, before_cleanup);
         assert_eq!(
             store
                 .prune_devices_at(Duration::from_secs(900), 1_000)
@@ -662,6 +670,7 @@ mod tests {
                 .unwrap(),
             0
         );
+        assert_eq!(store.fleet_revision(), after_cleanup);
 
         for table in [
             "agent_devices",

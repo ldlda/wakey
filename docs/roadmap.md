@@ -38,6 +38,7 @@ of remembered identifiers based on observation expiry.
 
 - [x] Human-readable agent/CC config durations with unit-aware legacy loading, stderr deprecation warnings, and canonical init-config output. See [configuration durations](config-durations.md).
 - [x] CC device retention by last snapshot inclusion (`device_retention = "60d"`, zero disables), independent of audit history and preserving saved identities.
+- [x] Lazy grouped fleet-view cache with store/connection invalidation and stale-build rejection. See [fleet cache](fleet-cache.md).
 
 - [x] Separate console, OTLP log, and trace filters using per-layer filtering. Explicit signal config overrides `RUST_LOG`, then CLI verbosity supplies defaults. Unconfigured defaults remain info-level; exporter-failure logs stay local. Live validation pending.
 - [ ] Record hostname-resolution success/failure without exporting hostnames or resolved addresses. Current spans show timing but do not explicitly classify the result.

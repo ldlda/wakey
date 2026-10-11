@@ -26,6 +26,7 @@ use crate::ws;
 mod admin;
 mod process;
 pub mod terminals;
+pub(crate) mod view_cache;
 pub use admin::revoke_agent;
 pub use admin::{
     issue_enroll_token, list_enroll_tokens, migrate_sqlite_state, revoke_enroll_token, state_stats,
@@ -44,6 +45,7 @@ pub struct AppState {
     pub enroll_token_ttl: Duration,
     pub terminals: terminals::TerminalRegistry,
     pub alerts: api::AlertsHub,
+    pub(crate) fleet: Arc<api::FleetCache>,
 }
 
 #[derive(Clone)]
@@ -190,6 +192,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         enroll_token_ttl: daemon.enroll_token_ttl,
         terminals: terminals::TerminalRegistry::new(),
         alerts: api::AlertsHub::new(),
+        fleet: Arc::new(api::FleetCache::default()),
     };
 
     tokio::spawn(api::run_alert_evaluator(app_state.clone()));

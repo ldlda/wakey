@@ -25,7 +25,11 @@ impl Store {
             .await
             .with_context(|| format!("failed to migrate state db {}", db_path.display()))?;
 
-        let store = Self { db_path, pool };
+        let store = Self {
+            db_path,
+            pool,
+            fleet_revision: Default::default(),
+        };
 
         store.ensure_schema_version().await?;
         store
@@ -87,7 +91,8 @@ impl Store {
             .fetch_one(&self.pool)
             .await
             .context("failed validating SQLite state connection")?;
-        info!(path = %self.db_path.display(), "reload requested; SQLite backend does not require in-memory reload");
+        self.touch_fleet();
+        info!(path = %self.db_path.display(), "reload requested; invalidated derived fleet views");
         Ok(())
     }
 

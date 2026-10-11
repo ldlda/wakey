@@ -54,6 +54,7 @@ impl Store {
         tx.commit()
             .await
             .context("failed committing state db after enroll")?;
+        self.touch_fleet();
         info!(agent_id = %agent_id, "issued persistent agent credentials");
 
         Ok(IssuedAgent {
@@ -113,6 +114,9 @@ impl Store {
         tx.commit()
             .await
             .context("failed committing db after agent revoke")?;
+        if result.rows_affected() > 0 {
+            self.touch_fleet();
+        }
         Ok(result.rows_affected() > 0)
     }
 
@@ -146,6 +150,7 @@ impl Store {
                 .context("failed clearing agent nickname")?;
         }
 
+        self.touch_fleet();
         Ok(true)
     }
 

@@ -12,6 +12,216 @@ use super::normalize_refresh_agent_ids;
 use super::types::ListFleetDevicesQuery;
 use crate::state::{AgentDeviceRow, AgentDeviceWithChildren, DeviceIdentifier, KnownDevice};
 
+#[tokio::test]
+async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters() {
+    use crate::runtime::{AgentSession, AppState};
+    use crate::state::{DeviceIdentifierInput, KnownDeviceInput, Store};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{Mutex, RwLock, mpsc};
+
+    let dir = std::env::temp_dir().join(format!("wakey-fleet-cache-{}", uuid::Uuid::new_v4()));
+    let state = AppState {
+        store: Arc::new(
+            Store::load_or_init(&dir.join("state.sqlite3"), vec![], Duration::from_secs(60))
+                .await
+                .unwrap(),
+        ),
+        sessions: Arc::new(RwLock::new(HashMap::new())),
+        pending: Arc::new(Mutex::new(HashMap::new())),
+        public_url: "http://localhost".into(),
+        command_timeout: Duration::from_secs(30),
+        enroll_token_ttl: Duration::from_secs(60),
+        terminals: crate::runtime::terminals::TerminalRegistry::new(),
+        alerts: crate::api::AlertsHub::new(),
+        fleet: Arc::new(super::FleetCache::default()),
+    };
+    let store = &state.store;
+    let token = store
+        .issue_enroll_token(Duration::from_secs(60))
+        .await
+        .unwrap();
+    let agent = store.enroll(&token.enroll_token).await.unwrap();
+    let observed = wakey_core::Device::from_parts(
+        vec![wakey_core::NeighborEntry {
+            ip: "192.168.1.10".parse().unwrap(),
+            mac: Some("aa:bb:cc:dd:ee:01".parse().unwrap()),
+            dev: Some("br-lan".into()),
+            state: wakey_core::NeighborState::Reachable,
+        }],
+        vec![],
+    );
+    store
+        .replace_agent_device_snapshot(&agent.agent_id, &[observed])
+        .await
+        .unwrap();
+    let initial = super::fleet_view(&state).await.unwrap();
+    assert_eq!(initial.len(), 1);
+    assert!(Arc::ptr_eq(
+        &initial,
+        &super::fleet_view(&state).await.unwrap()
+    ));
+    assert!(initial[0].recommended_route.is_none());
+
+    let (tx, _rx) = mpsc::unbounded_channel();
+    state.sessions.write().await.insert(
+        agent.agent_id.clone(),
+        AgentSession {
+            connection_id: "test".into(),
+            tx,
+            capabilities: vec![],
+            capability_options: Default::default(),
+        },
+    );
+    let connected = super::fleet_view(&state).await.unwrap();
+    assert!(connected[0].recommended_route.is_some());
+    store
+        .set_agent_nickname(&agent.agent_id, Some("router"))
+        .await
+        .unwrap();
+    assert_eq!(
+        super::fleet_view(&state).await.unwrap()[0].agents[0]
+            .nickname
+            .as_deref(),
+        Some("router")
+    );
+
+    let saved = store
+        .create_known_device(KnownDeviceInput {
+            display_name: "my pc".into(),
+            pinned: true,
+            notes: None,
+            identifiers: vec![DeviceIdentifierInput {
+                kind: "mac".into(),
+                value: "aa:bb:cc:dd:ee:01".into(),
+            }],
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        super::fleet_view(&state).await.unwrap()[0].display_name,
+        "my pc"
+    );
+    store
+        .rename_known_device(&saved.device_id, "renamed pc")
+        .await
+        .unwrap();
+    let before_error = super::fleet_view(&state).await.unwrap();
+    assert!(
+        store
+            .rename_known_device(&saved.device_id, " ")
+            .await
+            .is_err()
+    );
+    assert!(Arc::ptr_eq(
+        &before_error,
+        &super::fleet_view(&state).await.unwrap()
+    ));
+    assert_eq!(
+        super::fleet_view(&state).await.unwrap()[0].display_name,
+        "renamed pc"
+    );
+    let query = ListFleetDevicesQuery {
+        query: Some("does-not-exist".into()),
+        visibility: Some("all".into()),
+        ..Default::default()
+    };
+    assert!(
+        super::load_fleet_devices(&state, &query)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let all = ListFleetDevicesQuery {
+        visibility: Some("all".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        super::load_fleet_devices(&state, &all).await.unwrap().len(),
+        1
+    );
+
+    store
+        .detach_device_identifier(&saved.device_id, &saved.identifiers[0].identifier_key)
+        .await
+        .unwrap();
+    assert_eq!(super::fleet_view(&state).await.unwrap().len(), 2);
+    store
+        .attach_device_identifier(
+            &saved.device_id,
+            DeviceIdentifierInput {
+                kind: "mac".into(),
+                value: "aa:bb:cc:dd:ee:01".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(super::fleet_view(&state).await.unwrap().len(), 1);
+    let other = store
+        .create_known_device(KnownDeviceInput {
+            display_name: "other".into(),
+            pinned: false,
+            notes: None,
+            identifiers: vec![],
+        })
+        .await
+        .unwrap();
+    assert_eq!(super::fleet_view(&state).await.unwrap().len(), 2);
+    let limited = ListFleetDevicesQuery {
+        visibility: Some("all".into()),
+        limit: Some(1),
+        ..Default::default()
+    };
+    assert_eq!(
+        super::load_fleet_devices(&state, &limited)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        super::load_fleet_devices(&state, &all).await.unwrap().len(),
+        2
+    );
+    store
+        .merge_known_devices(&saved.device_id, &other.device_id)
+        .await
+        .unwrap();
+    assert_eq!(super::fleet_view(&state).await.unwrap().len(), 1);
+    store.forget_known_device(&saved.device_id).await.unwrap();
+    assert!(
+        super::fleet_view(&state).await.unwrap()[0]
+            .known_device
+            .is_none()
+    );
+
+    state.sessions.write().await.clear();
+    assert!(
+        super::fleet_view(&state).await.unwrap()[0]
+            .recommended_route
+            .is_none()
+    );
+    let before_reload = super::fleet_view(&state).await.unwrap();
+    store.reload_from_disk().await.unwrap();
+    assert!(!Arc::ptr_eq(
+        &before_reload,
+        &super::fleet_view(&state).await.unwrap()
+    ));
+    store.revoke_agent(&agent.agent_id).await.unwrap();
+    assert!(
+        super::fleet_view(&state).await.unwrap()[0].agents[0]
+            .nickname
+            .is_none()
+    );
+    store
+        .replace_agent_device_snapshot(&agent.agent_id, &[])
+        .await
+        .unwrap();
+    assert!(super::fleet_view(&state).await.unwrap().is_empty());
+    drop(state);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn refresh_agent_selection_keeps_all_agents_beyond_previous_cap() {
     let ids = (0..140)
