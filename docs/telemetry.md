@@ -106,6 +106,20 @@ existing debug events too; inspect them before enabling it broadly.
 - Inventory source spans separate neighbor, DHCP lease, and hook-store reads
   from merging. `db_*` spans cover snapshot replacement, fleet reads, and manual
   identity changes, including transaction waits and result assembly where applicable.
+  Snapshot replacement retains `db_replace_agent_snapshot` as its total duration,
+  with four sequential child spans:
+  - `db_pool_acquire`: obtaining a pooled connection, including any connection
+    setup/checks; it is not exclusively queue wait.
+  - `db_write_transaction_begin`: executing `BEGIN IMMEDIATE`, including SQLite
+    writer-lock wait and worker scheduling, not a direct lock-wait measurement.
+  - `db_snapshot_write_rows`: existing-key lookup, normalization, parent/child
+    writes, and deletion of devices missing from the complete snapshot.
+  - `db_snapshot_commit`: transaction commit, including its SQLite/worker work;
+    this does not isolate filesystem flush time.
+  Pool and transaction-begin spans come from the shared write helper, so they
+  also appear under other write operations. No per-row spans or SQL values are
+  recorded. A failed write rolls back through SQLx and has no commit span;
+  fleet cache invalidation still happens only after a successful commit.
 - Fleet spans cover list/load/grouping, refresh fan-out with per-agent outcomes,
   and wake dispatch. Counts distinguish grouped, filtered, and returned rows;
   wake events identify the chosen agent and whether the route was explicit,

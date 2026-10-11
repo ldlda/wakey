@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use tracing::Instrument;
 use wakey_core::{Device, DeviceEndpoint, DeviceId, EndpointSource};
 
 use super::Store;
@@ -53,47 +54,16 @@ impl Store {
     ) -> Result<usize> {
         let mut tx = self.begin_write().await?;
 
-        let mut incoming_keys = std::collections::HashSet::with_capacity(devices.len());
-        let snapshot_time = now_unix();
-
-        let existing_keys: Vec<String> = sqlx::query_scalar!(
-            "SELECT device_key FROM agent_devices WHERE agent_id = ?1",
-            agent_id
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .context("failed fetching existing keys")?;
-
-        for device in devices {
-            let Some(device_id) = &device.id else {
-                continue;
-            };
-            let device_key = device_key_from_id(device_id);
-            incoming_keys.insert(device_key.clone());
-
-            snapshot::write_device(&mut tx, agent_id, &device_key, device, snapshot_time).await?;
-        }
-
-        for old_key in existing_keys {
-            if !incoming_keys.contains(&old_key) {
-                sqlx::query!(
-                    "DELETE FROM agent_devices WHERE agent_id = ?1 AND device_key = ?2",
-                    agent_id,
-                    old_key
-                )
-                .execute(&mut *tx)
-                .await
-                .context("failed pruning old agent device")?;
-            }
-        }
+        let accepted = snapshot::replace(&mut tx, agent_id, devices).await?;
 
         tx.commit()
+            .instrument(tracing::info_span!("db_snapshot_commit"))
             .await
             .context("failed committing device snapshot")?;
         self.touch_fleet();
 
-        tracing::Span::current().record("accepted", incoming_keys.len());
-        Ok(incoming_keys.len())
+        tracing::Span::current().record("accepted", accepted);
+        Ok(accepted)
     }
 
     /// List all agent devices and their child rows from one consistent read view.

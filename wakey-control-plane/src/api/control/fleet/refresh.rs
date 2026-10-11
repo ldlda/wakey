@@ -163,75 +163,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn decode_keeps_relay_and_payload_failures_distinct() {
-        assert_eq!(
-            decode_inventory(Ok(response(None))).unwrap_err(),
-            "inventory command returned no result"
-        );
-        assert!(decode_inventory(Ok(response(Some(json!({"devices": "invalid"}))))).is_err());
-        let mut failed = response(Some(json!({"devices": []})));
-        failed.status = "error".into();
-        assert_eq!(
-            decode_inventory(Ok(failed)).unwrap_err(),
-            "inventory command failed"
-        );
-        assert_eq!(
-            decode_inventory(Err(ApiError::new(
-                StatusCode::NOT_FOUND,
-                "agent_not_connected",
-                "agent is not connected"
-            )))
-            .unwrap_err(),
-            "404 Not Found: agent is not connected"
-        );
-        assert!(
-            decode_inventory(Ok(response(Some(json!({"devices": []})))))
-                .unwrap()
-                .devices
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn summary_keeps_partial_failures_and_sorts_by_agent() {
-        let result = summarize(vec![
-            RefreshFleetAgentResult {
-                agent_id: "z".into(),
-                status: "ok".into(),
-                accepted: 2,
-                error: None,
-            },
-            RefreshFleetAgentResult {
-                agent_id: "b".into(),
-                status: "error".into(),
-                accepted: 0,
-                error: Some("disconnected".into()),
-            },
-            RefreshFleetAgentResult {
-                agent_id: "a".into(),
-                status: "ok".into(),
-                accepted: 3,
-                error: None,
-            },
-        ]);
-        assert_eq!(result.total_accepted, 5);
-        assert_eq!(
-            result
-                .agents
-                .iter()
-                .map(|row| row.agent_id.as_str())
-                .collect::<Vec<_>>(),
-            ["a", "b", "z"]
-        );
-        assert_eq!(result.agents[1].error.as_deref(), Some("disconnected"));
-        assert!(summarize(vec![]).agents.is_empty());
-    }
-
     #[tokio::test]
-    async fn handler_reports_explicit_disconnected_agents_without_omitting_them() {
+    async fn refresh_updates_cached_fleet_despite_a_disconnected_agent() {
+        use crate::runtime::{AgentReply, AgentSession, SessionEvent};
         use std::{collections::HashMap, sync::Arc, time::Duration};
-        use tokio::sync::{Mutex, RwLock};
+        use tokio::sync::{Mutex, RwLock, mpsc};
+        use wakey_agent::protocol::{CommandResult, ServerMessage};
 
         let dir =
             std::env::temp_dir().join(format!("wakey-refresh-handler-{}", uuid::Uuid::new_v4()));
@@ -250,35 +187,164 @@ mod tests {
             alerts: crate::api::AlertsHub::new(),
             fleet: Arc::new(super::super::FleetCache::default()),
         };
-        assert!(select_agents(&state, vec![]).await.is_empty());
-        let response = refresh_fleet_devices(
+        let token = state
+            .store
+            .issue_enroll_token(Duration::from_secs(60))
+            .await
+            .unwrap();
+        let agent_id = state
+            .store
+            .enroll(&token.enroll_token)
+            .await
+            .unwrap()
+            .agent_id;
+        let device = |ip: &str| {
+            wakey_core::Device::from_parts(
+                vec![wakey_core::NeighborEntry {
+                    ip: ip.parse().unwrap(),
+                    mac: Some("aa:bb:cc:dd:ee:01".parse().unwrap()),
+                    dev: Some("br-lan".into()),
+                    state: wakey_core::NeighborState::Reachable,
+                }],
+                vec![],
+            )
+        };
+        state
+            .store
+            .replace_agent_device_snapshot(&agent_id, &[device("192.168.1.10")])
+            .await
+            .unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        state.sessions.write().await.insert(
+            agent_id.clone(),
+            AgentSession {
+                connection_id: "test".into(),
+                tx,
+                capabilities: vec![],
+                capability_options: Default::default(),
+            },
+        );
+        assert_eq!(
+            select_agents(&state, vec![]).await.as_slice(),
+            std::slice::from_ref(&agent_id)
+        );
+
+        // Prime the real cache with old data before refresh touches the store.
+        let query = super::super::types::ListFleetDevicesQuery {
+            visibility: Some("all".into()),
+            ..Default::default()
+        };
+        let before = super::super::load_fleet_devices(&state, &query)
+            .await
+            .unwrap();
+        assert_eq!(before.len(), 1);
+        assert_eq!(
+            before[0].ips,
+            ["192.168.1.10".parse::<std::net::IpAddr>().unwrap()]
+        );
+
+        let refresh = refresh_fleet_devices(
             State(state.clone()),
             Json(RefreshFleetDevicesRequest {
-                agent_ids: vec!["missing-b".into(), "missing-a".into(), "missing-b".into()],
+                agent_ids: vec!["disconnected".into(), agent_id.clone(), agent_id.clone()],
                 timeout_ms: None,
             }),
-        )
-        .await
-        .unwrap()
-        .into_response();
+        );
+        // Answer through the production relay's pending-request channel. No
+        // sleep or polling: receiving the command proves its waiter exists.
+        let reply = async {
+            let SessionEvent::Message(ServerMessage::Command {
+                request_id,
+                command,
+                ..
+            }) = rx.recv().await.unwrap()
+            else {
+                panic!("expected inventory command");
+            };
+            let AgentCommand::Inventory(request) = command else {
+                panic!("expected inventory command");
+            };
+            assert!(request.query.is_none() && request.name.is_none());
+            assert!(
+                request.ips.is_empty()
+                    && request.macs.is_empty()
+                    && request.devs.is_empty()
+                    && request.nuds.is_empty()
+            );
+            let result =
+                serde_json::to_value(CommandResult::Inventory(wakey_core::DeviceInventory {
+                    devices: vec![device("192.168.1.20")],
+                }))
+                .unwrap();
+            state
+                .pending
+                .lock()
+                .await
+                .remove(request_id.as_str())
+                .unwrap()
+                .send(AgentReply::Result(result))
+                .unwrap_or_else(|_| panic!("relay waiter dropped"));
+        };
+        let (response, ()) = tokio::join!(refresh, reply);
+        let response = response.unwrap().into_response();
         assert_eq!(response.status(), StatusCode::OK);
         let body = axum::body::to_bytes(response.into_body(), 4096)
             .await
             .unwrap();
         let result: RefreshFleetDevicesResponse = serde_json::from_slice(&body).unwrap();
-        assert_eq!(result.total_accepted, 0);
+        assert_eq!(result.total_accepted, 1);
         assert_eq!(result.agents.len(), 2);
-        assert_eq!(result.agents[0].agent_id, "missing-a");
-        assert_eq!(result.agents[1].agent_id, "missing-b");
-        for agent in result.agents {
-            assert_eq!(agent.status, "error");
-            assert_eq!(agent.accepted, 0);
-            assert_eq!(
-                agent.error.as_deref(),
-                Some("404 Not Found: agent is not connected")
-            );
-        }
+        assert!(
+            result
+                .agents
+                .windows(2)
+                .all(|pair| pair[0].agent_id < pair[1].agent_id)
+        );
+        let success = result
+            .agents
+            .iter()
+            .find(|row| row.agent_id == agent_id)
+            .unwrap();
+        assert_eq!(success.status, "ok");
+        assert_eq!(success.accepted, 1);
+        assert!(success.error.is_none());
+        let failed = result
+            .agents
+            .iter()
+            .find(|row| row.agent_id == "disconnected")
+            .unwrap();
+        assert_eq!(failed.status, "error");
+        assert_eq!(failed.accepted, 0);
+        assert_eq!(
+            failed.error.as_deref(),
+            Some("404 Not Found: agent is not connected")
+        );
         assert!(state.pending.lock().await.is_empty());
+        assert!(matches!(
+            rx.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+
+        let after = super::super::load_fleet_devices(&state, &query)
+            .await
+            .unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].device_key, before[0].device_key);
+        assert_eq!(
+            after[0].ips,
+            ["192.168.1.20".parse::<std::net::IpAddr>().unwrap()]
+        );
+        let stored = state
+            .store
+            .list_agent_device_rows_for_agent(&agent_id)
+            .await
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].endpoints.len(), 1);
+        assert_eq!(
+            stored[0].endpoints[0].key.ip,
+            Some("192.168.1.20".parse().unwrap())
+        );
         drop(state);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -310,10 +376,39 @@ mod tests {
         assert_eq!(stored.status, "ok");
         assert_eq!(stored.accepted, 1);
         let revision = store.fleet_revision();
-        let invalid = store_inventory(&store, "agent", Ok(response(None))).await;
-        assert_eq!(invalid.status, "error");
-        assert_eq!(invalid.accepted, 0);
-        assert_eq!(store.fleet_revision(), revision);
+        let mut command_failed = response(None);
+        command_failed.status = "error".into();
+        command_failed.error = Some(wakey_agent::protocol::ErrorPayload {
+            code: "inventory_failed".into(),
+            message: "source unavailable".into(),
+            retryable: None,
+        });
+        for failed in [
+            Ok(response(None)),
+            Ok(response(Some(json!({"devices": "invalid"})))),
+            Ok(command_failed),
+            Err(ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                "agent_send_failed",
+                "send failed",
+            )),
+        ] {
+            let invalid = store_inventory(&store, "agent", failed).await;
+            assert_eq!(invalid.status, "error");
+            assert_eq!(invalid.accepted, 0);
+            assert!(invalid.error.is_some());
+            assert_eq!(store.fleet_revision(), revision);
+            let rows = store
+                .list_agent_device_rows_for_agent("agent")
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].endpoints.len(), 1);
+            assert_eq!(
+                rows[0].endpoints[0].key.ip,
+                Some("192.168.1.10".parse().unwrap())
+            );
+        }
         let rows = store
             .list_agent_device_rows_for_agent("agent")
             .await

@@ -1,4 +1,4 @@
-//! Writes one snapshot device using the caller's transaction. No helper commits.
+//! Replaces snapshot rows using the caller's transaction. No helper commits.
 
 use anyhow::{Context, Result};
 use sqlx::SqliteConnection;
@@ -9,7 +9,51 @@ use super::{
     presence_to_str,
 };
 
-pub(super) async fn write_device(
+/// Includes key lookup, normalization, parent/child writes and missing-device
+/// deletion. This measures replacement work, not pure SQL execution time.
+#[tracing::instrument(name = "db_snapshot_write_rows", skip_all, fields(devices = devices.len()))]
+pub(super) async fn replace(
+    connection: &mut SqliteConnection,
+    agent_id: &str,
+    devices: &[Device],
+) -> Result<usize> {
+    let mut incoming_keys = std::collections::HashSet::with_capacity(devices.len());
+    let snapshot_time = super::now_unix();
+
+    let existing_keys: Vec<String> = sqlx::query_scalar!(
+        "SELECT device_key FROM agent_devices WHERE agent_id = ?1",
+        agent_id
+    )
+    .fetch_all(&mut *connection)
+    .await
+    .context("failed fetching existing keys")?;
+
+    for device in devices {
+        let Some(device_id) = &device.id else {
+            continue;
+        };
+        let device_key = super::device_key_from_id(device_id);
+        incoming_keys.insert(device_key.clone());
+
+        write_device(connection, agent_id, &device_key, device, snapshot_time).await?;
+    }
+
+    for old_key in existing_keys {
+        if !incoming_keys.contains(&old_key) {
+            sqlx::query!(
+                "DELETE FROM agent_devices WHERE agent_id = ?1 AND device_key = ?2",
+                agent_id,
+                old_key
+            )
+            .execute(&mut *connection)
+            .await
+            .context("failed pruning old agent device")?;
+        }
+    }
+    Ok(incoming_keys.len())
+}
+
+async fn write_device(
     connection: &mut SqliteConnection,
     agent_id: &str,
     device_key: &str,

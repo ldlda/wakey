@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
-use tracing::{info, warn};
+use tracing::{Instrument, info, warn};
 use uuid::Uuid;
 
 use crate::state::types::{
@@ -33,9 +33,17 @@ impl Store {
     /// Begins a new transaction with an IMMEDIATE write lock.
     ///
     /// Use this for all transactions that perform writes to avoid SQLite upgrade deadlocks.
+    /// Separate spans distinguish pool wait/setup from acquiring SQLite's writer
+    /// transaction. Keep SQLx ownership and rollback-on-drop behavior intact.
     pub async fn begin_write(&self) -> Result<Transaction<'static, Sqlite>> {
-        self.pool
-            .begin_with("BEGIN IMMEDIATE")
+        let connection = self
+            .pool
+            .acquire()
+            .instrument(tracing::info_span!("db_pool_acquire"))
+            .await
+            .context("failed to begin write transaction")?;
+        Transaction::begin(connection, Some("BEGIN IMMEDIATE".into()))
+            .instrument(tracing::info_span!("db_write_transaction_begin"))
             .await
             .context("failed to begin write transaction")
     }
