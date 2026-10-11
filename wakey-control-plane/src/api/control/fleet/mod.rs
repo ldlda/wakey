@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use futures_util::StreamExt;
 use tracing::{Instrument, info, warn};
-use wakey_agent::protocol::{AgentCommand, InventoryRequest, WakeRequest};
+use wakey_agent::protocol::{AgentCommand, InventoryRequest};
 
 use crate::api::ApiError;
 use crate::api::commands::{RelayCommandResponse, relay_agent_command};
@@ -14,6 +14,8 @@ use crate::runtime::AppState;
 
 mod build;
 mod types;
+mod wake;
+pub use wake::wake_fleet_device;
 
 #[cfg(test)]
 mod tests;
@@ -24,7 +26,7 @@ use build::{
 };
 use types::{
     FleetDevice, ListFleetDevicesQuery, RefreshFleetAgentResult, RefreshFleetDevicesRequest,
-    RefreshFleetDevicesResponse, WakeFleetDeviceRequest, WakeFleetDeviceResponse,
+    RefreshFleetDevicesResponse,
 };
 
 pub(crate) type FleetCache =
@@ -247,99 +249,6 @@ async fn refresh_fleet_agent_result(
             error: Some(format!("{}: {}", err.status, err.message)),
         },
     }
-}
-
-#[tracing::instrument(name = "fleet_wake", skip_all, fields(explicit_route = req.route_id.is_some(), outcome = tracing::field::Empty))]
-pub async fn wake_fleet_device(
-    State(state): State<AppState>,
-    Json(req): Json<WakeFleetDeviceRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    // Early database/relay errors retain an outcome even without a command result.
-    tracing::Span::current().record("outcome", "error");
-    let query = ListFleetDevicesQuery {
-        query: None,
-        presence: None,
-        known: None,
-        agent_id: None,
-        visibility: Some("all".into()),
-        limit: Some(1000),
-    };
-    let devices = load_fleet_devices(&state, &query).await.map_err(|err| {
-        warn!(error = %err, "failed loading fleet devices for wake");
-        fleet_error(err, "load_fleet_devices_failed")
-    })?;
-
-    let device = devices
-        .into_iter()
-        .find(|device| device.device_key == req.device_key)
-        .ok_or_else(|| {
-            tracing::Span::current().record("outcome", "device_not_found");
-            ApiError::new(
-                StatusCode::NOT_FOUND,
-                "fleet_device_not_found",
-                "fleet device not found",
-            )
-        })?;
-
-    let route = match req.route_id.as_deref() {
-        Some(route_id) => device
-            .route_candidates
-            .into_iter()
-            .find(|route| route.route_id == route_id),
-        None => device.recommended_route,
-    }
-    .ok_or_else(|| {
-        tracing::Span::current().record("outcome", "route_unavailable");
-        ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "wake_route_unavailable",
-            "no wakeable connected MAC-backed route is available",
-        )
-    })?;
-
-    let Some(mac) = route.mac else {
-        tracing::Span::current().record("outcome", "route_without_mac");
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "wake_route_unavailable",
-            "selected route does not include a MAC address",
-        ));
-    };
-    if !route.connected {
-        tracing::Span::current().record("outcome", "route_disconnected");
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "wake_route_unavailable",
-            "selected route agent is not connected",
-        ));
-    }
-    if !route.wakeable {
-        tracing::Span::current().record("outcome", "route_not_wakeable");
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "wake_route_unavailable",
-            "selected route is not wakeable",
-        ));
-    }
-
-    info!(agent_id = %route.agent_id, has_ip = route.ip.is_some(), explicit_route = req.route_id.is_some(), "fleet wake route selected");
-    let command = relay_agent_command(
-        &state,
-        &route.agent_id,
-        AgentCommand::Wake(WakeRequest {
-            query: None,
-            mac: Some(mac),
-            ip: route.ip,
-        }),
-        req.timeout_ms,
-    )
-    .await?;
-    tracing::Span::current().record("outcome", command.status.as_str());
-
-    Ok((
-        StatusCode::OK,
-        Json(WakeFleetDeviceResponse { route, command }),
-    ))
 }
 
 #[tracing::instrument(name = "fleet_load", skip_all, fields(grouped = tracing::field::Empty, filtered = tracing::field::Empty, returned = tracing::field::Empty))]

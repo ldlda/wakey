@@ -1,6 +1,6 @@
 # Fleet View Cache
 
-CC retains one complete, grouped fleet view in memory. Requests still apply
+CC retains one complete, grouped fleet view in memory. List requests still apply
 their own search, visibility, presence, agent filters and result limit. Neither
 the database nor the response format changes.
 
@@ -22,7 +22,9 @@ list/wake requests return HTTP 503 with code `fleet_busy`; clients can retry
 later. No stale view or command is used as a fallback. This bounds the number
 of rebuilds per reader, not database execution time or total concurrent requests.
 
-Wake uses the same view, but command dispatch still checks the current session;
+Wake searches the complete cached view by device key, without list visibility
+filters or the list API's 1,000-row limit. It borrows the view and clones only the
+selected route. Command dispatch still checks the current session;
 a cached route cannot grant access to a disconnected agent.
 
 ## External Writes
@@ -41,5 +43,6 @@ keep their existing timer-driven evaluator rather than being forced into this
 lazy cache.
 
 `fleet_load` spans remain on requests. A cache miss adds `fleet_rebuild`, with
-database loads and `fleet_group_devices` nested below it. A cache hit performs
-only key checking, cloning the view, and request-specific filtering.
+database loads and `fleet_group_devices` nested below it. On a cache hit, list
+requests clone/filter the view; wake requests look up their device in the borrowed
+view. Neither path repeats the database reads or grouping.
