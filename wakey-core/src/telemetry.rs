@@ -105,11 +105,14 @@ pub fn init(
         }
         let resource = resource.build();
         // Small fixed queues are intentional: a disconnected collector cannot grow router RAM.
+        // Exporters own transient retries/backoff; authentication failures are
+        // not retried. The timeout remains their budget, not a durable outbox.
         let trace_exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic()
             .with_metadata(metadata.clone())
             .with_endpoint(endpoint)
             .with_timeout(Duration::from_secs(3))
+            .with_retry_policy(opentelemetry_otlp::RetryPolicy::recommended())
             .build()
             .context("OTLP trace exporter")?;
         let trace_processor = opentelemetry_sdk::trace::BatchSpanProcessor::builder(trace_exporter)
@@ -129,6 +132,7 @@ pub fn init(
             .with_metadata(metadata.clone())
             .with_endpoint(endpoint)
             .with_timeout(Duration::from_secs(3))
+            .with_retry_policy(opentelemetry_otlp::RetryPolicy::recommended())
             .build()
             .context("OTLP log exporter")?;
         let log_processor = opentelemetry_sdk::logs::BatchLogProcessor::builder(log_exporter)
@@ -148,6 +152,7 @@ pub fn init(
             .with_metadata(metadata)
             .with_endpoint(endpoint)
             .with_timeout(Duration::from_secs(3))
+            .with_retry_policy(opentelemetry_otlp::RetryPolicy::recommended())
             .build()
             .context("OTLP metric exporter")?;
         let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(metric_exporter)

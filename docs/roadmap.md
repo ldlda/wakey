@@ -41,6 +41,7 @@ of remembered identifiers based on observation expiry.
 - [x] Lazy grouped fleet-view cache with store/connection invalidation and stale-build rejection. See [fleet cache](fleet-cache.md).
 
 - [x] Separate console, OTLP log, and trace filters using per-layer filtering. Explicit signal config overrides `RUST_LOG`, then CLI verbosity supplies defaults. Unconfigured defaults remain info-level; exporter-failure logs stay local. Live validation pending.
+- [x] Upgrade the matched OpenTelemetry stack to 0.33 with exporter-managed backoff/jitter retries. Controlled collector tests cover all-signal recovery, bounded retries, and no retry on authentication rejection; live outage validation remains pending.
 - [ ] Record hostname-resolution success/failure without exporting hostnames or resolved addresses. Current spans show timing but do not explicitly classify the result.
 - [ ] Investigate the slow resolver with a reproducible device-side check. Timing isolated the phase, not the cause; do not treat instrumentation as a fix.
 - [x] Propagate optional W3C trace context for periodic/requested WS snapshots so agent collection and CC persistence can be inspected together. Wire compatibility and context linkage tested; live validation pending.
@@ -52,7 +53,7 @@ or current fleet size. Metric labels should remain bounded; no per-device labels
 
 ## Validation And Reliability
 
-- [ ] Bound fleet-cache rebuild retries under sustained mutations; current stale-build rejection can keep a request waiting while inputs continuously change. Do not silently serve stale wake routes as a fallback.
+- [x] Bound fleet-cache rebuilds to three attempts under sustained mutations; return retryable HTTP 503 `fleet_busy` rather than silently serving stale wake routes. Deterministic limit/recovery tests included.
 - [ ] Reproduce/check Ctrl-C cleanup on the test device: process groups, PTYs, relay tasks, and telemetry shutdown. Leftovers were suspected, not confirmed.
 - [ ] Exercise collector unavailability and recovery with running agent/CC instances. Verify normal operations continue and telemetry queues remain bounded; outage losses are expected under the current best-effort policy.
 - [ ] Validate terminal recovery instrumentation live: generation timing/size, transport attach/resume, and backpressure episodes ending in drain or disconnect.

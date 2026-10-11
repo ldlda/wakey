@@ -3,6 +3,7 @@
 use opentelemetry_proto::tonic::collector::{
     logs::v1 as logs, metrics::v1 as metrics, trace::v1 as traces,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tonic::{Request, Response, Status};
 use wakey_core::telemetry::{self, TelemetryConfig};
@@ -12,6 +13,8 @@ struct Collector {
     traces: Arc<Mutex<Vec<traces::ExportTraceServiceRequest>>>,
     logs: Arc<Mutex<Vec<logs::ExportLogsServiceRequest>>>,
     metrics: Arc<Mutex<Vec<metrics::ExportMetricsServiceRequest>>>,
+    fail_until: usize,
+    attempts: [Arc<AtomicUsize>; 3],
 }
 
 fn check_auth<T>(request: &Request<T>) -> Result<(), Status> {
@@ -28,13 +31,78 @@ fn check_auth<T>(request: &Request<T>) -> Result<(), Status> {
     Ok(())
 }
 
+/// Use a real receiver and counted RPCs, not sleep/elapsed-time expectations.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exporter_retries_are_bounded_and_bad_credentials_are_not_retried() {
+    use opentelemetry_otlp::{RetryPolicy, WithExportConfig, WithTonicConfig};
+    use opentelemetry_sdk::trace::SpanExporter as _;
+    use std::time::Duration;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let collector = Collector {
+        fail_until: usize::MAX,
+        ..Default::default()
+    };
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(
+        tonic::transport::Server::builder()
+            .add_service(traces::trace_service_server::TraceServiceServer::new(
+                collector.clone(),
+            ))
+            .serve_with_incoming_shutdown(
+                tokio_stream::wrappers::TcpListenerStream::new(listener),
+                async {
+                    let _ = stop_rx.await;
+                },
+            ),
+    );
+    let mut metadata = tonic::metadata::MetadataMap::new();
+    metadata.insert("authorization", "Basic dGVzdDp0ZXN0".parse().unwrap());
+    let policy = RetryPolicy::recommended()
+        .with_max_retries(2)
+        .with_initial_delay(Duration::from_millis(1))
+        .with_max_delay(Duration::from_millis(4))
+        .with_max_jitter(Duration::ZERO);
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(&endpoint)
+        .with_metadata(metadata)
+        .with_timeout(Duration::from_secs(3))
+        .with_retry_policy(policy.clone())
+        .build()
+        .unwrap();
+    assert!(exporter.export(vec![]).await.is_err());
+    assert_eq!(collector.attempts[0].load(Ordering::SeqCst), 3);
+
+    let unauthorized = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(endpoint)
+        .with_timeout(Duration::from_secs(3))
+        .with_retry_policy(policy)
+        .build()
+        .unwrap();
+    assert!(unauthorized.export(vec![]).await.is_err());
+    assert_eq!(
+        collector.attempts[0].load(Ordering::SeqCst),
+        4,
+        "authentication failure must add only one attempt"
+    );
+    let _ = stop_tx.send(());
+    server.await.unwrap().unwrap();
+}
+
 #[tonic::async_trait]
 impl traces::trace_service_server::TraceService for Collector {
     async fn export(
         &self,
         request: Request<traces::ExportTraceServiceRequest>,
     ) -> Result<Response<traces::ExportTraceServiceResponse>, Status> {
+        let attempt = self.attempts[0].fetch_add(1, Ordering::SeqCst);
         check_auth(&request)?;
+        if attempt < self.fail_until {
+            return Err(Status::unavailable("temporary receiver outage"));
+        }
         self.traces.lock().unwrap().push(request.into_inner());
         Ok(Response::new(Default::default()))
     }
@@ -45,7 +113,11 @@ impl logs::logs_service_server::LogsService for Collector {
         &self,
         request: Request<logs::ExportLogsServiceRequest>,
     ) -> Result<Response<logs::ExportLogsServiceResponse>, Status> {
+        let attempt = self.attempts[1].fetch_add(1, Ordering::SeqCst);
         check_auth(&request)?;
+        if attempt < self.fail_until {
+            return Err(Status::unavailable("temporary receiver outage"));
+        }
         self.logs.lock().unwrap().push(request.into_inner());
         Ok(Response::new(Default::default()))
     }
@@ -56,7 +128,11 @@ impl metrics::metrics_service_server::MetricsService for Collector {
         &self,
         request: Request<metrics::ExportMetricsServiceRequest>,
     ) -> Result<Response<metrics::ExportMetricsServiceResponse>, Status> {
+        let attempt = self.attempts[2].fetch_add(1, Ordering::SeqCst);
         check_auth(&request)?;
+        if attempt < self.fail_until {
+            return Err(Status::unavailable("temporary receiver outage"));
+        }
         self.metrics.lock().unwrap().push(request.into_inner());
         Ok(Response::new(Default::default()))
     }
@@ -68,33 +144,40 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
     // Exercise the real global subscriber without mutating this process's environment
     // or inheriting a developer's RUST_LOG=warn/off setting.
     if std::env::var_os("WAKEY_OTLP_TEST_CHILD").is_none() {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "exports_all_signals_and_preserves_remote_command_parent",
-                "--nocapture",
-            ])
-            .env("WAKEY_OTLP_TEST_CHILD", "1")
-            .env("RUST_LOG", "info")
-            .env("WAKEY_OTLP_TEST_AUTH", "Basic dGVzdDp0ZXN0")
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        for console in [&output.stdout, &output.stderr] {
+        for retry in ["0", "1"] {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "exports_all_signals_and_preserves_remote_command_parent",
+                    "--nocapture",
+                ])
+                .env("WAKEY_OTLP_TEST_CHILD", "1")
+                .env("WAKEY_OTLP_TEST_RETRY", retry)
+                .env("RUST_LOG", "info")
+                .env("WAKEY_OTLP_TEST_AUTH", "Basic dGVzdDp0ZXN0")
+                .output()
+                .unwrap();
             assert!(
-                !String::from_utf8_lossy(console)
-                    .contains("debug log exported without console output")
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
             );
+            for console in [&output.stdout, &output.stderr] {
+                assert!(
+                    !String::from_utf8_lossy(console)
+                        .contains("debug log exported without console output")
+                );
+            }
         }
         return;
     }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
-    let collector = Collector::default();
+    let retry = std::env::var("WAKEY_OTLP_TEST_RETRY").as_deref() == Ok("1");
+    let collector = Collector {
+        fail_until: usize::from(retry),
+        ..Default::default()
+    };
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
     let server = tonic::transport::Server::builder()
         .add_service(traces::trace_service_server::TraceServiceServer::new(
@@ -158,6 +241,13 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
         .unwrap();
     let _ = stop_tx.send(());
     server.await.unwrap().unwrap();
+
+    for attempts in &collector.attempts {
+        assert!(
+            attempts.load(Ordering::SeqCst) > usize::from(retry),
+            "each signal must recover from its first failed export"
+        );
+    }
 
     let traces = collector.traces.lock().unwrap();
     let spans: Vec<_> = traces

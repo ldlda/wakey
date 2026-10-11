@@ -12,6 +12,22 @@ use super::normalize_refresh_agent_ids;
 use super::types::ListFleetDevicesQuery;
 use crate::state::{AgentDeviceRow, AgentDeviceWithChildren, DeviceIdentifier, KnownDevice};
 
+#[test]
+fn cache_rebuild_limit_is_retryable_but_db_failures_keep_their_error_code() {
+    let busy = super::fleet_error(
+        crate::runtime::view_cache::RebuildLimit.into(),
+        "list_fleet_devices_failed",
+    );
+    assert_eq!(busy.status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(busy.code, "fleet_busy");
+    let failed = super::fleet_error(
+        anyhow::anyhow!("database failed"),
+        "list_fleet_devices_failed",
+    );
+    assert_eq!(failed.status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(failed.code, "list_fleet_devices_failed");
+}
+
 #[tokio::test]
 async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters() {
     use crate::runtime::{AgentSession, AppState};

@@ -5,6 +5,19 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
+const MAX_REBUILDS: usize = 3;
+
+#[derive(Debug)]
+pub(crate) struct RebuildLimit;
+
+impl std::fmt::Display for RebuildLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("view inputs kept changing during rebuilding; retry the request")
+    }
+}
+
+impl std::error::Error for RebuildLimit {}
+
 pub(crate) struct ViewCache<K, V> {
     entry: Mutex<Option<(K, Arc<V>)>>,
 }
@@ -21,19 +34,20 @@ impl<K: Eq, V> ViewCache<K, V> {
     /// Reuse a matching view or rebuild it. `key` must reflect every input to
     /// `build`; rechecking it prevents an in-flight old build being published.
     /// Errors are not cached, and cancellation releases the rebuild lock.
-    pub(crate) async fn get_or_try_init<E, KF, BF>(
+    /// Three invalidated builds return `RebuildLimit` rather than starving readers.
+    pub(crate) async fn get_or_try_init<KF, BF>(
         &self,
         key: impl Fn() -> KF,
         build: impl Fn() -> BF,
-    ) -> Result<Arc<V>, E>
+    ) -> anyhow::Result<Arc<V>>
     where
         KF: Future<Output = K>,
-        BF: Future<Output = Result<V, E>>,
+        BF: Future<Output = anyhow::Result<V>>,
     {
         // Keep publication and rebuilding under one lock. Waiting readers then
         // reuse the completed view rather than launching duplicate DB work.
         let mut entry = self.entry.lock().await;
-        loop {
+        for _ in 0..MAX_REBUILDS {
             let before = key().await;
             if let Some((stored_key, value)) = &*entry
                 && *stored_key == before
@@ -47,6 +61,7 @@ impl<K: Eq, V> ViewCache<K, V> {
                 return Ok(value);
             }
         }
+        Err(RebuildLimit.into())
     }
 }
 
@@ -65,7 +80,7 @@ mod tests {
         let build = || async {
             builds.fetch_add(1, Ordering::SeqCst);
             tokio::task::yield_now().await;
-            Ok::<_, ()>(42)
+            Ok::<_, anyhow::Error>(42)
         };
         let (a, b) = tokio::join!(
             cache.get_or_try_init(key, build),
@@ -93,7 +108,7 @@ mod tests {
                     started.notify_one();
                     release.notified().await;
                 }
-                Ok::<_, ()>(captured)
+                Ok::<_, anyhow::Error>(captured)
             },
         );
         let writer = async {
@@ -111,13 +126,16 @@ mod tests {
         let cache = ViewCache::default();
         assert!(
             cache
-                .get_or_try_init(|| async { 0 }, || async { Err::<u8, _>("db failed") })
+                .get_or_try_init(
+                    || async { 0 },
+                    || async { Err::<u8, _>(anyhow::anyhow!("db failed")) }
+                )
                 .await
                 .is_err()
         );
         assert_eq!(
             *cache
-                .get_or_try_init(|| async { 0 }, || async { Ok::<_, &str>(7) })
+                .get_or_try_init(|| async { 0 }, || async { Ok::<_, anyhow::Error>(7) })
                 .await
                 .unwrap(),
             7
@@ -137,7 +155,7 @@ mod tests {
                         || async { 0 },
                         || async {
                             started.notify_one();
-                            std::future::pending::<Result<u8, ()>>().await
+                            std::future::pending::<anyhow::Result<u8>>().await
                         },
                     )
                     .await
@@ -148,10 +166,41 @@ mod tests {
         assert!(task.await.unwrap_err().is_cancelled());
         assert_eq!(
             *cache
-                .get_or_try_init(|| async { 0 }, || async { Ok::<_, ()>(7) })
+                .get_or_try_init(|| async { 0 }, || async { Ok::<_, anyhow::Error>(7) })
                 .await
                 .unwrap(),
             7
+        );
+    }
+
+    #[tokio::test]
+    async fn sustained_changes_stop_at_the_limit_and_a_later_read_recovers() {
+        let cache = ViewCache::default();
+        let revision = AtomicU64::new(0);
+        let key = || async { revision.load(Ordering::SeqCst) };
+        cache
+            .get_or_try_init(key, || async { Ok(0_u8) })
+            .await
+            .unwrap();
+        revision.store(1, Ordering::SeqCst);
+        let builds = AtomicU64::new(0);
+        let error = cache
+            .get_or_try_init(key, || async {
+                builds.fetch_add(1, Ordering::SeqCst);
+                revision.fetch_add(1, Ordering::SeqCst);
+                Ok(1)
+            })
+            .await
+            .unwrap_err();
+        assert!(error.is::<RebuildLimit>());
+        assert_eq!(builds.load(Ordering::SeqCst), MAX_REBUILDS as u64);
+        let recovered = cache
+            .get_or_try_init(key, || async { Ok(2) })
+            .await
+            .unwrap();
+        assert_eq!(
+            *recovered, 2,
+            "must not fall back to the previous cached value"
         );
     }
 }

@@ -51,6 +51,21 @@ async fn fleet_view(state: &AppState) -> anyhow::Result<std::sync::Arc<Vec<Fleet
 
 const REFRESH_CONCURRENCY: usize = 8;
 
+fn fleet_error(err: anyhow::Error, fallback_code: &str) -> ApiError {
+    if err.is::<crate::runtime::view_cache::RebuildLimit>() {
+        return ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fleet_busy",
+            err.to_string(),
+        );
+    }
+    ApiError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        fallback_code,
+        err.to_string(),
+    )
+}
+
 #[tracing::instrument(name = "fleet_list", skip_all)]
 pub async fn list_fleet_devices(
     State(state): State<AppState>,
@@ -60,11 +75,7 @@ pub async fn list_fleet_devices(
         Ok(devices) => Ok((StatusCode::OK, Json(devices))),
         Err(err) => {
             warn!(error = %err, "failed to list fleet devices");
-            Err(ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "list_fleet_devices_failed",
-                err.to_string(),
-            ))
+            Err(fleet_error(err, "list_fleet_devices_failed"))
         }
     }
 }
@@ -226,11 +237,7 @@ pub async fn wake_fleet_device(
     };
     let devices = load_fleet_devices(&state, &query).await.map_err(|err| {
         warn!(error = %err, "failed loading fleet devices for wake");
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "load_fleet_devices_failed",
-            err.to_string(),
-        )
+        fleet_error(err, "load_fleet_devices_failed")
     })?;
 
     let device = devices

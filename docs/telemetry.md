@@ -153,9 +153,20 @@ dashboards are not part of this initial slice.
 ## Failure policy
 
 Trace and log queues are capped at 256 records each, with export batches of 64
-and a 3-second request timeout. Export happens off the application path. On an
+and a 3-second request timeout. Export happens off the application path. The
+OTLP exporters use their recommended retry policy: up to three retries after
+the first attempt, exponential backoff and jitter, within the exporter timeout
+budget. Temporary transport/receiver failures can recover; authentication
+rejection and partial-success responses are not retried. Requests already in
+flight can exceed the retry budget, so it is not a hard wall-clock deadline.
+The application does not wrap exports in another retry loop. On an
 outage, telemetry can be dropped rather than accumulating unbounded router RAM;
 terminal output follows its existing lossless backpressure policy independently.
+
+Automated receiver tests reject the first export of each signal and confirm
+recovery, check the retry-attempt limit on a persistent outage, and confirm that
+bad credentials cause only one attempt. These tests do not establish durable
+delivery during a long outage; bounded queues can still drop telemetry.
 The bound is a record count, not an absolute byte limit on arbitrary log messages.
 Providers flush on orderly daemon exit (Ctrl-C/SIGTERM), on a blocking worker while
 Tokio remains alive. Only completed spans are exported; this is not graceful draining

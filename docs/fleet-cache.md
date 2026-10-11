@@ -17,9 +17,10 @@ and reuse it. The helper checks the key again after building: if inputs changed
 while database reads/grouping were in flight, it discards the result and retries.
 Build errors are returned, not cached; cancelling a reader releases the lock.
 The previous view is not served as a fallback after a rebuild error.
-Retries currently have no fixed limit. Sustained mutations faster than rebuilding
-can delay the rebuilding reader and readers waiting on its lock; bounding this
-behavior is tracked as a reliability follow-up.
+After three invalidated builds, the reader stops and releases the lock. Fleet
+list/wake requests return HTTP 503 with code `fleet_busy`; clients can retry
+later. No stale view or command is used as a fallback. This bounds the number
+of rebuilds per reader, not database execution time or total concurrent requests.
 
 Wake uses the same view, but command dispatch still checks the current session;
 a cached route cannot grant access to a disconnected agent.
