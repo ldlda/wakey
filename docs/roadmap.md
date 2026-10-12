@@ -29,6 +29,7 @@ live browser recovery and shutdown behavior are not established by those checks.
 - [ ] Check and complete editing of remembered-device notes.
 - [x] Replace generic unnamed-row labels with useful fallbacks. Prefer saved name, hostname, then `Device: <mac>`, then `Device: <ip>`; retain a generic label only when neither address exists. Presence stays in the badge, not the name. Inactive IPs can label IP-only rows without becoming active IPs or wake routes. Unknown-only fleet groups remain unknown.
 - [ ] Review frontend visibility defaults. Keep an explicit all-rows option; do not hide evidence just to fix poor labels. The user deliberately enabled all-row querying.
+- [ ] Keep device details current after identity mutations change the grouping key or active list filters exclude the result. Follow the explicit identity returned by create/attach/merge and load details independently of list filters; do not guess identity from a shared recyclable IP or retain stale mutation controls. Review detachment/split behavior separately, since a former group can become multiple rows.
 
 Identifier detachment already exists in the current frontend source; it is **not**
 the requested whole-device removal. No automatic identity promotion or deletion

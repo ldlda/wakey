@@ -14,7 +14,7 @@ For example, append `{job="wakey-agent"}` to a metric selector only if that is
 the job value you actually see. Metrics export every 30 seconds; use a time range
 that includes recent activity and allow at least two exports for rate queries.
 
-## The Three Types
+## Metric Types
 
 | Type | What it records | How to read it |
 | --- | --- | --- |

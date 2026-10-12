@@ -34,8 +34,9 @@ history_retention = "30d"
 device_retention = "60d"
 ```
 
-All three settings must be positive. Enrollment TTL and history retention must
-resolve to whole seconds. Command timeout can use subsecond values.
+`command_timeout`, `enroll_token_ttl`, and `history_retention` must be positive.
+Enrollment TTL and history retention must resolve to whole seconds. Command
+timeout can use subsecond values.
 `history_retention` deletes old audit events and alert transitions, not device
 snapshots or saved identities.
 
