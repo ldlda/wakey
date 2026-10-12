@@ -8,20 +8,64 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  SQLX_OFFLINE: "true"
+  RELEASE_VERSION: ${{ github.ref_name }}
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  router:
+    name: Router (ARMv7 musl)
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
         with:
-          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: release-router-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: release-router-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Cache cross executable
+        id: cross
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cross
+          key: cross-${{ runner.os }}-${{ runner.arch }}-0.2.5
+
+      - name: Install cross
+        if: steps.cross.outputs.cache-hit != 'true'
+        run: cargo install cross --version 0.2.5 --locked
+
+      - name: Build router binaries
+        run: cross build --release --locked --target armv7-unknown-linux-musleabihf -p wakey -p wakey-agent
+
+      - name: Package rootfs tarball
+        shell: pwsh
+        run: ./scripts/package_rootfs.ps1 -Version $env:RELEASE_VERSION -Target armv7-unknown-linux-musleabihf
+
+      - name: Upload rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: wakey-rootfs
+          path: dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz
+          if-no-files-found: error
+          compression-level: 0
+
+  ui:
+    name: UI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
         with:
@@ -33,8 +77,36 @@ jobs:
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
-      - name: Install cross
-        run: cargo install cross --locked
+      - name: Build UI dist
+        working-directory: ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Upload UI
+        uses: actions/upload-artifact@v4
+        with:
+          name: wakey-ui
+          path: ui/dist/
+          if-no-files-found: error
+
+  cc:
+    name: CC (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -43,57 +115,67 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: linux-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: release-cc-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: release-cc-${{ matrix.target }}-
 
-      - name: Build (armv7-musl with cross)
-        run: |
-          cross build --release --target armv7-unknown-linux-musleabihf -p wakey -p wakey-agent
+      # Native GNU builds use the runner's glibc. Gitea remains the separate
+      # older-glibc release path for deployment hosts that need it.
+      - name: Build control-plane natively
+        run: cargo build --release --locked --target ${{ matrix.target }} -p wakey-control-plane
 
-      - name: Build UI dist
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd ui
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      - name: Build control-plane (linux-gnu)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # x86_64 builds natively; aarch64 needs cross
-          echo "Building control-plane x86_64-unknown-linux-gnu (native)"
-          cargo build --release --target x86_64-unknown-linux-gnu -p wakey-control-plane
-
-          echo "Building control-plane aarch64-unknown-linux-gnu (cross)"
-          cross build --release --target aarch64-unknown-linux-gnu -p wakey-control-plane
-
-      - name: Package rootfs tarball
-        shell: pwsh
-        run: |
-          ./scripts/package_rootfs.ps1 -Version "${{ github.ref_name }}" -Target armv7-unknown-linux-musleabihf
-
-      - name: Package control-plane bundles
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x scripts/update_wakey_cc.sh scripts/package_wakey_cc_bundle.sh
-          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
-            ./scripts/package_wakey_cc_bundle.sh --version "${{ github.ref_name }}" --target "$target"
-          done
-
-      - name: Upload artifact
+      - name: Upload control-plane binary
         uses: actions/upload-artifact@v4
         with:
+          name: wakey-cc-bin-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/wakey-control-plane
+          if-no-files-found: error
+
+  release:
+    name: Package and publish
+    needs: [router, ui, cc]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download rootfs
+        uses: actions/download-artifact@v4
+        with:
           name: wakey-rootfs
-          path: dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz
+          path: dist
+
+      - name: Download UI
+        uses: actions/download-artifact@v4
+        with:
+          name: wakey-ui
+          path: ui/dist
+
+      - name: Download x86-64 CC
+        uses: actions/download-artifact@v4
+        with:
+          name: wakey-cc-bin-x86_64-unknown-linux-gnu
+          path: target/x86_64-unknown-linux-gnu/release
+
+      - name: Download ARM64 CC
+        uses: actions/download-artifact@v4
+        with:
+          name: wakey-cc-bin-aarch64-unknown-linux-gnu
+          path: target/aarch64-unknown-linux-gnu/release
+
+      - name: Package control-plane bundles
+        run: |
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            sh ./scripts/package_wakey_cc_bundle.sh --version "$RELEASE_VERSION" --target "$target"
+          done
 
       - name: Upload control-plane bundles
         uses: actions/upload-artifact@v4
         with:
           name: wakey-cc-bundles
           path: dist/wakey-cc-*unknown-linux-gnu.tgz
+          if-no-files-found: error
+          compression-level: 0
 
       - name: Publish Release to GitHub
         if: startsWith(github.ref, 'refs/tags/')
@@ -101,6 +183,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
           files: |
             dist/wakey-rootfs-*armv7-unknown-linux-musleabihf.tgz
             dist/wakey-cc-*unknown-linux-gnu.tgz

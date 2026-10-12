@@ -144,6 +144,14 @@ Implementation notes:
 
 ## CI (GitHub)
 
+- `.github/workflows/release.yml` builds router binaries, UI, x86-64 CC and
+  ARM64 CC in parallel. CC uses matching Ubuntu 24.04 runners and native Cargo;
+  Cross is used only for the ARMv7-musl router binaries. A final job downloads
+  their artifacts, packages CC bundles and publishes after every build succeeds.
+- GitHub's native GNU binaries inherit its runner's glibc requirements. Use the
+  Gitea bundles for older deployment hosts, checking that its build actually
+  used Zig's configured baseline. Gitea retains one job for `--once` runners.
+
 - Defined in `.github/workflows/ci.yml` on pushes/PRs to `main` or `master`:
   - **`rust` job:** `cargo fmt --check`, `clippy -D warnings`, `cargo test --workspace` on `ubuntu-latest`.
   - **`ui` job:** under `ui/`, `pnpm install --frozen-lockfile`, then `pnpm run typecheck`, `format:check`, and `build` (mirrors what you need before packaging the control-plane bundle). GitHub sets `CI=true` for the runner; pnpm uses lockfile `ui/pnpm-lock.yaml` for cache.

@@ -27,8 +27,15 @@ function Test-IsWsl {
     return $false
 }
 
+# With -Distro, resolve local relative paths from the PowerShell working
+# directory and convert Windows paths with the distro's mount configuration.
+# Without it, keep the existing mapping used by SCP callers, including remote destinations.
 function ConvertTo-WslPath {
-    param([string]$WindowsPath)
+    param(
+        [Alias('Path')]
+        [string]$WindowsPath,
+        [string]$Distro
+    )
 
     if ([string]::IsNullOrWhiteSpace($WindowsPath)) {
         return $WindowsPath
@@ -37,6 +44,36 @@ function ConvertTo-WslPath {
     # If already a POSIX path, return as-is
     if ($WindowsPath -match '^/') {
         return $WindowsPath
+    }
+
+    # wslpath expects a Windows input here. Use the selected distro's mount
+    # configuration when requested, while keeping existing POSIX paths intact.
+    if ($Distro) {
+        # Absolute Windows paths can be supplied even from Linux PowerShell.
+        # Relative inputs use the filesystem provider without requiring a file
+        # to exist, which is important for a new runner home/config.
+        if ($WindowsPath -notmatch '^[A-Za-z]:[\\/]|^\\\\') {
+            $provider = $null
+            $drive = $null
+            $WindowsPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+                $WindowsPath, [ref]$provider, [ref]$drive)
+            if ($provider.Name -ne 'FileSystem') {
+                throw "WSL paths must use the filesystem provider"
+            }
+            if ($WindowsPath.StartsWith('/')) {
+                return $WindowsPath
+            }
+        }
+        $output = & wsl.exe -d $Distro -e wslpath -a "$WindowsPath"
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "wslpath failed for '$WindowsPath' in '$Distro' (exit $exitCode)"
+        }
+        $converted = ($output -join "`n").Trim()
+        if (-not $converted) {
+            throw "wslpath returned no path for '$WindowsPath' in '$Distro'"
+        }
+        return $converted
     }
 
     # Handle Windows path (e.g., C:\path\to\file -> /mnt/c/path/to/file)

@@ -67,6 +67,12 @@ From Windows PowerShell, using the WSL wrapper:
 
 Path control (binary and config are independent):
 
+When called from PowerShell inside WSL, absolute POSIX paths pass through
+unchanged. Windows paths are converted using the selected distro's `wslpath`.
+Relative runner home, binary and config paths resolve from the current PowerShell
+directory. Conversion also supports paths that have not been created yet.
+The helper, runner home and config paths must be accessible in that distro.
+
 ```powershell
 ./scripts/act_runner_wsl.ps1 -Action status `
  -RunnerBin /home/lda/gitea-runner/act_runner `
