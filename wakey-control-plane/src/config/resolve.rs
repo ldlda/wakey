@@ -105,6 +105,7 @@ impl DaemonConfig {
             ui_dist_dir,
             bootstrap_enroll_tokens,
             telemetry,
+            access: file.access,
         })
     }
 }

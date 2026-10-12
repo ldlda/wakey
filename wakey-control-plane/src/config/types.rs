@@ -22,6 +22,17 @@ pub struct DaemonConfig {
     pub ui_dist_dir: PathBuf,
     pub bootstrap_enroll_tokens: Vec<String>,
     pub telemetry: TelemetryConfig,
+    pub access: Option<AccessConfig>,
+}
+
+/// Trusted origin-verifier settings; no URL is taken from a JWT header or claim.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AccessConfig {
+    pub issuer: String,
+    pub audience: String,
+    /// Omission uses the Cloudflare Access certs path beneath the issuer.
+    pub jwks_url: Option<String>,
 }
 
 /// TOML DTO for both loading partial files and generating complete files.
@@ -46,6 +57,7 @@ pub(crate) struct FileConfig {
     #[serde(alias = "enroll_tokens")]
     pub(crate) bootstrap_enroll_tokens: Option<Vec<String>>,
     pub(crate) telemetry: Option<FileTelemetryConfig>,
+    pub(crate) access: Option<AccessConfig>,
 }
 
 pub(crate) const DURATION_KEYS: &[LegacyDuration] = &[
@@ -103,6 +115,7 @@ pub(crate) static DEFAULT_CONFIG: LazyLock<DaemonConfig> = LazyLock::new(|| Daem
     pid_file: "wakey-control-plane.pid".into(),
     ui_dist_dir: "ui/dist".into(),
     bootstrap_enroll_tokens: Vec::new(),
+    access: None,
     telemetry: TelemetryConfig {
         console_filter: None,
         otlp_log_filter: None,

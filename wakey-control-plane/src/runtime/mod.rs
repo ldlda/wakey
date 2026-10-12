@@ -23,6 +23,7 @@ use crate::config;
 use crate::state;
 use crate::ws;
 
+mod access;
 mod admin;
 mod fleet_metrics;
 mod process;
@@ -177,6 +178,9 @@ fn control_api_routes() -> Router<AppState> {
 
 /// Starts the control-plane HTTP and websocket surfaces and manages daemon lifecycle hooks.
 pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
+    // The verifier delegates enforcement to Caddy. Do not expose the other
+    // handlers directly when that boundary is configured.
+    let access_routes = access::routes(daemon.access.as_ref(), daemon.bind)?;
     write_pid_file(&daemon.pid_file)?;
     info!(pid_file = %daemon.pid_file.display(), "wrote control-plane pid file");
 
@@ -207,6 +211,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     // - public_api_routes: intended internet-facing agent endpoints
     // - control_api_routes: intended admin-only endpoints behind Access
     let app = Router::new()
+        .merge(access_routes)
         .merge(public_api_routes(daemon.ui_dist_dir.clone()))
         .merge(control_api_routes())
         .with_state(app_state.clone());

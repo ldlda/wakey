@@ -107,6 +107,7 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
     super::resolve::validate_device_retention(device_retention)?;
 
     let body = FileConfig {
+        access: base.access,
         data_dir: Some(data_dir),
         bind: Some(bind.to_string()),
         public_url: Some(public_url),
@@ -245,6 +246,11 @@ pid_file = "old.pid"
 ui_dist_dir = "/opt/wakey/ui"
 bootstrap_enroll_tokens = ["old-token"]
 
+[access]
+issuer = "https://access.example"
+audience = "protected-app"
+jwks_url = "https://keys.example/custom"
+
 [telemetry]
 otlp_endpoint = "http://otel.example"
 authorization_env = "WAKEY_OTLP_AUTHORIZATION"
@@ -293,6 +299,14 @@ json_logs = true
         );
         assert!(parsed.get("command_timeout_ms").is_none());
         assert_eq!(converted.device_retention, Some(std::time::Duration::ZERO));
+        assert_eq!(
+            converted.access,
+            Some(crate::config::AccessConfig {
+                issuer: "https://access.example".into(),
+                audience: "protected-app".into(),
+                jwks_url: Some("https://keys.example/custom".into()),
+            })
+        );
         assert!(parsed.get("enroll_token_ttl_seconds").is_none());
         assert_eq!(
             parsed["state_file"].as_str(),

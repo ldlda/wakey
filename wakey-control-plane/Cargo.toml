@@ -10,6 +10,8 @@ axum = { version = "0.8", features = ["ws", "json"] }
 clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
 humantime-serde = "1"
+http-cache-semantics = { version = "3", default-features = false, features = ["reqwest"] }
+jsonwebtoken = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
 macaddr = { workspace = true }
 nix = { version = "0.31", default-features = false, features = [
     "signal",
@@ -21,6 +23,7 @@ reqwest = { version = "0.13", default-features = false, features = [
 ] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = "2"
 
 sqlx = { version = "0.8", features = [
     "runtime-tokio",
@@ -40,3 +43,7 @@ wakey-core = { path = "../wakey-core", registry = "gitea", version = "0", featur
 
 [target.'cfg(target_os = "linux")'.dependencies]
 wakey-linux = { path = "../wakey-linux", registry = "gitea", version = "0", features = ["telemetry"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+jsonwebtoken = { version = "10.3", default-features = false, features = ["use_pem", "aws_lc_rs"] }

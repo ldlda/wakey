@@ -8,4 +8,4 @@ pub use resolve::{
     resolve_revoke_agent_settings, resolve_revoke_enroll_token_settings,
     resolve_state_stats_settings,
 };
-pub use types::{DaemonConfig, TelemetryConfig};
+pub use types::{AccessConfig, DaemonConfig, TelemetryConfig};

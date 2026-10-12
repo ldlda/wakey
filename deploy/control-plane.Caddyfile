@@ -2,9 +2,11 @@
 #
 # Security model:
 # - Public endpoints for agents: health, enrollment, control WS, and scoped terminal relay WS
-# - Private admin surface: /ui/* and /api/v1/control/* (requires CF Access headers)
+# - Private admin surface: root, /ui/* and /api/v1/control/* (verified Access JWT)
+# Configure CC's [access] section and loopback bind before enabling this template.
+# Never expose /internal/auth/verify through this virtual host.
 #
-# Replace cp.example.com with your public control-plane domain.
+# Replace wakey.ldlda.com and the loopback upstream port for your deployment.
 
 wakey.ldlda.com {
     encode zstd gzip
@@ -15,15 +17,14 @@ wakey.ldlda.com {
         reverse_proxy 127.0.0.1:6767
     }
 
-    # Admin surface requires Cloudflare Access headers.
-    @admin path /ui* /api/v1/control/*
-    @cf_access header_regexp CFJWT Cf-Access-Jwt-Assertion .+
+    # Applies to HTTP requests and operator WebSocket upgrades, not WS frames.
+    @admin path / /ui* /api/v1/control/*
 
     handle @admin {
-        handle @cf_access {
-            reverse_proxy 127.0.0.1:6767
+        forward_auth 127.0.0.1:6767 {
+            uri /internal/auth/verify
         }
-        respond "forbidden" 403
+        reverse_proxy 127.0.0.1:6767
     }
 
     # Deny unknown paths by default.
