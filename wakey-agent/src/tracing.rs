@@ -6,7 +6,7 @@ pub fn init(
     config: &TelemetryConfig,
     agent_id: Option<&str>,
 ) -> Result<TelemetryGuard> {
-    wakey_core::telemetry::init(
+    let guard = wakey_core::telemetry::init(
         config,
         "wakey-agent",
         match verbose {
@@ -15,5 +15,8 @@ pub fn init(
             _ => "wakey_agent=trace,wakey=debug,wakey_core=info,opentelemetry=warn",
         },
         agent_id,
-    )
+    )?;
+    #[cfg(target_os = "linux")]
+    let guard = guard.with_process_metrics(wakey_linux::telemetry::ProcfsProcessMetrics);
+    Ok(guard)
 }

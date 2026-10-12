@@ -1,4 +1,4 @@
-//! rtnetlink-based neighbor table query. One syscall, filter in userspace.
+//! rtnetlink-based neighbor query: dump links and neighbors, then filter in userspace.
 #![cfg(unix)]
 use std::{
     collections::{HashMap, HashSet},

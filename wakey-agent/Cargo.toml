@@ -37,3 +37,6 @@ url = "2"
 vt100 = { package = "wakey-vt100", path = "../vendor/vt100", registry = "gitea", version = "=0.16.2-wakey.2" }
 wakey = { path = "..", registry = "gitea", version = "0" }
 wakey-core = { path = "../wakey-core", registry = "gitea", version = "0", features = ["telemetry"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wakey-linux = { path = "../wakey-linux", registry = "gitea", version = "0", features = ["telemetry"] }

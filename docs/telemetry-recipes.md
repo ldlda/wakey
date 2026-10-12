@@ -26,6 +26,41 @@ that includes recent activity and allow at least two exports for rate queries.
 Counter resets on restart are handled by `rate` and `increase`. Apply those
 functions **before** summing across instances so individual resets remain visible.
 
+## Process And Host
+
+Discover the new gauges first (these are Linux-only):
+
+```promql
+count by (__name__, job, instance) ({__name__=~"wakey_(process|host)_.*"})
+```
+
+Process age and host uptime, in seconds:
+
+```promql
+wakey_process_uptime_seconds
+```
+
+```promql
+wakey_host_uptime_seconds
+```
+
+Set Grafana's unit to a duration. Compare the two: process age resetting while
+host uptime continues suggests a daemon restart; both resetting suggests a host
+restart or a changed namespace/view. Missing samples are not a zero uptime or
+proof of a restart. These are gauges: do not use `rate` or `increase` on them.
+
+Resident process memory, in bytes:
+
+```promql
+wakey_process_memory_resident_bytes
+```
+
+Set the unit to **bytes (IEC)**. Keep `job` and `instance` in the legend to compare
+agent and CC separately. RSS includes shared/file-backed pages and is not heap
+allocation alone. A missing series can mean disabled telemetry, an unsupported
+platform, unavailable procfs, or export trouble. No new health endpoint or host
+inventory is provided here; do not sum host uptime from multiple daemons.
+
 ## Operations
 
 Completed attempts per second, including errors and timeouts:

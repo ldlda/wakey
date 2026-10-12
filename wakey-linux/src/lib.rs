@@ -3,6 +3,8 @@
 pub mod devices;
 pub mod dhcp;
 pub mod observations;
+#[cfg(all(target_os = "linux", feature = "telemetry"))]
+pub mod telemetry;
 #[cfg(unix)]
 pub mod terminal;
 pub mod wake;

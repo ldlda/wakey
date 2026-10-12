@@ -43,9 +43,23 @@ pub struct TelemetryGuard {
     traces: Option<SdkTracerProvider>,
     logs: Option<SdkLoggerProvider>,
     metrics: Option<SdkMeterProvider>,
+    process: Option<process::ProcessMetrics>,
 }
 
 impl TelemetryGuard {
+    /// Attach platform measurements only when OTLP metrics are enabled. Core
+    /// owns instruments; the supplied reader owns all OS-specific collection.
+    pub fn with_process_metrics(mut self, source: impl ProcessMetricsSource) -> Self {
+        if let Some(metrics) = &self.metrics {
+            use opentelemetry::metrics::MeterProvider as _;
+            self.process = Some(process::ProcessMetrics::new(
+                &metrics.meter("wakey"),
+                source,
+            ));
+        }
+        self
+    }
+
     pub fn shutdown(self) {
         // Export failures must not turn an otherwise successful daemon exit into a failure.
         if let Some(provider) = self.metrics {
@@ -198,6 +212,7 @@ pub fn init(
             traces: Some(traces),
             logs: Some(logs),
             metrics: Some(metrics),
+            process: None,
         };
     } else if config.json_logs {
         tracing_subscriber::registry()
@@ -292,7 +307,9 @@ fn local_timer() -> fmt::time::OffsetTime<time::format_description::well_known::
 // therefore does no per-PTY-read allocations or instrument registration.
 static METRICS: OnceLock<Instruments> = OnceLock::new();
 mod fleet;
+mod process;
 pub use fleet::{AgentDeviceCounts, FleetCounts, FleetMetrics};
+pub use process::ProcessMetricsSource;
 struct Instruments {
     operations: opentelemetry::metrics::Counter<u64>,
     duration: opentelemetry::metrics::Histogram<f64>,

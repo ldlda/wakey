@@ -1978,6 +1978,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "procfs"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25485360a54d6861439d60facef26de713b1e126bf015ec8f98239467a2b82f7"
+dependencies = [
+ "bitflags",
+ "procfs-core",
+ "rustix",
+]
+
+[[package]]
+name = "procfs-core"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6401bf7b6af22f78b563665d15a22e9aef27775b79b149a66ca022468a4e405"
+dependencies = [
+ "bitflags",
+ "hex",
+]
+
+[[package]]
 name = "prost"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3671,6 +3692,7 @@ dependencies = [
  "url",
  "wakey",
  "wakey-core",
+ "wakey-linux",
  "wakey-vt100",
 ]
 
@@ -3696,6 +3718,7 @@ dependencies = [
  "uuid",
  "wakey-agent",
  "wakey-core",
+ "wakey-linux",
 ]
 
 [[package]]
@@ -3733,6 +3756,7 @@ dependencies = [
  "lda-ipjs",
  "macaddr",
  "nix 0.31.2",
+ "procfs",
  "pty-process",
  "serde",
  "serde_json",

@@ -197,6 +197,20 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
             },
         );
     let server = tokio::spawn(server);
+    // The exporter contract is OS-independent; Linux procfs collection is
+    // tested in wakey-linux rather than imported into core.
+    struct ProcessSample;
+    impl telemetry::ProcessMetricsSource for ProcessSample {
+        fn process_uptime_seconds(&self) -> Option<f64> {
+            Some(120.5)
+        }
+        fn resident_memory_bytes(&self) -> Option<u64> {
+            Some(32 * 1024 * 1024)
+        }
+        fn host_uptime_seconds(&self) -> Option<f64> {
+            Some(10_000.0)
+        }
+    }
     let guard = telemetry::init(
         &TelemetryConfig {
             otlp_endpoint: Some(endpoint),
@@ -211,7 +225,8 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
         "info",
         Some("test-agent"),
     )
-    .unwrap();
+    .unwrap()
+    .with_process_metrics(ProcessSample);
 
     let fleet_metrics = telemetry::FleetMetrics::new().unwrap();
     fleet_metrics.replace(Some(telemetry::FleetCounts {
@@ -344,6 +359,44 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
         assert!(names.contains(&name), "missing {name}");
     }
     let latest = metrics.last().unwrap();
+    {
+        for (name, unit, expected) in [
+            (
+                "wakey.process.uptime",
+                "s",
+                number_data_point::Value::AsDouble(120.5),
+            ),
+            (
+                "wakey.process.memory.resident",
+                "By",
+                number_data_point::Value::AsInt(32 * 1024 * 1024),
+            ),
+            (
+                "wakey.host.uptime",
+                "s",
+                number_data_point::Value::AsDouble(10_000.0),
+            ),
+        ] {
+            let metric = latest
+                .resource_metrics
+                .iter()
+                .flat_map(|resource| &resource.scope_metrics)
+                .flat_map(|scope| &scope.metrics)
+                .find(|metric| metric.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"));
+            assert_eq!(metric.unit, unit);
+            let Some(metric::Data::Gauge(gauge)) = &metric.data else {
+                panic!("{name} must be a gauge");
+            };
+            assert_eq!(gauge.data_points.len(), 1);
+            let point = &gauge.data_points[0];
+            assert!(
+                point.attributes.is_empty(),
+                "process metrics need no PID/host/address labels"
+            );
+            assert_eq!(point.value, Some(expected));
+        }
+    }
     for (name, label, expected) in [
         (
             "wakey.stored.devices",

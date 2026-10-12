@@ -53,6 +53,9 @@ Use netlink only when:
 
 Today that mainly applies to `neighbor::nl`.
 
+`wakey-linux` explicitly uses netlink for neighbor and address inventory on its
+Unix-gated path, without automatic JSON fallback.
+
 ## Relationship to wakey
 
 `wakey` is the product.

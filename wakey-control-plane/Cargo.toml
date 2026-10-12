@@ -37,3 +37,6 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 wakey-agent = { path = "../wakey-agent", registry = "gitea", version = "0" }
 wakey-core = { path = "../wakey-core", registry = "gitea", version = "0", features = ["telemetry"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wakey-linux = { path = "../wakey-linux", registry = "gitea", version = "0", features = ["telemetry"] }

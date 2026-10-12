@@ -55,7 +55,8 @@ or current fleet size. Metric labels should remain bounded; no per-device labels
 
 ## Process And Host Visibility
 
-- [ ] Add shared process measurements for agent and CC: start time/uptime, resident memory, CPU time, and open file descriptors where supported. Keep version as resource metadata rather than repeating it on every sample.
+- [x] Add Linux process age/RSS and host uptime gauges for agent and CC through opt-in OTLP, using the existing collection interval. Core owns OS-independent instruments; wakey-linux supplies the optional procfs reader. Missing data omits observations; no added labels, config fields, health routes or polling tasks. Collector coverage verifies units and values; router/live dashboard validation pending.
+- [ ] Extend process measurements with CPU time and open file descriptors where supported, plus start-time/version metadata if needed. Keep version as resource metadata rather than repeating it on every sample.
 - [ ] Add a small host summary: hostname, OS/kernel, CPU count, host uptime, load, and available/total memory. Distinguish host uptime from process uptime so router reboots and agent restarts are visible separately. Sources must tolerate missing Linux files; not every agent host is a router.
 - [ ] Expose changing measurements through OTLP on a modest sampling interval; show selected process/host details on Fleet Health and agent details. Keep host information behind the protected operator interface, not public health endpoints. Avoid expensive reads on every request and unbounded labels.
 - [ ] Keep `/healthz` as cheap liveness; consider a separate bounded `/readyz` database-access check for CC. Collector outages and disconnected fleet agents must not make a functioning CC unready.

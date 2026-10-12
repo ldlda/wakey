@@ -157,6 +157,9 @@ queries, rates, averages, percentiles, and Grafana units.
 | `wakey.stored.devices` | CC gauge of retained device rows, labeled by `agent_id` |
 | `wakey.stored.endpoints` | CC gauge of retained endpoint rows, including inactive entries, labeled by `agent_id` |
 | `wakey.fleet.devices` | CC gauge of unfiltered grouped identities, labeled by `identity` (`saved` or `unsaved`) |
+| `wakey.process.uptime` | Linux gauge: seconds since this process's kernel-reported start, including suspend |
+| `wakey.process.memory.resident` | Linux gauge: approximate resident memory in bytes, from VmRSS |
+| `wakey.host.uptime` | Linux gauge: uptime in seconds reported by the process's procfs view, including suspend |
 | `wakey.terminal.active` | Agent PTY workers currently alive |
 | `wakey.terminal.input.bytes` | Input bytes received by the terminal relay |
 | `wakey.terminal.output.bytes` | Output bytes read from the PTY, including while detached |
@@ -164,8 +167,29 @@ queries, rates, averages, percentiles, and Grafana units.
 
 Metric labels do not include request/session IDs, MACs, or IPs. New spans use
 `skip_all` and explicitly select safe fields; terminal bytes and credentials are
-not attached. Profiles, host CPU/RSS metrics, connected-agent gauges, and export-loss
+not attached. Profiles, host CPU/total-memory metrics, connected-agent gauges, and export-loss
 dashboards are not part of this initial slice.
+
+Process and host gauges are registered automatically for Linux agent/CC daemons
+when OTLP is enabled. `wakey-core` owns the OS-independent instruments and
+`ProcessMetricsSource` interface; `wakey-linux` supplies the procfs reader via
+its optional `telemetry` feature. Each daemon attaches that reader to its
+telemetry guard, so core has no Linux dependency or filesystem reads.
+Their small procfs reads run during the existing 30-second
+metric collection and final shutdown collection; no independent poller or task
+is started. Non-Linux builds omit these gauges. Missing/unreadable procfs data
+omits the affected observation instead of reporting zero or failing the daemon.
+No hostname, PID, command line or environment values are exported by this slice.
+Service/instance resource attributes identify each daemon; two daemons on the
+same host can report the same host uptime, so do not sum it across processes.
+
+RSS includes anonymous, file-backed and shared resident pages, not just heap,
+and is an approximate kernel measurement. Process age uses procfs start ticks
+and uptime, not wall-clock subtraction or telemetry initialization time.
+Container/time namespaces can change the visible host clock; this is the
+process's Linux view, not an assertion about a physical machine's boot time.
+The Linux parser is [procfs](https://docs.rs/procfs/0.18.0/procfs/), with optional
+default features disabled. Public `/healthz` remains unchanged.
 
 Current-state fleet gauges sample independently every 30 seconds, with bounded
 revision retries to avoid mixed-state counts. Enrolled empty agents report zero;
