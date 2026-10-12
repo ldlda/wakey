@@ -4,7 +4,9 @@ import { toast } from "sonner";
 
 import {
   fetchFleetDevices,
+  fetchFleetDevice,
   fetchKnownDevices,
+  fetchKnownDevice,
   refreshFleetDevices,
   wakeFleetDevice,
   type Agent,
@@ -70,6 +72,15 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
   const [wakeBusyKey, setWakeBusyKey] = useState("");
   const [details, setDetails] = useState<FleetDevice | null>(null);
   const loadSeqRef = useRef(0);
+  const detailsKeyRef = useRef<string | null>(null);
+  const detailsSeqRef = useRef(0);
+
+  function selectDetails(device: FleetDevice | null) {
+    // Closing or selecting another row invalidates in-flight detail refreshes.
+    detailsSeqRef.current += 1;
+    detailsKeyRef.current = device?.device_key ?? null;
+    setDetails(device);
+  }
 
   async function loadFleet() {
     // Latest request wins: filter changes and debounced searches overlap, and
@@ -91,19 +102,56 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
       if (seq !== loadSeqRef.current) return;
       setDevices(nextDevices);
       setKnownDevices(nextKnownDevices);
-      // Keep the open dialog current after rename/identifier mutations.
-      setDetails((current) =>
-        current
-          ? (nextDevices.find(
-              (device) => device.device_key === current.device_key,
-            ) ?? null)
-          : null,
-      );
     } catch (err) {
       if (seq !== loadSeqRef.current) return;
       toast.error("Failed to load fleet", { description: String(err) });
     } finally {
       if (seq === loadSeqRef.current) setLoading(false);
+    }
+  }
+
+  async function refreshView(
+    originKey: string | null = detailsKeyRef.current,
+    knownDeviceId?: string,
+  ) {
+    if (!originKey || originKey !== detailsKeyRef.current) {
+      await loadFleet();
+      return;
+    }
+    // Mutations supply an explicit identity; never infer it from a shared IP.
+    // Details use their own read, so list filters and limits cannot close them.
+    const key = knownDeviceId ? `known:${knownDeviceId}` : originKey;
+    detailsKeyRef.current = key;
+    const seq = ++detailsSeqRef.current;
+    try {
+      const [device] = await Promise.all([fetchFleetDevice(key), loadFleet()]);
+      if (seq !== detailsSeqRef.current || detailsKeyRef.current !== key)
+        return;
+      const saved = device.known_device
+        ? await fetchKnownDevice(device.known_device.device_id)
+        : null;
+      if (seq === detailsSeqRef.current && detailsKeyRef.current === key) {
+        // The dialog's full identity must stay current even if the list refresh
+        // failed. Dropdown options may come from the list, not mutation controls.
+        if (saved) {
+          setKnownDevices((current) =>
+            current.some((item) => item.device_id === saved.device_id)
+              ? current.map((item) =>
+                  item.device_id === saved.device_id ? saved : item,
+                )
+              : [...current, saved],
+          );
+        }
+        setDetails(device);
+      }
+    } catch (err) {
+      if (seq !== detailsSeqRef.current || detailsKeyRef.current !== key)
+        return;
+      // A missing/failed identity read must not leave stale mutation controls.
+      selectDetails(null);
+      toast.error("Failed to refresh device details", {
+        description: String(err),
+      });
     }
   }
 
@@ -116,7 +164,7 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
         ? `Refreshed ${result.total_accepted} devices; ${failed.length} agent(s) failed`
         : `Refreshed ${result.total_accepted} devices from ${result.agents.length} connected agents`;
       toast.success(msg);
-      await loadFleet();
+      await refreshView();
     } catch (err) {
       toast.error("Fleet refresh failed", { description: String(err) });
     } finally {
@@ -135,7 +183,7 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
       const msg = `Wake sent via ${agentLabel(result.route.agent_id, result.route.nickname)} (${result.route.mac ?? "no mac"})`;
       toast.success(msg);
       if (onAfterWake) await onAfterWake();
-      await loadFleet();
+      await refreshView();
     } catch (err) {
       toast.error("Wake failed", { description: String(err) });
     } finally {
@@ -347,7 +395,7 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
                   device={device}
                   busy={wakeBusyKey === device.device_key}
                   onWake={() => void wakeDevice(device)}
-                  onDetails={() => setDetails(device)}
+                  onDetails={() => selectDetails(device)}
                   onCopy={(label, value) => void copyValue(label, value)}
                 />
               ))}
@@ -371,13 +419,15 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
         open={Boolean(details)}
         busy={wakeBusyKey === details?.device_key}
         onOpenChange={(open) => {
-          if (!open) setDetails(null);
+          if (!open) selectDetails(null);
         }}
         onWake={(routeId) => {
           if (details) void wakeDevice(details, routeId);
         }}
         onCopy={(label, value) => void copyValue(label, value)}
-        onChanged={() => void loadFleet()}
+        onChanged={(knownDeviceId) =>
+          refreshView(details?.device_key ?? null, knownDeviceId)
+        }
       />
     </section>
   );

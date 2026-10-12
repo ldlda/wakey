@@ -27,6 +27,12 @@ filters or the list API's 1,000-row limit. It borrows the view and clones only t
 selected route. Command dispatch still checks the current session;
 a cached route cannot grant access to a disconnected agent.
 
+`GET /api/v1/control/fleet/devices/{device_key}` returns one exact row from the
+complete view, or `404 fleet_device_not_found`. Details do not inherit list
+filters or limits. After Remember/Attach/Merge, the UI follows the saved ID
+returned by the mutation, not matching MAC/IP heuristics. It also refreshes the
+full saved identity independently of list results; Forget still closes details.
+
 ## External Writes
 
 The revision belongs to the running CC process. If another process directly

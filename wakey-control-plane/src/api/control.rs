@@ -14,5 +14,5 @@ pub use enroll::{
 };
 pub(crate) use fleet::FleetCache;
 pub(crate) use fleet::sample_fleet_counts;
-pub use fleet::{list_fleet_devices, refresh_fleet_devices, wake_fleet_device};
+pub use fleet::{get_fleet_device, list_fleet_devices, refresh_fleet_devices, wake_fleet_device};
 pub use stats::{StateStatsResponse, state_stats};

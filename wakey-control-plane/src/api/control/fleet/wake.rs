@@ -216,6 +216,20 @@ mod tests {
         .unwrap();
         assert_eq!(listed.len(), 1000);
         assert!(listed.iter().all(|row| row.device_key != "pc-1000"));
+        {
+            use axum::extract::Path;
+            let details =
+                super::super::get_fleet_device(State(state.clone()), Path("pc-1000".into()))
+                    .await
+                    .unwrap()
+                    .into_response();
+            assert_eq!(details.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(details.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let row: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(row["device_key"], "pc-1000");
+        }
         for route_id in [None, Some("valid")] {
             let selected = load_selected_route(&state, "pc-1000", route_id)
                 .await

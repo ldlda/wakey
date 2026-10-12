@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use axum::Json;
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use tracing::warn;
@@ -103,6 +103,30 @@ pub async fn list_fleet_devices(
             Err(fleet_error(err, "list_fleet_devices_failed"))
         }
     }
+}
+
+/// Details are an exact identity lookup, not a filtered/paginated list lookup.
+/// In particular, remembering an unsaved row must remain readable under its new key.
+#[tracing::instrument(name = "fleet_get", skip_all)]
+pub async fn get_fleet_device(
+    State(state): State<AppState>,
+    Path(device_key): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let devices = fleet_view(&state)
+        .await
+        .map_err(|err| fleet_error(err, "get_fleet_device_failed"))?;
+    let device = devices
+        .iter()
+        .find(|device| device.device_key == device_key)
+        .cloned()
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::NOT_FOUND,
+                "fleet_device_not_found",
+                "fleet device not found",
+            )
+        })?;
+    Ok(Json(device))
 }
 
 #[tracing::instrument(name = "fleet_load", skip_all, fields(grouped = tracing::field::Empty, filtered = tracing::field::Empty, returned = tracing::field::Empty))]

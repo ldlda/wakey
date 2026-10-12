@@ -29,7 +29,7 @@ live browser recovery and shutdown behavior are not established by those checks.
 - [ ] Check and complete editing of remembered-device notes.
 - [x] Replace generic unnamed-row labels with useful fallbacks. Prefer saved name, hostname, then `Device: <mac>`, then `Device: <ip>`; retain a generic label only when neither address exists. Presence stays in the badge, not the name. Inactive IPs can label IP-only rows without becoming active IPs or wake routes. Unknown-only fleet groups remain unknown.
 - [ ] Review frontend visibility defaults. Keep an explicit all-rows option; do not hide evidence just to fix poor labels. The user deliberately enabled all-row querying.
-- [ ] Keep device details current after identity mutations change the grouping key or active list filters exclude the result. Follow the explicit identity returned by create/attach/merge and load details independently of list filters; do not guess identity from a shared recyclable IP or retain stale mutation controls. Review detachment/split behavior separately, since a former group can become multiple rows.
+- [x] Keep device details current after identity mutations change the grouping key or list filters exclude the result. Exact fleet details and full saved-identity reads follow the mutation's explicit ID; no shared-IP matching or stale-control fallback. Remember/Attach/Rename verified with mocked browser flows on desktop, Remember/Rename on mobile; backend tests cover filtering, old-key rejection and lookup beyond the list cap. Forget deliberately closes; detaching stays on the saved identity instead of guessing among split observations.
 
 Identifier detachment already exists in the current frontend source; it is **not**
 the requested whole-device removal. No automatic identity promotion or deletion
@@ -59,8 +59,10 @@ or current fleet size. Metric labels should remain bounded; no per-device labels
 - [x] Add cumulative process CPU time (counter) and current open-FD count (gauge) through the same Linux reader and OS-independent instruments. Exclude child processes, omit failed samples, and document one-core CPU-rate interpretation and sampling FD overhead. Extend collector/reader coverage rather than adding timing-based tests; live validation pending.
 - [ ] Add start-time/version metadata if needed. Keep version as resource metadata rather than repeating it on every sample.
 - [x] Add total/available host memory and 1/5/15-minute load gauges through the optional Linux reader, with byte conversion owned by procfs and fixed load-period labels. Omit unavailable MemAvailable instead of substituting free memory; document kernel views versus container limits. Collector/reader coverage included; live validation pending.
-- [ ] Complete a small host summary with hostname, OS/kernel and CPU count, plus protected UI presentation of collected measurements. Sources must tolerate missing Linux files; not every agent host is a router.
-- [ ] Expose changing measurements through OTLP on a modest sampling interval; show selected process/host details on Fleet Health and agent details. Keep host information behind the protected operator interface, not public health endpoints. Avoid expensive reads on every request and unbounded labels.
+- [ ] Complete a small host summary with hostname, OS/kernel and CPU count. Sources must tolerate missing Linux files; not every agent host is a router.
+- [ ] Display CC and agent process/host information in Fleet Health and agent details: version/name, process/host uptime, RSS, CPU time/usage, open FDs, available/total host memory and load where supported. OTLP export is not the UI's data source; the UI must work without a collector.
+- [ ] Add typed agent status snapshots over the existing authenticated WebSocket, on a modest timer and when requested. Reuse Linux collection rather than introducing separate parsers; CC retains each agent's latest sample with received time and connection status. Show stale/disconnected or unavailable values explicitly, never as zero/current. Keep routine samples in memory initially, not an unbounded DB history.
+- [ ] Expose the CC's own sampled status and retained agent summaries through protected control APIs. Keep `/healthz` unchanged and do not expose environment variables, credentials or command lines. CPU percentages require successive cumulative CPU/time samples; do not label raw CPU seconds as utilization. No expensive host reads on every UI request.
 - [ ] Keep `/healthz` as cheap liveness; consider a separate bounded `/readyz` database-access check for CC. Collector outages and disconnected fleet agents must not make a functioning CC unready.
 - [ ] Add application resource gauges where useful: DB pool usage, connected agents, pending commands, and active terminal sessions. Check existing instruments first to avoid duplicates; distinguish pool pressure from host/process pressure.
 
@@ -84,6 +86,17 @@ event hooks; [ubus](https://openwrt.org/docs/techref/ubus) is local IPC/RPC, and
 [UCI](https://openwrt.org/docs/guide-developer/ubus/uci) manages configuration.
 None is a Kafka-style retained observation history. Verify what the vendor
 firmware actually exposes before making any of them an agent requirement.
+
+## Origin Authentication
+
+- [ ] Replace Caddy's nonempty `Cf-Access-Jwt-Assertion` matcher: header presence does not authenticate a request that reaches the origin directly. The `lb.ldlda.com` probe reached Cloudflare and redirected to Access login, so a direct-origin bypass was not reproduced; the matcher remains insufficient.
+- [ ] Add a CC-owned, loopback-accessible `/internal/auth/verify` endpoint for Caddy `forward_auth`. Validate the Access JWT signature, permitted algorithm, exact team issuer, protected Wakey application AUD and expiry using a standard JWT library. Cache signing keys with bounded fetches/timeouts and rate-limited refreshes; arbitrary token key IDs must not trigger unlimited upstream requests. Return 204 for valid credentials, 401 for missing/invalid credentials, and 503 when verification cannot be completed safely. Never log tokens.
+- [ ] Apply `forward_auth` to `/`, `/ui*` and `/api/v1/control/*`, including operator WebSocket handshakes. Keep health, agent enrollment/WS/terminal relay and ACME challenge paths outside Access verification; agent endpoints retain their own authentication. Do not accept the bypass application's AUD as an operator credential or expose the internal verifier through public Caddy routes. Keep CC bound to loopback: Caddy owns enforcement, so direct CC access would bypass it.
+- [ ] Test forged/expired/wrong-audience tokens, signing-key rotation and unavailable key retrieval, protected HTTP/WS rejection, and unaffected public agent routes before deployment. Validate the Caddy configuration and test a real direct-origin connection as well as the Cloudflare-facing hostname. Authentication failures must never fall back to header-only acceptance.
+
+## Multi-CC Planning
+
+- [ ] Consolidate stable CC/local-agent IDs, forwarded display names, per-CC enrollments, and agent config restructuring. See [multi-CC proposal](multi-cc-plan.md). Identity/name exchange and terminal ownership must be defined before adding connection workers; no CC-to-CC state synchronization is planned.
 
 ## Validation And Reliability
 

@@ -339,6 +339,12 @@ export function fetchKnownDevices(): Promise<KnownDevice[]> {
   return request<KnownDevice[]>("/api/v1/control/devices");
 }
 
+export function fetchKnownDevice(deviceId: string): Promise<KnownDevice> {
+  return request<KnownDevice>(
+    `/api/v1/control/devices/${encodeURIComponent(deviceId)}`,
+  );
+}
+
 export function fetchFleetDevices(opts?: {
   query?: string;
   presence?: string;
@@ -358,6 +364,12 @@ export function fetchFleetDevices(opts?: {
   params.set("limit", String(opts?.limit ?? 500));
   return request<FleetDevice[]>(
     `/api/v1/control/fleet/devices?${params.toString()}`,
+  );
+}
+
+export function fetchFleetDevice(deviceKey: string): Promise<FleetDevice> {
+  return request<FleetDevice>(
+    `/api/v1/control/fleet/devices/${encodeURIComponent(deviceKey)}`,
   );
 }
 

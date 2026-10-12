@@ -109,6 +109,10 @@ fn control_api_routes() -> Router<AppState> {
             "/api/v1/control/fleet/devices/refresh",
             post(api::refresh_fleet_devices),
         )
+        .route(
+            "/api/v1/control/fleet/devices/{device_key}",
+            get(api::get_fleet_device),
+        )
         .route("/api/v1/control/fleet/wake", post(api::wake_fleet_device))
         .route(
             "/api/v1/control/devices",

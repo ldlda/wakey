@@ -159,6 +159,35 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
             .unwrap()
             .is_empty()
     );
+    // The filtered list excludes this row, but exact details still follow the
+    // authoritative saved key after remembering and renaming the observation.
+    {
+        use axum::{
+            extract::{Path, State},
+            response::IntoResponse,
+        };
+        let response = super::get_fleet_device(
+            State(state.clone()),
+            Path(format!("known:{}", saved.device_id)),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let details: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(details["display_name"], "renamed pc");
+        assert_eq!(details["known_device"]["device_id"], saved.device_id);
+        let missing =
+            super::get_fleet_device(State(state.clone()), Path(initial[0].device_key.clone()))
+                .await
+                .err()
+                .expect("old unsaved grouping key no longer exists");
+        assert_eq!(missing.status, axum::http::StatusCode::NOT_FOUND);
+        assert_eq!(missing.code, "fleet_device_not_found");
+    }
     let counts = super::sample_fleet_counts(&state).await.unwrap();
     assert_eq!((counts.saved, counts.unsaved), (1, 0));
     let all = ListFleetDevicesQuery {

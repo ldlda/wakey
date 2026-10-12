@@ -48,7 +48,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   onWake: (routeId?: string | null) => void;
   onCopy: (label: string, value: string) => void;
-  onChanged: () => void;
+  onChanged: (knownDeviceId?: string) => Promise<void>;
 };
 
 export function FleetDeviceDetailsDialog({
@@ -99,18 +99,20 @@ export function FleetDeviceDetailsDialog({
     (kd) => kd.device_id !== currentDevice.known_device?.device_id,
   );
 
-  async function wrap(fn: () => Promise<void | { changed?: boolean }>) {
+  async function wrap(
+    fn: () => Promise<void | { changed?: boolean; knownDeviceId?: string }>,
+  ) {
     setError("");
     setActionBusy(true);
     try {
       const res = await fn();
       if (!res || res.changed !== false) {
-        onChanged();
+        await onChanged(res?.knownDeviceId);
       }
     } catch (err: any) {
       setError(String(err));
       if (err && (err.changed || err.partial)) {
-        onChanged();
+        await onChanged(err.knownDeviceId);
       }
     } finally {
       setActionBusy(false);
@@ -125,6 +127,7 @@ export function FleetDeviceDetailsDialog({
         identifiers: rowIdentifiers,
       });
       toast.success(`Remembered as "${result.display_name}"`);
+      return { knownDeviceId: result.device_id };
     });
   }
 
@@ -133,7 +136,7 @@ export function FleetDeviceDetailsDialog({
     const target = knownDevices.find((kd) => kd.device_id === targetDeviceId);
     await wrap(async () => {
       const ids = fullKnown ? unattachedIdentifiers : rowIdentifiers;
-      if (ids.length === 0) return;
+      if (ids.length === 0) return { changed: false };
 
       const results = await Promise.allSettled(
         ids.map((id) => attachDeviceIdentifier(targetDeviceId, id)),
@@ -144,14 +147,17 @@ export function FleetDeviceDetailsDialog({
 
       if (errors.length) {
         const err = errors[0].reason as Error;
-        if (changed) (err as any).changed = true;
+        if (changed) {
+          (err as any).changed = true;
+          (err as any).knownDeviceId = targetDeviceId;
+        }
         throw err;
       }
 
       toast.success(
         `Attached ${ids.length} identifier(s) to "${target?.display_name ?? targetDeviceId}"`,
       );
-      return { changed };
+      return { changed, knownDeviceId: targetDeviceId };
     });
   }
 
@@ -159,12 +165,12 @@ export function FleetDeviceDetailsDialog({
     if (!targetDeviceId || !currentDevice.known_device) return;
     const target = knownDevices.find((kd) => kd.device_id === targetDeviceId);
     await wrap(async () => {
-      await mergeKnownDevice(
+      const merged = await mergeKnownDevice(
         targetDeviceId,
         currentDevice.known_device!.device_id,
       );
       toast.success(`Merged into "${target?.display_name ?? targetDeviceId}"`);
-      onOpenChange(false);
+      return { knownDeviceId: merged.device_id };
     });
   }
 
@@ -297,7 +303,7 @@ export function FleetDeviceDetailsDialog({
             <Button
               size="sm"
               onClick={() => onWake(selectedRoute?.route_id ?? null)}
-              disabled={busy || !selectedRoute?.wakeable}
+              disabled={actionBusy || busy || !selectedRoute?.wakeable}
             >
               <Zap className="size-4" aria-hidden />
               {busy ? "Waking" : "Wake"}
