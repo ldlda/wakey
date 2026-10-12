@@ -35,6 +35,15 @@ pub async fn rename_known_device(
     AxumPath(device_id): AxumPath<String>,
     Json(req): Json<RenameKnownDeviceRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // The store validates too, but checking here distinguishes bad input from
+    // storage failures without interpreting anyhow error messages.
+    if req.display_name.trim().is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "rename_known_device_failed",
+            "display_name must not be empty",
+        ));
+    }
     match state
         .store
         .rename_known_device(&device_id, &req.display_name)
@@ -49,7 +58,7 @@ pub async fn rename_known_device(
         Err(err) => {
             warn!(error = %err, "failed to rename known device");
             Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "rename_known_device_failed",
                 err.to_string(),
             ))
@@ -292,5 +301,114 @@ fn known_device_response(device: crate::state::KnownDevice) -> KnownDeviceRespon
                 created_at_unix: identifier.created_at_unix,
             })
             .collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{Mutex, RwLock};
+
+    #[tokio::test]
+    async fn rename_distinguishes_invalid_names_missing_devices_and_storage_failures() {
+        let dir = std::env::temp_dir().join(format!("wakey-rename-api-{}", uuid::Uuid::new_v4()));
+        let store = Arc::new(
+            crate::state::Store::load_or_init(
+                &dir.join("state.sqlite3"),
+                vec![],
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap(),
+        );
+        let state = AppState {
+            store: store.clone(),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            public_url: "http://localhost".into(),
+            command_timeout: Duration::from_secs(30),
+            enroll_token_ttl: Duration::from_secs(60),
+            terminals: crate::runtime::terminals::TerminalRegistry::new(),
+            alerts: crate::api::AlertsHub::new(),
+            fleet: Arc::new(crate::api::FleetCache::default()),
+        };
+        let device = store
+            .create_known_device(KnownDeviceInput {
+                display_name: "before".into(),
+                pinned: false,
+                notes: None,
+                identifiers: vec![],
+            })
+            .await
+            .unwrap();
+        let rename = |id: String, name: &str| {
+            rename_known_device(
+                State(state.clone()),
+                AxumPath(id),
+                Json(RenameKnownDeviceRequest {
+                    display_name: name.into(),
+                }),
+            )
+        };
+        let response = rename(device.device_id.clone(), " after ")
+            .await
+            .unwrap()
+            .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            store
+                .get_known_device(&device.device_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .display_name,
+            "after"
+        );
+        assert_eq!(
+            rename("missing".into(), "valid")
+                .await
+                .err()
+                .unwrap()
+                .status,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            rename(device.device_id.clone(), " \t\n ")
+                .await
+                .err()
+                .unwrap()
+                .status,
+            StatusCode::BAD_REQUEST
+        );
+        // A deterministic SQLite failure, not a clock-sensitive lock timeout.
+        let mut tx = store.begin_write().await.unwrap();
+        sqlx::query("CREATE TRIGGER reject_rename BEFORE UPDATE ON known_devices BEGIN SELECT RAISE(ABORT, 'test rename failure'); END")
+            .execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let failure = rename(device.device_id.clone(), "valid")
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(failure.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(failure.code, "rename_known_device_failed");
+        assert_eq!(
+            store
+                .get_known_device(&device.device_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .display_name,
+            "after"
+        );
+        assert_eq!(
+            rename(device.device_id, " ").await.err().unwrap().status,
+            StatusCode::BAD_REQUEST
+        );
+        drop(state);
+        drop(store);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

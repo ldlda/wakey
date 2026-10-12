@@ -238,7 +238,7 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
             json_logs: false,
             console_filter: Some("info".into()),
             otlp_log_filter: Some("debug".into()),
-            trace_filter: Some("info".into()),
+            trace_filter: Some("info,opentelemetry_sdk=debug,h2=debug,hyper=debug,hyper_util=debug,tonic=debug,tower=debug".into()),
         },
         "unused",
         "info",
@@ -295,6 +295,20 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
     let hidden = tracing::debug_span!("debug_span_not_exported");
     drop(hidden);
     tracing::warn!(target: "opentelemetry_sdk", "synthetic exporter failure remains local");
+    macro_rules! transport_activity {
+        ($target:literal) => {{
+            let span = tracing::debug_span!(target: $target, "exporter_transport_span");
+            span.in_scope(|| tracing::debug!(target: $target, "synthetic exporter transport event"));
+        }};
+    }
+    transport_activity!("opentelemetry_sdk");
+    transport_activity!("h2::proto");
+    transport_activity!("hyper::client");
+    transport_activity!("hyper_util::client");
+    transport_activity!("tonic::transport");
+    transport_activity!("tower::buffer");
+    // A similarly named application target is not transport infrastructure.
+    tracing::info!(target: "tower_device", "application target remains exported");
     let invalid_parent = tracing::info_span!("invalid_remote_parent");
     telemetry::set_remote_parent(
         &invalid_parent,
@@ -335,6 +349,12 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
     assert!(
         !spans
             .iter()
+            .any(|span| span.name == "exporter_transport_span"),
+        "exporter transport spans must not feed back into OTLP"
+    );
+    assert!(
+        !spans
+            .iter()
             .any(|span| span.name == "debug_span_not_exported")
     );
     let records: Vec<_> = logs
@@ -343,6 +363,17 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
         .flat_map(|r| &r.scope_logs)
         .flat_map(|s| &s.log_records)
         .collect();
+    assert!(
+        !records
+            .iter()
+            .any(|r| format!("{:?}", r.body).contains("synthetic exporter transport event")),
+        "exporter transport events must not feed back into OTLP"
+    );
+    assert!(
+        records
+            .iter()
+            .any(|r| format!("{:?}", r.body).contains("application target remains exported"))
+    );
     assert!(
         records
             .iter()

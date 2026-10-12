@@ -88,8 +88,13 @@ Explicit filters must be valid and nonempty; changing them requires a restart.
 Without explicit filters, `RUST_LOG=warn` suppresses informational spans and logs.
 Use `wakey_agent=info,wakey=info,wakey_core=info,opentelemetry=warn` for the agent and
 `wakey_control_plane=info,wakey_core=info,opentelemetry=warn` for CC. Exporter warnings
-remain local to prevent export-failure feedback loops. Increasing verbosity exports the
-existing debug events too; inspect them before enabling it broadly.
+remain local to prevent export-failure feedback loops. Both OTLP logs and traces
+exclude OpenTelemetry SDK targets and the `h2`, `hyper`, `hyper_util`, `tonic`
+and `tower` crate targets, even under broad debug filters. These transport
+crates also serve application traffic: their diagnostics stay console-only,
+while Wakey's command/storage/relay spans still export. Console filters remain
+independent. Increasing verbosity exports application debug events too; inspect
+them before enabling it broadly.
 
 ## Signals
 

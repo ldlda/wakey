@@ -181,14 +181,14 @@ pub fn init(
         let _ = METRICS.set(Instruments::new());
         let otel = tracing_opentelemetry::layer()
             .with_tracer(traces.tracer(service.to_owned()))
-            .with_filter(trace_filter);
-        // Exporter failures must remain local, never feed back into the failing exporter.
+            .with_filter(trace_filter)
+            .with_filter(tracing_subscriber::filter::filter_fn(not_exporter_internal));
+        // Apply the same exclusion to both OTLP layers. Console filtering stays
+        // independent so exporter and transport diagnostics remain available.
         let logs_layer =
             opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(&logs)
                 .with_filter(log_filter)
-                .with_filter(tracing_subscriber::filter::filter_fn(|metadata| {
-                    !metadata.target().starts_with("opentelemetry")
-                }));
+                .with_filter(tracing_subscriber::filter::filter_fn(not_exporter_internal));
         let subscriber = tracing_subscriber::registry().with(otel).with(logs_layer);
         if config.json_logs {
             subscriber
@@ -233,6 +233,17 @@ pub fn init(
             .try_init()?;
     }
     Ok(guard)
+}
+
+/// Exporting the exporter's own diagnostics can create a perpetual feedback
+/// loop. Transport targets are shared with application traffic, so exclude
+/// them from OTLP altogether while retaining console diagnostics.
+fn not_exporter_internal(metadata: &tracing::Metadata<'_>) -> bool {
+    let target = metadata.target();
+    let root = target.split("::").next().unwrap_or(target);
+    !(root == "opentelemetry"
+        || root.starts_with("opentelemetry_")
+        || matches!(root, "h2" | "hyper" | "hyper_util" | "tonic" | "tower"))
 }
 
 fn signal_filter(
