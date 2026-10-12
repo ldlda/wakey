@@ -159,7 +159,12 @@ queries, rates, averages, percentiles, and Grafana units.
 | `wakey.fleet.devices` | CC gauge of unfiltered grouped identities, labeled by `identity` (`saved` or `unsaved`) |
 | `wakey.process.uptime` | Linux gauge: seconds since this process's kernel-reported start, including suspend |
 | `wakey.process.memory.resident` | Linux gauge: approximate resident memory in bytes, from VmRSS |
+| `wakey.process.cpu.time` | Linux counter: cumulative user + system CPU seconds for all process threads, excluding children |
+| `wakey.process.open_fds` | Linux gauge: current count of open process file descriptors |
 | `wakey.host.uptime` | Linux gauge: uptime in seconds reported by the process's procfs view, including suspend |
+| `wakey.host.memory.total` | Linux gauge: total usable RAM in bytes from the visible meminfo |
+| `wakey.host.memory.available` | Linux gauge: estimated available RAM in bytes; omitted if MemAvailable is unavailable |
+| `wakey.host.load` | Linux gauge: load average, with fixed `period` labels `1m`, `5m`, `15m` |
 | `wakey.terminal.active` | Agent PTY workers currently alive |
 | `wakey.terminal.input.bytes` | Input bytes received by the terminal relay |
 | `wakey.terminal.output.bytes` | Output bytes read from the PTY, including while detached |
@@ -167,7 +172,7 @@ queries, rates, averages, percentiles, and Grafana units.
 
 Metric labels do not include request/session IDs, MACs, or IPs. New spans use
 `skip_all` and explicitly select safe fields; terminal bytes and credentials are
-not attached. Profiles, host CPU/total-memory metrics, connected-agent gauges, and export-loss
+not attached. Profiles, host CPU-utilization metrics, connected-agent gauges, and export-loss
 dashboards are not part of this initial slice.
 
 Process and host gauges are registered automatically for Linux agent/CC daemons
@@ -182,6 +187,17 @@ omits the affected observation instead of reporting zero or failing the daemon.
 No hostname, PID, command line or environment values are exported by this slice.
 Service/instance resource attributes identify each daemon; two daemons on the
 same host can report the same host uptime, so do not sum it across processes.
+CPU time is not elapsed time or CPU percentage: use its rate for consumption.
+Open-FD sampling can temporarily open descriptors counted by the measurement.
+Process metrics describe the daemon itself, not its child shells/PTY programs
+or the entire host. CPU/FD collection is also supplied by `wakey-linux`;
+unsupported platform readers may omit these optional measurements.
+Host memory/load come from the same optional Linux reader. `MemAvailable`
+estimates memory reusable without swapping and is not `MemFree`; no fallback
+is invented on older kernels. Load averages include runnable and uninterruptible
+tasks, so they are not CPU percentages. These are the visible kernel/procfs
+figures, not cgroup memory limits or container-specific load measurements;
+multiple daemons may export duplicate views of the same host.
 
 RSS includes anonymous, file-backed and shared resident pages, not just heap,
 and is an approximate kernel measurement. Process age uses procfs start ticks

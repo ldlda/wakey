@@ -210,6 +210,25 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
         fn host_uptime_seconds(&self) -> Option<f64> {
             Some(10_000.0)
         }
+        fn cpu_time_seconds(&self) -> Option<f64> {
+            Some(1.25)
+        }
+        fn open_file_descriptors(&self) -> Option<u64> {
+            Some(12)
+        }
+        fn host_memory(&self) -> Option<telemetry::HostMemory> {
+            Some(telemetry::HostMemory {
+                total_bytes: 2 * 1024 * 1024 * 1024,
+                available_bytes: Some(512 * 1024 * 1024),
+            })
+        }
+        fn host_load(&self) -> Option<telemetry::HostLoad> {
+            Some(telemetry::HostLoad {
+                one_minute: 0.5,
+                five_minutes: 1.0,
+                fifteen_minutes: 1.5,
+            })
+        }
     }
     let guard = telemetry::init(
         &TelemetryConfig {
@@ -376,6 +395,21 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
                 "s",
                 number_data_point::Value::AsDouble(10_000.0),
             ),
+            (
+                "wakey.process.open_fds",
+                "",
+                number_data_point::Value::AsInt(12),
+            ),
+            (
+                "wakey.host.memory.total",
+                "By",
+                number_data_point::Value::AsInt(2 * 1024 * 1024 * 1024),
+            ),
+            (
+                "wakey.host.memory.available",
+                "By",
+                number_data_point::Value::AsInt(512 * 1024 * 1024),
+            ),
         ] {
             let metric = latest
                 .resource_metrics
@@ -395,6 +429,46 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
                 "process metrics need no PID/host/address labels"
             );
             assert_eq!(point.value, Some(expected));
+        }
+        let cpu = latest
+            .resource_metrics
+            .iter()
+            .flat_map(|resource| &resource.scope_metrics)
+            .flat_map(|scope| &scope.metrics)
+            .find(|metric| metric.name == "wakey.process.cpu.time")
+            .expect("CPU time exported");
+        assert_eq!(cpu.unit, "s");
+        let Some(metric::Data::Sum(sum)) = &cpu.data else {
+            panic!("CPU time must be a counter, not a gauge");
+        };
+        assert!(sum.is_monotonic);
+        assert_eq!(sum.data_points.len(), 1);
+        assert_eq!(
+            sum.data_points[0].value,
+            Some(number_data_point::Value::AsDouble(1.25))
+        );
+        assert!(sum.data_points[0].attributes.is_empty());
+        let load = latest
+            .resource_metrics
+            .iter()
+            .flat_map(|resource| &resource.scope_metrics)
+            .flat_map(|scope| &scope.metrics)
+            .find(|metric| metric.name == "wakey.host.load")
+            .expect("host load exported");
+        let Some(metric::Data::Gauge(gauge)) = &load.data else {
+            panic!("host load must be a gauge");
+        };
+        assert_eq!(gauge.data_points.len(), 3);
+        for (period, expected) in [("1m", 0.5), ("5m", 1.0), ("15m", 1.5)] {
+            let point = gauge.data_points.iter().find(|point| point.attributes.iter().any(|attribute| {
+                attribute.key == "period" && attribute.value.as_ref().and_then(|value| value.value.as_ref())
+                    == Some(&opentelemetry_proto::tonic::common::v1::any_value::Value::StringValue(period.into()))
+            })).expect("load period exported");
+            assert_eq!(point.attributes.len(), 1, "only fixed period labels");
+            assert_eq!(
+                point.value,
+                Some(number_data_point::Value::AsDouble(expected))
+            );
         }
     }
     for (name, label, expected) in [

@@ -309,7 +309,7 @@ static METRICS: OnceLock<Instruments> = OnceLock::new();
 mod fleet;
 mod process;
 pub use fleet::{AgentDeviceCounts, FleetCounts, FleetMetrics};
-pub use process::ProcessMetricsSource;
+pub use process::{HostLoad, HostMemory, ProcessMetricsSource};
 struct Instruments {
     operations: opentelemetry::metrics::Counter<u64>,
     duration: opentelemetry::metrics::Histogram<f64>,

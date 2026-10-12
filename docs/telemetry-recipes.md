@@ -61,6 +61,59 @@ allocation alone. A missing series can mean disabled telemetry, an unsupported
 platform, unavailable procfs, or export trouble. No new health endpoint or host
 inventory is provided here; do not sum host uptime from multiple daemons.
 
+CPU consumption as a percentage of **one CPU core**:
+
+```promql
+100 * rate(wakey_process_cpu_time_seconds_total[5m])
+```
+
+Set the unit to **percent (0-100)**. A multithreaded process can exceed 100%;
+this is not normalized by the host's CPU count. The counter includes daemon
+user/system CPU, not its child shells or commands. Allow at least two exports;
+`rate` handles counter resets on process restart.
+
+Current open descriptors:
+
+```promql
+wakey_process_open_fds
+```
+
+Read directly as a count, not a rate. The sampling read can contribute temporary
+descriptors. Persistent growth can warrant investigation, but sockets, terminal
+sessions and pool connections legitimately change the count too.
+
+Host usable/available RAM, in bytes:
+
+```promql
+wakey_host_memory_total_bytes
+```
+
+```promql
+wakey_host_memory_available_bytes
+```
+
+Set units to **bytes (IEC)**. Estimated percentage not available for new work:
+
+```promql
+100 * (1 - wakey_host_memory_available_bytes / wakey_host_memory_total_bytes)
+```
+
+Available includes reclaimable memory and is not merely free RAM. Missing
+`MemAvailable` leaves a gap rather than substituting `MemFree`. Do not sum host
+RAM from multiple daemon instances on the same host, or interpret these kernel
+values as a container's cgroup limit.
+
+Load averages by period:
+
+```promql
+wakey_host_load
+```
+
+Use `{{job}} / {{instance}} / {{period}}` as the legend. Fixed periods are `1m`,
+`5m`, and `15m`. Read directly as a load count, not a percentage or a rate:
+Linux includes runnable and uninterruptible tasks; a high load can include I/O
+waiting rather than CPU work. These values are not normalized by CPU count.
+
 ## Operations
 
 Completed attempts per second, including errors and timeouts:
