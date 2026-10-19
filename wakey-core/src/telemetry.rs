@@ -338,6 +338,12 @@ impl Instruments {
             duration: meter
                 .f64_histogram("wakey.operation.duration")
                 .with_unit("s")
+                // Measurements are seconds; SDK defaults start at 5, which
+                // collapses millisecond operations into one unusably wide bucket.
+                .with_boundaries(vec![
+                    0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
+                    10.0, 30.0, 60.0,
+                ])
                 .build(),
             snapshot_devices: meter.u64_counter("wakey.snapshot.devices").build(),
             terminal_active: meter.i64_up_down_counter("wakey.terminal.active").build(),

@@ -410,6 +410,37 @@ async fn exports_all_signals_and_preserves_remote_command_parent() {
     }
     let latest = metrics.last().unwrap();
     {
+        let duration = latest
+            .resource_metrics
+            .iter()
+            .flat_map(|r| &r.scope_metrics)
+            .flat_map(|s| &s.metrics)
+            .find(|m| m.name == "wakey.operation.duration")
+            .unwrap();
+        assert_eq!(duration.unit, "s");
+        let Some(metric::Data::Histogram(histogram)) = &duration.data else {
+            panic!("operation duration must export a histogram");
+        };
+        let point = histogram.data_points.first().unwrap();
+        assert_eq!(
+            point.explicit_bounds,
+            vec![
+                0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
+                10.0, 30.0, 60.0,
+            ]
+        );
+        // One inventory operation is recorded above. Derive its expected bucket
+        // from the exported sum, avoiding elapsed-time thresholds or sleeps.
+        assert_eq!(point.count, 1);
+        let sample = point.sum.unwrap();
+        let bucket = point
+            .explicit_bounds
+            .partition_point(|bound| *bound < sample);
+        let mut expected = vec![0; point.explicit_bounds.len() + 1];
+        expected[bucket] = 1;
+        assert_eq!(point.bucket_counts, expected);
+    }
+    {
         for (name, unit, expected) in [
             (
                 "wakey.process.uptime",

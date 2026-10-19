@@ -155,6 +155,15 @@ This needs classic histogram bucket series. Keep `le` in the grouping: it is
 the bucket boundary, in seconds. p95 is an estimate from those boundaries,
 not an exact sort of recorded durations. Few operations make percentiles noisy.
 
+Operation-duration buckets span 100 microseconds to 60 seconds, with an overflow
+bucket above that. Older binaries used SDK defaults whose first positive boundary
+was 5 seconds: fast operations could therefore report an estimated p95 of 4.75
+seconds. Updating both CC and agents fixes future measurements, not historical
+data. Wait until the query's window contains only new-version measurements after
+rollout; mixing old and new bucket layouts makes the estimate unreliable.
+With roughly one snapshot per minute, a five-minute percentile is based on only
+a handful of observations and can still look stepped. Use the mean above alongside it.
+
 CC relay duration includes waiting for the agent; agent execution duration
 measures its dispatch separately. Do not sum both and call that user latency.
 
