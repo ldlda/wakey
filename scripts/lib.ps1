@@ -191,7 +191,7 @@ function Get-SshpassCommand {
 }
 
 function Invoke-Ext {
-    param($Exe, $Arguments, $Label)
+    param($Exe, $Arguments, $Label, [string]$Stdin)
     $displayArgs = $Arguments.Clone()
     for ($i = 0; $i -lt $displayArgs.Count; $i++) {
         if ($displayArgs[$i] -eq '-pw' -and ($i + 1) -lt $displayArgs.Count) {
@@ -203,7 +203,12 @@ function Invoke-Ext {
     }
     Write-Host ("[{0}] {1} {2}" -f $Label, $Exe, ($displayArgs -join ' ')) -ForegroundColor Cyan
 
-    $out = & $Exe @Arguments 2>&1
+    # Keep stdin optional so interactive callers retain their existing behavior.
+    if ($PSBoundParameters.ContainsKey('Stdin')) {
+        $out = $Stdin | & $Exe @Arguments 2>&1
+    } else {
+        $out = & $Exe @Arguments 2>&1
+    }
     if ($LASTEXITCODE -ne 0) {
         if ($Exe -like '*sshpass*' -and $LASTEXITCODE -eq 6) {
             Write-Error ("{0} failed: sshpass could not confirm host key automatically (code 6). Use ssh once manually, or enable StrictHostKeyChecking=accept-new." -f $Label)
@@ -284,8 +289,14 @@ function Invoke-Scp {
 
 
 function Invoke-Ssh {
-    param($Cmd, $User, $Remote, $Pass, [int]$Port = 22, [switch]$Quiet, [switch]$ForcePassword)
+    # Supply Stdin for scripts, e.g. -Cmd 'sh -s' -Stdin $script. This avoids
+    # embedding a whole script in a remote shell command's quoting layer.
+    param($Cmd, $User, $Remote, $Pass, [int]$Port = 22, [switch]$Quiet, [switch]$ForcePassword, [string]$Stdin)
     $Cmd = Normalize-LineEndings $Cmd
+    $inputArgs = @{}
+    if ($PSBoundParameters.ContainsKey('Stdin')) {
+        $inputArgs.Stdin = Normalize-LineEndings $Stdin
+    }
     
     $isWin = [bool]$IsWindows
     $isWsl = Test-IsWsl
@@ -297,7 +308,7 @@ function Invoke-Ssh {
         if ($Pass) { $arguments += @('-pw', $Pass) }
         $dest = if ($User) { "$User@$Remote" } else { $Remote }
         $arguments += $dest, $Cmd
-        Invoke-Ext -Exe $plink.Path -Arguments $arguments -Label 'ssh'
+        Invoke-Ext -Exe $plink.Path -Arguments $arguments -Label 'ssh' @inputArgs
     }
     else {
         $arguments = @()
@@ -319,7 +330,7 @@ function Invoke-Ssh {
             $sshpassExe = Get-SshpassCommand
             if ($sshpassExe) {
                 $wrapped = @('-p', $Pass, 'ssh') + $arguments
-                Invoke-Ext -Exe $sshpassExe -Arguments $wrapped -Label 'ssh'
+                Invoke-Ext -Exe $sshpassExe -Arguments $wrapped -Label 'ssh' @inputArgs
                 return
             }
             if (-not $script:WarnedNoSshpass) {
@@ -338,7 +349,7 @@ function Invoke-Ssh {
             throw 'ForcePassword requires sshpass'
         }
 
-        Invoke-Ext -Exe 'ssh' -Arguments $arguments -Label 'ssh'
+        Invoke-Ext -Exe 'ssh' -Arguments $arguments -Label 'ssh' @inputArgs
     }
 }
 

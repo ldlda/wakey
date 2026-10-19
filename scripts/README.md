@@ -43,6 +43,10 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
 - `dev_push.ps1` — Fast dev loop: build + upload to router. Usage:
   - `./scripts/dev_push.ps1 -Pass <password> [-HostName <ip>] [-RemotePath </root/.bin/wakey>] [-Restart] [-Quiet]`
   - Uploads to `<RemotePath>.tmp` then atomically moves into place; `-Restart` restarts the service; `-Quiet` silences MOTD.
+  - Defaults to both binaries plus init/hooks, with restart enabled. Use `-Restart:$false` to leave the service running, or `-Quiet:$false` for deployment output. Config files are untouched.
+  - Binary-only agent update: `./scripts/dev_push.ps1 -HostName router -BinariesOnly -Package wakey-agent -Quiet:$false`
+  - Use `-BinariesOnly` without `-Package` for both binaries, or `-Package wakey` for only the CLI. Cargo still builds the selected package's dependencies.
+  - The checked-in `remote_deploy_wakey.sh` is streamed over SSH to `sh -s -- --batch ...` in all modes, with the deployment plan passed as quoted arguments. No remote helper is uploaded or required. Its original single-binary invocation remains supported. The shared `Invoke-Ssh -Cmd 'sh -s' -Stdin $script` supports stdin scripts for other callers.
 - `package_rootfs.ps1` — Produces `dist/wakey-rootfs-<version>-<target>.tgz` with `/root/.bin/wakey` and `/etc/init.d/*`.
 - `update_wakey_cc.sh` — Linux VPS updater for control-plane bundles; extracts into the selected directory (default: current directory) and restarts `wakey-cc.service`.
 - `update_wakey_cc_from_repo.sh` — Linux VPS source updater; clones repo to temp dir, builds UI + control-plane locally, packages bundle tgz, installs into selected directory, and restarts `wakey-cc.service`.
