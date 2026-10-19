@@ -75,7 +75,7 @@ pub async fn get_with_handle(
                     NeighbourAddress::Inet6(v6) => ip = Some(IpAddr::from(v6)),
                     _ => continue 'row,
                 },
-                NeighbourAttribute::LinkLocalAddress(bytes) => {
+                NeighbourAttribute::LinkLayerAddress(bytes) => {
                     mac = match bytes.len() {
                         6 => bytes.first_chunk::<6>().map(|&b| MacAddr::from(b)),
                         8 => bytes.first_chunk::<8>().map(|&b| MacAddr::from(b)),
