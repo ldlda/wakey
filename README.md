@@ -269,6 +269,26 @@ pnpm build
 
 Then start control-plane and open `/ui/` on the same host/port.
 
+For UI development with hot reload, run `pnpm --dir ui dev` and open
+`http://127.0.0.1:5173/ui/` (Vite chooses another port if occupied). API requests
+and terminal/event WebSockets proxy to `http://127.0.0.1:8080` by default.
+Override the backend with `WAKEY_DEV_API_TARGET=http://127.0.0.1:18080 pnpm --dir ui dev`,
+or set it in `ui/.env` using `ui/.env.example`. Restart Vite after changing it.
+This setting is dev-only; built assets still use the serving CC's origin.
+
+For the remote CC, first open an SSH tunnel:
+
+```sh
+ssh -N -L 127.0.0.1:18080:127.0.0.1:23501 cloud
+```
+
+Use `http://127.0.0.1:18080` as the dev target. This connects directly to CC
+through SSH, avoiding Cloudflare Access browser redirects/cookie handling in the
+proxy. The dev server binds to loopback; do not expose this authenticated tunnel
+through a public Vite server. Changes made in the dev UI affect the selected
+backend, including production if that is what you tunnel to. HTTPS targets retain
+certificate verification; the proxy does not add Cloudflare credentials.
+
 ## VPS Deploy (Manual Updates)
 
 Suggested layout on VPS:
