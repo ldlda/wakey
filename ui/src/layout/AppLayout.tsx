@@ -79,15 +79,17 @@ function usePageTitle() {
 export function AppLayout() {
   const { resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
-  const [collapsed, setCollapsed] = useState(() => {
+  const [desktopCollapsed, setDesktopCollapsed] = useState(() => {
     return window.localStorage.getItem(SIDEBAR_KEY) === "true";
   });
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const collapsed = desktopCollapsed && !mobileOpen;
 
   usePageTitle();
 
   useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_KEY, String(collapsed));
-  }, [collapsed]);
+    window.localStorage.setItem(SIDEBAR_KEY, String(desktopCollapsed));
+  }, [desktopCollapsed]);
 
   return (
     <div className="app-shell">
@@ -97,7 +99,9 @@ export function AppLayout() {
           collapsed ? "sidebar--collapsed" : "",
           "fixed inset-y-0 left-0 z-50 shadow-xl transition-all duration-100 ease-in-out",
           "md:sticky md:top-0 md:z-30 md:shadow-none",
-          collapsed ? "-translate-x-full md:translate-x-0" : "translate-x-0",
+          mobileOpen
+            ? "translate-x-0"
+            : "invisible -translate-x-full md:visible md:translate-x-0",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -132,6 +136,7 @@ export function AppLayout() {
                     key={item.to}
                     to={item.to}
                     end={item.end}
+                    onClick={() => setMobileOpen(false)}
                     className={({ isActive }) =>
                       [
                         "sidebar-link",
@@ -198,8 +203,17 @@ export function AppLayout() {
                 variant="ghost"
                 size="sm"
                 className="sidebar-footer-btn"
-                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                onClick={() => setCollapsed((c) => !c)}
+                aria-label={
+                  mobileOpen
+                    ? "Close navigation"
+                    : collapsed
+                      ? "Expand sidebar"
+                      : "Collapse sidebar"
+                }
+                onClick={() => {
+                  if (mobileOpen) setMobileOpen(false);
+                  else setDesktopCollapsed((collapsed) => !collapsed);
+                }}
               >
                 {collapsed ? (
                   <PanelLeft className="size-4" aria-hidden />
@@ -207,40 +221,38 @@ export function AppLayout() {
                   <PanelLeftClose className="size-4" aria-hidden />
                 )}
                 {!collapsed && (
-                  <span className="sidebar-link-label">Collapse</span>
+                  <span className="sidebar-link-label">
+                    {mobileOpen ? "Close" : "Collapse"}
+                  </span>
                 )}
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">
-              {collapsed ? "Expand" : "Collapse"}
+              {mobileOpen ? "Close" : collapsed ? "Expand" : "Collapse"}
             </TooltipContent>
           </Tooltip>
         </div>
       </aside>
 
       {/* Mobile backdrop */}
-      {!collapsed && (
-        <div
-          role="button"
-          tabIndex={0}
+      {mobileOpen && (
+        <button
+          type="button"
           className="fixed inset-0 z-40 bg-black/20 md:hidden animate-in fade-in duration-200"
-          onClick={() => setCollapsed(true)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") setCollapsed(true);
-          }}
+          onClick={() => setMobileOpen(false)}
           aria-label="Close menu"
         />
       )}
 
       {/* Mobile floating button when sidebar is collapsed/hidden */}
-      {collapsed && (
+      {!mobileOpen && (
         <Button
           type="button"
           variant="ghost"
           size="sm"
           className="fixed bottom-3 left-3 z-40 md:hidden"
           aria-label="Open menu"
-          onClick={() => setCollapsed(false)}
+          onClick={() => setMobileOpen(true)}
         >
           <PanelLeft className="size-4" aria-hidden />
         </Button>
