@@ -70,6 +70,7 @@ or current fleet size. Metric labels should remain bounded; no per-device labels
 
 - [x] Add agent-side ICMP ping through the existing command relay. Linux agents use `surge-ping` for a single IPv4 or IPv6 echo with a two-second reply timeout. Link-local IPv6 uses the observed interface. The agent needs access to ICMP datagram sockets or raw sockets.
 - [x] Offer Ping alongside Wake in device details. Show reply status and round-trip time for the selected IP and agent. Probe results leave device presence and identity unchanged.
+  Upgrade the control plane before agents that advertise the new `ping` capability.
 
 ## Optional Agent Sources And Capabilities
 

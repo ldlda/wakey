@@ -45,6 +45,7 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
         ),
         sessions: Arc::new(RwLock::new(HashMap::new())),
         pending: Arc::new(Mutex::new(HashMap::new())),
+        ping_slots: Arc::new(tokio::sync::Semaphore::new(8)),
         public_url: "http://localhost".into(),
         command_timeout: Duration::from_secs(30),
         enroll_token_ttl: Duration::from_secs(60),

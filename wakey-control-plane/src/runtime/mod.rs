@@ -8,7 +8,7 @@ use axum::response::Redirect;
 use axum::routing::get_service;
 use axum::routing::{get, post};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, RwLock, mpsc, oneshot};
+use tokio::sync::{Mutex, RwLock, Semaphore, mpsc, oneshot};
 #[cfg(unix)]
 use tokio::time::MissedTickBehavior;
 use tower_http::services::ServeDir;
@@ -42,6 +42,7 @@ pub struct AppState {
     pub store: Arc<state::Store>,
     pub sessions: Arc<RwLock<HashMap<String, AgentSession>>>,
     pub pending: Arc<Mutex<HashMap<String, oneshot::Sender<AgentReply>>>>,
+    pub(crate) ping_slots: Arc<Semaphore>,
     pub public_url: String,
     pub command_timeout: Duration,
     pub enroll_token_ttl: Duration,
@@ -196,6 +197,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         store: Arc::new(store),
         sessions: Arc::new(RwLock::new(HashMap::new())),
         pending: Arc::new(Mutex::new(HashMap::new())),
+        ping_slots: Arc::new(Semaphore::new(8)),
         public_url: daemon.public_url.clone(),
         command_timeout: daemon.command_timeout,
         enroll_token_ttl: daemon.enroll_token_ttl,

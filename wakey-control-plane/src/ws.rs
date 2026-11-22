@@ -232,11 +232,11 @@ async fn process_agent_text(
             } else {
                 None
             };
-            connection.capability_options = AgentCapabilityOptions {
-                terminal,
-                ping: capability_options.ping,
-            };
-            connection.capabilities = capabilities;
+            connection.capability_options = AgentCapabilityOptions { terminal };
+            connection.capabilities = capabilities
+                .into_iter()
+                .filter(|capability| *capability != AgentCapability::Unknown)
+                .collect();
         }
         IncomingClientMessage::Auth {
             agent_id,

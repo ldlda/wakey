@@ -64,6 +64,10 @@ impl<'de> Deserialize<'de> for TerminalId {
 #[serde(rename_all = "snake_case")]
 pub enum AgentCapability {
     Terminal,
+    Ping,
+    // Hello stays readable when a newer agent advertises a feature CC lacks.
+    #[serde(other)]
+    Unknown,
 }
 
 pub const DEFAULT_TERMINAL_MAX_SESSIONS: usize = 2;
@@ -90,21 +94,17 @@ const fn default_terminal_session_ttl_seconds() -> u64 {
 
 /// Optional parameters attached to advertised agent capabilities.
 ///
-/// Keep this separate from `AgentCapability`: the capability list remains a
-/// compact, backward-compatible feature check, while this object can grow as
-/// individual capabilities gain configurable limits or modes.
+/// Capabilities describe feature support. Options carry feature parameters,
+/// such as the terminal session limit.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCapabilityOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<TerminalCapabilityOptions>,
-    /// Older peers can ignore this field and continue using the same hello.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ping: Option<bool>,
 }
 
 impl AgentCapabilityOptions {
     fn is_empty(&self) -> bool {
-        self.terminal.is_none() && self.ping.is_none()
+        self.terminal.is_none()
     }
 }
 
@@ -274,6 +274,19 @@ pub enum AgentCommand {
     Inventory(InventoryRequest),
     Wake(WakeRequest),
     Ping(PingRequest),
+}
+
+impl AgentCommand {
+    /// Stable command label used by audit events and telemetry on both peers.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Leases(_) => "leases",
+            Self::Devs(_) => "devs",
+            Self::Inventory(_) => "inventory",
+            Self::Wake(_) => "wake",
+            Self::Ping(_) => "ping",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -509,12 +522,25 @@ mod tests {
     }
 
     #[test]
+    fn unknown_capability_does_not_hide_known_features() {
+        let capabilities: Vec<AgentCapability> =
+            serde_json::from_str(r#"["terminal","ping","future_feature"]"#).unwrap();
+        assert_eq!(
+            capabilities,
+            [
+                AgentCapability::Terminal,
+                AgentCapability::Ping,
+                AgentCapability::Unknown
+            ]
+        );
+    }
+
+    #[test]
     fn hello_serializes_typed_capability_options() {
         let message = ClientMessage::Hello {
             agent_id: "router".into(),
             capabilities: vec![AgentCapability::Terminal],
             capability_options: AgentCapabilityOptions {
-                ping: None,
                 terminal: Some(TerminalCapabilityOptions {
                     max_sessions: 3,
                     session_ttl_seconds: 600,

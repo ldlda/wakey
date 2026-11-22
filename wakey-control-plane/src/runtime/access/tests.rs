@@ -561,6 +561,7 @@ async fn verifier_routes_do_not_gate_agent_or_control_handlers() {
         store: Arc::new(store),
         sessions: Arc::new(RwLock::new(HashMap::new())),
         pending: Arc::new(Mutex::new(HashMap::new())),
+        ping_slots: Arc::new(tokio::sync::Semaphore::new(8)),
         public_url: "http://localhost".into(),
         command_timeout: Duration::from_secs(30),
         enroll_token_ttl: Duration::from_secs(60),

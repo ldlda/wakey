@@ -9,8 +9,8 @@ use tracing::{Instrument, debug, error, info, info_span, warn};
 use crate::config::AgentConfig;
 use crate::dispatch::{dispatch_command, inventory_for_config};
 use crate::protocol::{
-    AgentCapability, AgentCapabilityOptions, AgentCommand, ClientMessage, ErrorPayload,
-    ServerMessage, TerminalCapabilityOptions,
+    AgentCapability, AgentCapabilityOptions, ClientMessage, ErrorPayload, ServerMessage,
+    TerminalCapabilityOptions,
 };
 use crate::terminal::TerminalManager;
 
@@ -89,7 +89,6 @@ async fn run_once(
                 agent_id: config.agent_id.clone(),
                 capabilities: agent_capabilities(config),
                 capability_options: AgentCapabilityOptions {
-                    ping: cfg!(target_os = "linux").then_some(true),
                     terminal: config
                         .terminal
                         .enabled
@@ -260,7 +259,7 @@ where
             command,
             trace_context,
         } => {
-            let kind = command_kind(&command);
+            let kind = command.kind();
             let span = info_span!("execute_command", command = kind, request_id = %request_id);
             wakey_core::telemetry::set_remote_parent(&span, &trace_context);
             let mut operation = wakey_core::telemetry::Operation::new(kind);
@@ -396,16 +395,6 @@ where
     Ok(())
 }
 
-fn command_kind(command: &AgentCommand) -> &'static str {
-    match command {
-        AgentCommand::Leases(_) => "leases",
-        AgentCommand::Devs(_) => "devs",
-        AgentCommand::Inventory(_) => "inventory",
-        AgentCommand::Wake(_) => "wake",
-        AgentCommand::Ping(_) => "ping",
-    }
-}
-
 fn client_message_kind(message: &ClientMessage) -> &'static str {
     match message {
         ClientMessage::Hello { .. } => "hello",
@@ -420,12 +409,17 @@ fn client_message_kind(message: &ClientMessage) -> &'static str {
 }
 
 fn agent_capabilities(config: &AgentConfig) -> Vec<AgentCapability> {
+    let mut capabilities = Vec::new();
+    if cfg!(target_os = "linux") {
+        capabilities.push(AgentCapability::Ping);
+    }
     #[cfg(unix)]
     if config.terminal.enabled {
-        return vec![AgentCapability::Terminal];
+        capabilities.push(AgentCapability::Terminal);
     }
-
-    Vec::new()
+    #[cfg(not(unix))]
+    let _ = config;
+    capabilities
 }
 
 pub fn websocket_url(server_url: &str) -> Result<url::Url> {

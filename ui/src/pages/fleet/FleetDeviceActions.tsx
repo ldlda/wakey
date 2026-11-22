@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Activity, Zap } from "lucide-react";
+import { Activity, LoaderCircle, Zap } from "lucide-react";
 import { pingDevice, type Agent, type FleetDevice } from "@/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,11 +44,12 @@ export function FleetDeviceActions({
     route.ip &&
     agents.some(
       (agent) =>
-        agent.agent_id === route.agent_id && agent.capability_options?.ping,
+        agent.agent_id === route.agent_id &&
+        agent.capabilities.includes("ping"),
     );
 
   async function ping() {
-    if (!route?.ip || pending) return;
+    if (!canPing || !route?.ip || pending) return;
     setPending(true);
     setResult(undefined);
     try {
@@ -69,6 +70,10 @@ export function FleetDeviceActions({
     }
   }
 
+  const currentResult =
+    result?.routeId === route?.route_id ? result : undefined;
+  const PingIcon = pending ? LoaderCircle : Activity;
+
   return (
     <section className="grid gap-2" aria-label="Device actions">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -80,8 +85,11 @@ export function FleetDeviceActions({
             onClick={() => void ping()}
             disabled={busy || pending || !canPing}
           >
-            <Activity aria-hidden />
-            {pending ? "Pinging" : "Ping"}
+            <PingIcon
+              className={pending ? "motion-safe:animate-spin" : undefined}
+              aria-hidden
+            />
+            Ping
           </Button>
           <Button
             size="sm"
@@ -118,14 +126,12 @@ export function FleetDeviceActions({
           ))}
         </SelectContent>
       </Select>
-      {result && result.routeId === route?.route_id && (
-        <p
-          role="status"
-          className={`break-words text-sm ${result.failed ? "text-destructive" : "text-muted-foreground"}`}
-        >
-          {result.text}
-        </p>
-      )}
+      <p
+        role="status"
+        className={`h-10 overflow-y-auto wrap-break-word text-sm ${currentResult?.failed ? "text-destructive" : "text-muted-foreground"}`}
+      >
+        {pending ? "Waiting for reply…" : currentResult?.text}
+      </p>
     </section>
   );
 }

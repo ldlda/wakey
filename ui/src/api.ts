@@ -2,10 +2,9 @@ export type Agent = {
   agent_id: string;
   connected: boolean;
   nickname?: string | null;
-  capabilities: "terminal"[];
+  capabilities: ("terminal" | "ping")[];
   capability_options?: {
     terminal?: { max_sessions: number };
-    ping?: boolean;
   };
 };
 

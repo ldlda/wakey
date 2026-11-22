@@ -11,7 +11,7 @@ pub async fn dispatch_command(
     command: AgentCommand,
     config: &AgentConfig,
 ) -> Result<CommandResult> {
-    let kind = command_kind(&command);
+    let kind = command.kind();
     info!(command = %kind, "dispatching command into local wakey services");
     match command {
         AgentCommand::Leases(req) => dispatch_leases(req, config).await,
@@ -152,16 +152,6 @@ async fn dispatch_wake(req: WakeRequest) -> Result<CommandResult> {
     };
     debug!("dispatched wake command");
     Ok(CommandResult::Wake(result))
-}
-
-fn command_kind(command: &AgentCommand) -> &'static str {
-    match command {
-        AgentCommand::Leases(_) => "leases",
-        AgentCommand::Devs(_) => "devs",
-        AgentCommand::Inventory(_) => "inventory",
-        AgentCommand::Wake(_) => "wake",
-        AgentCommand::Ping(_) => "ping",
-    }
 }
 
 pub fn validate_wake_request(req: &WakeRequest) -> Result<()> {
