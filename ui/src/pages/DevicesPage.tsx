@@ -14,7 +14,7 @@ import {
   type KnownDevice,
 } from "@/api";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
@@ -510,7 +510,7 @@ function FleetDeviceRow({
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button variant="outline" size="icon-sm" />}
+            className={buttonVariants({ variant: "outline", size: "icon-sm" })}
             aria-label="Device actions"
             title="Device actions"
           >
@@ -520,13 +520,13 @@ function FleetDeviceRow({
             <DropdownMenuItem onClick={onDetails}>Details</DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => onCopy("IP", device.ips[0] ?? "")}
-              data-disabled={!device.ips.length}
+              disabled={!device.ips.length}
             >
               Copy first IP
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => onCopy("MAC", device.macs[0] ?? "")}
-              data-disabled={!device.macs.length}
+              disabled={!device.macs.length}
             >
               Copy first MAC
             </DropdownMenuItem>
