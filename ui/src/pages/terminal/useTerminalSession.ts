@@ -59,6 +59,7 @@ export function useTerminalSession({
   const socketRef = useRef<WebSocket | null>(null);
   const activeSessionRef = useRef<TerminalSession | null>(null);
   const mountedRef = useRef(false);
+  const reconnectingRef = useRef(false);
   const selectedAgentIdRef = useRef(selectedAgentId);
   const catalogRef = useRef(catalog);
   const [session, setSession] = useState<TerminalSession | null>(null);
@@ -255,7 +256,8 @@ export function useTerminalSession({
 
   const reconnect = useCallback(async () => {
     const currentSession = activeSessionRef.current;
-    if (!currentSession) return;
+    if (!currentSession || reconnectingRef.current) return;
+    reconnectingRef.current = true;
     detachTransport();
     try {
       terminal.reset();
@@ -264,16 +266,41 @@ export function useTerminalSession({
         currentSession.terminal_id,
         operatorId,
       );
-      if (!mountedRef.current) return;
+      if (
+        !mountedRef.current ||
+        activeSessionRef.current?.terminal_id !== currentSession.terminal_id
+      )
+        return;
       connect(attached);
     } catch (error) {
-      if (!mountedRef.current) return;
+      if (
+        !mountedRef.current ||
+        activeSessionRef.current?.terminal_id !== currentSession.terminal_id
+      )
+        return;
       setConnection("disconnected");
-      toast.error("Terminal session is no longer available", {
+      toast.error("Could not reconnect terminal", {
         description: String(error),
       });
+    } finally {
+      reconnectingRef.current = false;
     }
   }, [connect, detachTransport, operatorId, terminal]);
+
+  useEffect(() => {
+    if (connection !== "disconnected") return;
+    const resume = () => {
+      if (document.visibilityState === "visible" && document.hasFocus()) {
+        void reconnect();
+      }
+    };
+    window.addEventListener("focus", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      window.removeEventListener("focus", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [connection, reconnect]);
 
   const close = useCallback(
     async (closingSession: TerminalSession) => {
