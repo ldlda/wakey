@@ -20,38 +20,6 @@ use crate::runtime::terminals::{
 use crate::runtime::{AppState, SessionEvent};
 use crate::state::AuditEventInput;
 
-const RELAY_HEARTBEAT: Duration = Duration::from_secs(25);
-const RELAY_PING: &[u8] = b"wakey-relay";
-
-fn relay_heartbeat() -> tokio::time::Interval {
-    let mut ticks = tokio::time::interval_at(
-        tokio::time::Instant::now() + RELAY_HEARTBEAT,
-        RELAY_HEARTBEAT,
-    );
-    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    ticks
-}
-
-async fn probe_relay(
-    write: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    awaiting_pong: &mut bool,
-) -> bool {
-    // Protocol-level pings keep idle tunnels active. One missed pong is enough
-    // to detach the dead transport and let the existing session resume path run.
-    if *awaiting_pong {
-        return false;
-    }
-    *awaiting_pong = true;
-    matches!(
-        tokio::time::timeout(
-            RELAY_HEARTBEAT,
-            write.send(Message::Ping(RELAY_PING.into())),
-        )
-        .await,
-        Ok(Ok(()))
-    )
-}
-
 #[derive(Debug, Deserialize)]
 pub struct CreateTerminalRequest {
     pub agent_id: String,
@@ -377,34 +345,15 @@ async fn handle_agent_terminal_socket(state: AppState, terminal_id: String, mut 
             return;
         }
     }
-    let mut heartbeat = relay_heartbeat();
-    let mut awaiting_pong = false;
     loop {
         tokio::select! {
             biased;
-            _ = heartbeat.tick() => {
-                if !probe_relay(&mut write, &mut awaiting_pong).await {
-                    warn!(terminal_id, "agent terminal heartbeat failed");
-                    break;
-                }
-            }
             outbound_frame = outbound.recv() => {
                 let Some(frame) = outbound_frame else { break; };
                 if send_relay_frame(&mut write, frame).await.is_err() { break; }
             }
             incoming = read.next() => {
-                let message = match incoming {
-                    Some(Ok(Message::Pong(payload))) if payload.as_ref() == RELAY_PING => {
-                        awaiting_pong = false;
-                        continue;
-                    }
-                    Some(Ok(message)) => message,
-                    Some(Err(error)) => {
-                        warn!(terminal_id, %error, "agent terminal transport lost");
-                        break;
-                    }
-                    None => break,
-                };
+                let Some(Ok(message)) = incoming else { break; };
                 match agent_relay_frame(message) {
                     Ok(Some(frame)) => {
                         let closes = matches!(frame, TerminalRelayFrame::Close);
@@ -507,30 +456,11 @@ async fn handle_operator_terminal_socket(
         }
     }
     let mut explicit_close = false;
-    let mut heartbeat = relay_heartbeat();
-    let mut awaiting_pong = false;
     loop {
         tokio::select! {
             biased;
-            _ = heartbeat.tick() => {
-                if !probe_relay(&mut write, &mut awaiting_pong).await {
-                    warn!(terminal_id, "operator terminal heartbeat failed");
-                    break;
-                }
-            }
             incoming = read.next() => {
-                let message = match incoming {
-                    Some(Ok(Message::Pong(payload))) if payload.as_ref() == RELAY_PING => {
-                        awaiting_pong = false;
-                        continue;
-                    }
-                    Some(Ok(message)) => message,
-                    Some(Err(error)) => {
-                        warn!(terminal_id, %error, "operator terminal transport lost");
-                        break;
-                    }
-                    None => break,
-                };
+                let Some(Ok(message)) = incoming else { break; };
                 match operator_relay_frame(message) {
                     Ok(Some(frame)) => {
                         explicit_close = matches!(frame, TerminalRelayFrame::Close);
