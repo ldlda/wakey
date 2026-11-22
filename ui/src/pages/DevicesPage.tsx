@@ -113,9 +113,11 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
   async function refreshView(
     originKey: string | null = detailsKeyRef.current,
     knownDeviceId?: string,
+    scope: "fleet-and-details" | "details-only" = "fleet-and-details",
   ) {
+    const list = scope === "fleet-and-details" ? loadFleet() : undefined;
     if (!originKey || originKey !== detailsKeyRef.current) {
-      await loadFleet();
+      await list;
       return;
     }
     // Mutations supply an explicit identity; never infer it from a shared IP.
@@ -124,7 +126,7 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
     detailsKeyRef.current = key;
     const seq = ++detailsSeqRef.current;
     try {
-      const [device] = await Promise.all([fetchFleetDevice(key), loadFleet()]);
+      const [device] = await Promise.all([fetchFleetDevice(key), list]);
       if (seq !== detailsSeqRef.current || detailsKeyRef.current !== key)
         return;
       const saved = device.known_device
@@ -395,7 +397,14 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
                   device={device}
                   busy={wakeBusyKey === device.device_key}
                   onWake={() => void wakeDevice(device)}
-                  onDetails={() => selectDetails(device)}
+                  onDetails={() => {
+                    selectDetails(device);
+                    void refreshView(
+                      device.device_key,
+                      undefined,
+                      "details-only",
+                    );
+                  }}
                   onCopy={(label, value) => void copyValue(label, value)}
                 />
               ))}

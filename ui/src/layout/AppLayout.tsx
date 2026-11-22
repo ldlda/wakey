@@ -91,6 +91,16 @@ export function AppLayout() {
     window.localStorage.setItem(SIDEBAR_KEY, String(desktopCollapsed));
   }, [desktopCollapsed]);
 
+  useEffect(() => {
+    // Keep in sync with the Tailwind md breakpoint on the sidebar.
+    const desktop = window.matchMedia("(min-width: 48rem)");
+    const closeMobileMenu = () => {
+      if (desktop.matches) setMobileOpen(false);
+    };
+    desktop.addEventListener("change", closeMobileMenu);
+    return () => desktop.removeEventListener("change", closeMobileMenu);
+  }, []);
+
   return (
     <div className="app-shell">
       <aside
