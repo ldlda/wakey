@@ -383,7 +383,8 @@
   background: var(--presence-online);
 }
 
-.terminal-status[data-state="connecting"] > span {
+.terminal-status[data-state="connecting"] > span,
+.terminal-status[data-state="reconnecting"] > span {
   background: var(--presence-likely);
 }
 
@@ -545,6 +546,7 @@
 }
 
 .terminal-tab-dot[data-state="connecting"],
+.terminal-tab-dot[data-state="reconnecting"],
 .terminal-tab-dot[data-state="detached"] {
   background: var(--presence-likely);
 }

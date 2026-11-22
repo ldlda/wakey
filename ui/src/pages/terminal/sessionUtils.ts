@@ -5,6 +5,7 @@ import type { TerminalSession } from "@/api";
 export type TerminalConnectionState =
   | "idle"
   | "connecting"
+  | "reconnecting"
   | "ready"
   | "disconnected"
   | "exited";

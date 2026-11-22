@@ -21,6 +21,7 @@ import type { TerminalPort } from "@/pages/terminal/useXterm";
 
 const REMEMBERED_TERMINAL_KEY = "wakey.active-terminal-id";
 const TERMINAL_OPERATOR_KEY = "wakey.terminal-operator-id";
+const RECONNECT_TIMEOUT_MS = 10_000;
 
 // Fallback for browsers that do not implement crypto.randomUUID().
 const randomId = () =>
@@ -59,7 +60,7 @@ export function useTerminalSession({
   const socketRef = useRef<WebSocket | null>(null);
   const activeSessionRef = useRef<TerminalSession | null>(null);
   const mountedRef = useRef(false);
-  const reconnectingRef = useRef(false);
+  const reconnectRef = useRef<AbortController | null>(null);
   const selectedAgentIdRef = useRef(selectedAgentId);
   const catalogRef = useRef(catalog);
   const [session, setSession] = useState<TerminalSession | null>(null);
@@ -77,6 +78,12 @@ export function useTerminalSession({
     const socket = socketRef.current;
     socketRef.current = null;
     socket?.close();
+  }, []);
+
+  const cancelReconnect = useCallback(() => {
+    const attempt = reconnectRef.current;
+    reconnectRef.current = null;
+    attempt?.abort();
   }, []);
 
   const writeTerminalData = useCallback(
@@ -193,6 +200,7 @@ export function useTerminalSession({
       if (nextSession.operator_attached) return;
 
       const previousSession = activeSessionRef.current;
+      cancelReconnect();
       detachTransport();
       if (previousSession)
         catalogRef.current.markDetached(previousSession.terminal_id);
@@ -222,13 +230,14 @@ export function useTerminalSession({
         void catalogRef.current.refresh().catch(() => undefined);
       }
     },
-    [connect, detachTransport, operatorId, terminal],
+    [cancelReconnect, connect, detachTransport, operatorId, terminal],
   );
 
   const start = useCallback(async () => {
     const dimensions = terminal.dimensions();
     if (!selectedAgentIdRef.current || !dimensions) return;
     const previousSession = activeSessionRef.current;
+    cancelReconnect();
     detachTransport();
     if (previousSession)
       catalogRef.current.markDetached(previousSession.terminal_id);
@@ -252,38 +261,40 @@ export function useTerminalSession({
       setConnection("idle");
       toast.error("Could not start terminal", { description: String(error) });
     }
-  }, [connect, detachTransport, terminal]);
+  }, [cancelReconnect, connect, detachTransport, terminal]);
 
   const reconnect = useCallback(async () => {
     const currentSession = activeSessionRef.current;
-    if (!currentSession || reconnectingRef.current) return;
-    reconnectingRef.current = true;
+    if (!currentSession || reconnectRef.current) return;
+    // Check the attempt's identity even if the user switches away and back
+    // to the same terminal before the old request settles.
+    const attempt = new AbortController();
+    reconnectRef.current = attempt;
+    const deadline = window.setTimeout(() => {
+      attempt.abort(
+        new DOMException("Terminal reconnect timed out", "TimeoutError"),
+      );
+    }, RECONNECT_TIMEOUT_MS);
     detachTransport();
     try {
       terminal.reset();
-      setConnection("connecting");
+      setConnection("reconnecting");
       const attached = await attachTerminal(
         currentSession.terminal_id,
         operatorId,
+        attempt.signal,
       );
-      if (
-        !mountedRef.current ||
-        activeSessionRef.current?.terminal_id !== currentSession.terminal_id
-      )
-        return;
+      if (reconnectRef.current !== attempt) return;
       connect(attached);
     } catch (error) {
-      if (
-        !mountedRef.current ||
-        activeSessionRef.current?.terminal_id !== currentSession.terminal_id
-      )
-        return;
+      if (reconnectRef.current !== attempt) return;
       setConnection("disconnected");
       toast.error("Could not reconnect terminal", {
         description: String(error),
       });
     } finally {
-      reconnectingRef.current = false;
+      window.clearTimeout(deadline);
+      if (reconnectRef.current === attempt) reconnectRef.current = null;
     }
   }, [connect, detachTransport, operatorId, terminal]);
 
@@ -313,6 +324,7 @@ export function useTerminalSession({
       const fallback = remaining.find((item) => !item.operator_attached);
 
       if (closesActiveSession) {
+        cancelReconnect();
         if (socketRef.current?.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({ type: "close" }));
         }
@@ -345,7 +357,7 @@ export function useTerminalSession({
         if (fallback) void activate(fallback);
       }
     },
-    [activate, detachTransport, terminal],
+    [activate, cancelReconnect, detachTransport, terminal],
   );
 
   const toggleModifier = useCallback(
@@ -431,6 +443,7 @@ export function useTerminalSession({
       mountedRef.current = false;
       input.dispose();
       resize.dispose();
+      cancelReconnect();
       detachTransport();
     };
   }, [
@@ -440,6 +453,7 @@ export function useTerminalSession({
     terminal.reset,
     terminal.sendResize,
     terminal,
+    cancelReconnect,
     connect,
     detachTransport,
     operatorId,

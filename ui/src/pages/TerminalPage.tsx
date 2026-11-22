@@ -78,10 +78,13 @@ export function TerminalPage({
   );
   const agentAtSessionLimit =
     selectedAgentSessionCount >= selectedAgentSessionLimit;
+  const attaching =
+    terminalSession.connection === "connecting" ||
+    terminalSession.connection === "reconnecting";
   const canRequestStart = Boolean(
     selectedAgent?.connected &&
     selectedAgent.capabilities.includes("terminal") &&
-    terminalSession.connection !== "connecting" &&
+    !attaching &&
     terminal.terminal.ready,
   );
   const terminalInputReady = terminalSession.connection === "ready";
@@ -141,7 +144,7 @@ export function TerminalPage({
             )}
             value={selectedAgentId}
             onChange={onSelectAgent}
-            disabled={terminalSession.connection === "connecting"}
+            disabled={attaching}
             className="w-full min-w-0 sm:w-64"
           />
         </div>

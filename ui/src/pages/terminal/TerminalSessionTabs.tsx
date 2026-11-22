@@ -76,6 +76,8 @@ export function TerminalSessionTabs({
   onClose,
   onStart,
 }: Props) {
+  const attaching =
+    connection === "connecting" || connection === "reconnecting";
   return (
     <div className="terminal-tabs">
       <div
@@ -150,12 +152,12 @@ export function TerminalSessionTabs({
                 <button
                   type="button"
                   className="terminal-tab-close"
-                  disabled={locked || connection === "connecting"}
+                  disabled={locked || attaching}
                   aria-label={`Close ${agentLabel} terminal session`}
                   title={
                     locked
                       ? "Attached in another browser"
-                      : connection === "connecting"
+                      : attaching
                         ? "Connecting — wait before closing"
                         : "Close session"
                   }
