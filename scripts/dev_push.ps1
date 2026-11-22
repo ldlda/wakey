@@ -13,6 +13,7 @@ param(
     [string]$User = "root",
     [string]$RemotePath = "/root/.bin/wakey",
     [string]$AgentRemotePath = "/root/.bin/wakey-agent",
+    [ValidateNotNullOrEmpty()]
     [string]$RemoteInitPath = "/etc/init.d/wakey",
     [string]$Target = "armv7-unknown-linux-musleabihf",
     [string]$BinName = "wakey",
@@ -75,14 +76,15 @@ function New-DeploymentPlan {
 
 function Get-RemoteDeployment {
     param($Plan)
-    $deployArgs = @('--batch')
+    $deployArgs = @('--batch', '--init', $RemoteInitPath)
+    # The final binary operation restarts the service with the installed init script.
+    foreach ($file in $Plan.Support) {
+        $deployArgs += @('--install', $file.Temp, $file.Destination)
+    }
     for ($i = 0; $i -lt $Plan.Binaries.Count; $i++) {
         $binary = $Plan.Binaries[$i]
         $restartFlag = if ($Restart -and $i -eq $Plan.Binaries.Count - 1) { '1' } else { '0' }
         $deployArgs += @('--binary', $binary.Temp, $binary.Destination, $restartFlag)
-    }
-    foreach ($file in $Plan.Support) {
-        $deployArgs += @('--install', $file.Temp, $file.Destination)
     }
     # Only data needs shell quoting; the checked-in shell program travels as stdin.
     $command = 'sh -s -- ' + (($deployArgs | ForEach-Object { Quote-ShArg $_ }) -join ' ')

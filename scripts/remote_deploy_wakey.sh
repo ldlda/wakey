@@ -1,10 +1,12 @@
 #!/bin/sh
 # Usage: remote_deploy_wakey.sh <bin_tmp> <dest_path> [restart_flag]
 # restart_flag: 1 (default) to stop/start, 0 to only replace file.
-# Or stream over SSH: sh -s -- --batch [--binary <tmp> <dest> <restart> |
+# Or stream over SSH: sh -s -- --batch [--init <path>] [--binary <tmp> <dest> <restart> |
 #                                     --install <tmp> <dest>]...
 
 set -e
+
+DEFAULT_INIT="/etc/init.d/wakey"
 
 # A subshell keeps per-binary variables and exit statements local, including
 # when several replacements are requested by one dev_push invocation.
@@ -12,7 +14,7 @@ deploy_binary() (
     BIN_TMP="$1"
     DEST="$2"
     RESTART="${3:-1}"
-    INIT="/etc/init.d/wakey"
+    INIT="${4:-$DEFAULT_INIT}"
     KILL="/root/.bin/kill_wakey.sh"
 
     if [ -z "$BIN_TMP" ] || [ -z "$DEST" ]; then
@@ -29,6 +31,9 @@ deploy_binary() (
     if [ "$RESTART" = "1" ]; then
         if [ -x "$INIT" ]; then
             "$INIT" stop || true
+        elif [ "$INIT" != "$DEFAULT_INIT" ]; then
+            echo "selected init script is not executable: $INIT" >&2
+            exit 1
         elif [ -x "$KILL" ]; then
             sh "$KILL" || true
         fi
@@ -60,11 +65,17 @@ if [ "${1:-}" != '--batch' ]; then
 fi
 
 shift
+init_path="$DEFAULT_INIT"
+if [ "${1:-}" = '--init' ]; then
+    [ -n "${2:-}" ] || { echo '--init requires a path' >&2; exit 2; }
+    init_path="$2"
+    shift 2
+fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --binary)
             [ "$#" -ge 4 ] || { echo '--binary requires tmp, destination, restart' >&2; exit 2; }
-            deploy_binary "$2" "$3" "$4"
+            deploy_binary "$2" "$3" "$4" "$init_path"
             shift 4
             ;;
         --install)

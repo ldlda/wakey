@@ -64,6 +64,7 @@ function Invoke-Ssh {
     Assert (($global:DeployTest.Build -join ' ') -eq 'build --release --target test -p wakey -p wakey-agent') 'Default build changed'
     Assert ($global:DeployTest.Command.Contains("'/root/.bin/wakey.tmp' '/root/.bin/wakey' '0'")) 'CLI must not restart before agent replacement'
     Assert ($global:DeployTest.Command.Contains("'/root/.bin/wakey-agent.tmp' '/root/.bin/wakey-agent' '1'")) 'Agent must restart by default'
+    Assert ($global:DeployTest.Command.LastIndexOf("'--install'") -lt $global:DeployTest.Command.IndexOf("'--binary'")) 'Support files must install before binary replacement and restart'
     Assert ($global:DeployTest.Body -ceq (Get-Content -Raw "$repo/scripts/remote_deploy_wakey.sh")) 'Deployment must stream the checked-in file unchanged'
 
     Run-Deploy @{ BinariesOnly = $true }
@@ -90,6 +91,19 @@ function Invoke-Ssh {
     Run-Deploy @{ BinariesOnly = $true; Restart = $false; RemotePath = $cliPath; AgentRemotePath = $agentPath } @('wakey', 'wakey-agent') 0 $true
     Assert ((Test-Path -LiteralPath $cliPath) -and (Test-Path -LiteralPath $agentPath)) 'Streamed helper did not install both binaries'
     Assert (-not (Test-Path -LiteralPath "$agentPath.tmp")) 'Temporary upload was not moved'
+
+    # The selected service must start from the newly installed init script.
+    $initPath = "$fixture/owner's init"
+    $initTemp = "$fixture/init.tmp"
+    $restartBin = "$fixture/restart binary"
+    [IO.File]::WriteAllText($initTemp, "#!/bin/sh`nprintf 'new:%s\n' `"`$1`" >> `"`$0.events`"`n")
+    New-Item -ItemType File -Path "$restartBin.tmp" | Out-Null
+    & sh "$fixture/scripts/remote_deploy_wakey.sh" --batch --init $initPath --install $initTemp $initPath --binary "$restartBin.tmp" $restartBin 1
+    Assert ($LASTEXITCODE -eq 0) 'Custom init deployment failed'
+    Assert (((Get-Content -LiteralPath "$initPath.events") -join ' ') -ceq 'new:stop new:start') 'Selected init script did not stop and start the service once'
+
+    Run-Deploy @{ BinariesOnly = $true; RemoteInitPath = $initPath; AgentRemotePath = $agentPath; Package = @('wakey-agent') } @('wakey-agent') 0 $true
+    Assert (((Get-Content -LiteralPath "$initPath.events") -join ' ') -ceq 'new:stop new:start new:stop new:start') 'Binary-only deploy did not restart the selected service'
 
     $supportTemp = "$fixture/support.tmp"
     $supportDest = "$fixture/hook dir/owner's hook"

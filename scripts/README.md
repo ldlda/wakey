@@ -46,6 +46,7 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
   - Defaults to both binaries plus init/hooks, with restart enabled. Use `-Restart:$false` to leave the service running, or `-Quiet:$false` for deployment output. Config files are untouched.
   - Binary-only agent update: `./scripts/dev_push.ps1 -HostName router -BinariesOnly -Package wakey-agent -Quiet:$false`
   - Use `-BinariesOnly` without `-Package` for both binaries, or `-Package wakey` for only the CLI. Cargo still builds the selected package's dependencies.
+  - `-RemoteInitPath` selects both the init script installation path and the service to restart. If you skip installing the script, a custom path must already be executable to restart it.
   - The checked-in `remote_deploy_wakey.sh` is streamed over SSH to `sh -s -- --batch ...` in all modes, with the deployment plan passed as quoted arguments. No remote helper is uploaded or required. Its original single-binary invocation remains supported. The shared `Invoke-Ssh -Cmd 'sh -s' -Stdin $script` supports stdin scripts for other callers.
 - `package_rootfs.ps1` — Produces `dist/wakey-rootfs-<version>-<target>.tgz` with `/root/.bin/wakey` and `/etc/init.d/*`.
 - `update_wakey_cc.sh` — Linux VPS updater for control-plane bundles; extracts into the selected directory (default: current directory) and restarts `wakey-cc.service`.
