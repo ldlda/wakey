@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 
+import { createDevProxy, DEV_HOST } from "./devProxy";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const debugEnabled = (): boolean => {
@@ -40,6 +42,7 @@ export default defineConfig(({ command, mode, isPreview }) => {
       );
     }
   }
+  const devProxy = dev ? createDevProxy(target) : undefined;
   return {
     plugins: [
       react({
@@ -48,6 +51,7 @@ export default defineConfig(({ command, mode, isPreview }) => {
         },
       }),
       tailwindcss(),
+      devProxy?.plugin,
     ],
     base: "/ui/",
     resolve: {
@@ -60,13 +64,10 @@ export default defineConfig(({ command, mode, isPreview }) => {
     },
     // Keep browser requests same-origin, including terminal/event WebSockets.
     // WAKEY_DEV_* is read only by this config, never exposed as VITE_* client data.
-    server: dev
+    server: devProxy
       ? {
-          host: "127.0.0.1",
-          proxy: {
-            "^/api/": { target, changeOrigin: true, ws: true },
-            "^/healthz$": { target, changeOrigin: true },
-          },
+          host: DEV_HOST,
+          proxy: devProxy.proxy,
         }
       : undefined,
   };

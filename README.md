@@ -284,9 +284,10 @@ ssh -N -L 127.0.0.1:18080:127.0.0.1:23501 cloud
 
 Use `http://127.0.0.1:18080` as the dev target. This connects directly to CC
 through SSH, avoiding Cloudflare Access browser redirects/cookie handling in the
-proxy. The dev server binds to loopback; do not expose this authenticated tunnel
-through a public Vite server. Changes made in the dev UI affect the selected
-backend, including production if that is what you tunnel to. HTTPS targets retain
+proxy. The dev server requires a loopback bind and rejects cross-origin API
+requests and WebSocket upgrades. Open the UI directly from the loopback URL
+printed by Vite. Changes made in the dev UI affect the selected backend,
+including production if that is what you tunnel to. HTTPS targets retain
 certificate verification; the proxy does not add Cloudflare credentials.
 
 ## VPS Deploy (Manual Updates)
