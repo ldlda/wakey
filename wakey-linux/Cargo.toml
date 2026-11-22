@@ -21,7 +21,10 @@ serial_test = "3"
 telemetry = ["wakey-core/telemetry", "dep:procfs"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["net"] }
 procfs = { version = "0.18", default-features = false, optional = true }
+rand = "0.10"
+surge-ping = "0.9.1"
 
 [dependencies.lda-ipjs]
 path = "../ipjs"
