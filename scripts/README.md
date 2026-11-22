@@ -38,7 +38,7 @@ This folder has small helpers for build, CI, and router install. Keep it simple;
 ## Scripts overview
 
 - `act_runner.ps1` — Start/seed the local Gitea runner. Use `-Attach` to see logs, `-ForceConfigure` to register non-interactively.
-- `act_runner_wsl.ps1` — Windows PowerShell wrapper that controls the Fedora/WSL runner.
+- `act_runner_wsl.ps1` — PowerShell 7 (`pwsh`) wrapper that controls the Fedora/WSL runner.
 - `act_runner_fedora.sh` — Linux/Fedora helper used inside WSL for update/register/start/stop/status.
 - `dev_push.ps1` — Fast dev loop: build + upload to router. Requires PowerShell 7.4 or newer for byte-preserving SSH stdin. Usage:
   - `./scripts/dev_push.ps1 -Pass <password> [-HostName <ip>] [-RemotePath </root/.bin/wakey>] [-Restart] [-Quiet]`

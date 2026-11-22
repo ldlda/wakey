@@ -3,6 +3,9 @@
 This repo now expects Linux/router release builds to run on a Fedora 43 runner
 inside WSL, not on the Windows host runner.
 
+Run `act_runner_wsl.ps1` from PowerShell 7 (`pwsh`). Windows PowerShell 5.1
+(`powershell.exe`) is unsupported.
+
 The goal is simple:
 
 - build `wakey` and `wakey-agent` in a Linux-native environment
