@@ -268,7 +268,7 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
             .is_none()
     );
     let before_reload = super::fleet_view(&state).await.unwrap();
-    store.reload_from_disk().await.unwrap();
+    store.refresh_fleet_views().await.unwrap();
     assert!(!Arc::ptr_eq(
         &before_reload,
         &super::fleet_view(&state).await.unwrap()

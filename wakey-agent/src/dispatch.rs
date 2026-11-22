@@ -144,57 +144,9 @@ pub async fn inventory_for_config(
 }
 
 async fn dispatch_wake(req: WakeRequest) -> Result<CommandResult> {
-    validate_wake_request(&req)?;
-    let result = match (req.query, req.mac, req.ip) {
-        (Some(query), None, None) => wakey::wake_from_query(query).await?,
-        (None, Some(mac), ip) => wakey::wake_explicit(mac, ip).await?,
-        _ => unreachable!("wake request validated before dispatch"),
-    };
+    let result = wakey::WakeInput::from_parts(req.query, req.mac, req.ip)?
+        .send()
+        .await?;
     debug!("dispatched wake command");
     Ok(CommandResult::Wake(result))
-}
-
-pub fn validate_wake_request(req: &WakeRequest) -> Result<()> {
-    let has_query = req.query.is_some();
-    let has_mac = req.mac.is_some();
-    let has_ip = req.ip.is_some();
-
-    if has_ip && !has_mac {
-        anyhow::bail!("wake request `ip` requires `mac`");
-    }
-    if has_query && (has_mac || has_ip) {
-        anyhow::bail!("wake query mode and explicit mode are mutually exclusive");
-    }
-    if !has_query && !has_mac {
-        anyhow::bail!("wake request requires either `query` or `mac`");
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::protocol::WakeRequest;
-
-    #[test]
-    fn wake_rejects_ip_without_mac() {
-        let err = validate_wake_request(&WakeRequest {
-            query: None,
-            mac: None,
-            ip: Some("192.168.1.1".parse().expect("ip")),
-        })
-        .expect_err("should reject");
-        assert!(err.to_string().contains("requires `mac`"));
-    }
-
-    #[test]
-    fn wake_rejects_mixed_mode() {
-        let err = validate_wake_request(&WakeRequest {
-            query: Some("pc".into()),
-            mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
-            ip: None,
-        })
-        .expect_err("should reject");
-        assert!(err.to_string().contains("mutually exclusive"));
-    }
 }

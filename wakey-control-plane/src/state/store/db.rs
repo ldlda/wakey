@@ -86,7 +86,7 @@ impl Store {
     }
 
     #[cfg_attr(not(unix), allow(dead_code))]
-    pub async fn reload_from_disk(&self) -> Result<()> {
+    pub async fn refresh_fleet_views(&self) -> Result<()> {
         sqlx::query!(r#"SELECT 1 as "ok!""#)
             .fetch_one(&self.pool)
             .await

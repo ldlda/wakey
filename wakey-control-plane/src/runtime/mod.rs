@@ -33,8 +33,8 @@ pub use admin::revoke_agent;
 pub use admin::{
     issue_enroll_token, list_enroll_tokens, migrate_sqlite_state, revoke_enroll_token, state_stats,
 };
+use process::PidFile;
 pub use process::reload_daemon;
-use process::{remove_pid_file, write_pid_file};
 
 /// Shared state for HTTP handlers and websocket relay paths.
 #[derive(Clone)]
@@ -182,9 +182,6 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     // The verifier delegates enforcement to Caddy. Do not expose the other
     // handlers directly when that boundary is configured.
     let access_routes = access::routes(daemon.access.as_ref(), daemon.bind)?;
-    write_pid_file(&daemon.pid_file)?;
-    info!(pid_file = %daemon.pid_file.display(), "wrote control-plane pid file");
-
     let store = state::Store::load_or_init(
         &daemon.state_file,
         daemon.bootstrap_enroll_tokens.clone(),
@@ -206,9 +203,6 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         fleet: Arc::new(api::FleetCache::default()),
     };
 
-    tokio::spawn(api::run_alert_evaluator(app_state.clone()));
-    let _fleet_metrics = fleet_metrics::FleetMetricsTask::start(app_state.clone());
-
     // Keep route classes explicit so edge policy can map directly:
     // - public_api_routes: intended internet-facing agent endpoints
     // - control_api_routes: intended admin-only endpoints behind Access
@@ -219,8 +213,25 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         .with_state(app_state.clone());
 
     info!(bind = %daemon.bind, data_dir = %daemon.data_dir.display(), pid_file = %daemon.pid_file.display(), state_file = %daemon.state_file.display(), ui_dist_dir = %daemon.ui_dist_dir.display(), "starting control-plane server");
-    let listener = TcpListener::bind(daemon.bind).await?;
-    let server = tokio::spawn(async move {
+    let listener = TcpListener::bind(daemon.bind)
+        .await
+        .with_context(|| format!("failed to bind control-plane listener to {}", daemon.bind))?;
+
+    #[cfg(unix)]
+    let (mut hup, mut terminate) = {
+        use tokio::signal::unix::{SignalKind, signal};
+        (
+            signal(SignalKind::hangup()).context("failed to install SIGHUP handler")?,
+            signal(SignalKind::terminate()).context("failed to install SIGTERM handler")?,
+        )
+    };
+
+    // Publish the PID only after the database, listener, and reload handler are ready.
+    let _pid_file = PidFile::write(&daemon.pid_file)?;
+    info!(pid_file = %daemon.pid_file.display(), "wrote control-plane pid file");
+    tokio::spawn(api::run_alert_evaluator(app_state.clone()));
+    let _fleet_metrics = fleet_metrics::FleetMetricsTask::start(app_state.clone());
+    let mut server = tokio::spawn(async move {
         axum::serve(listener, app)
             .await
             .context("control-plane server exited unexpectedly")
@@ -228,31 +239,23 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
 
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{SignalKind, signal};
-        let mut server = server;
-        let mut hup = signal(SignalKind::hangup()).context("failed to install SIGHUP handler")?;
-        let mut terminate =
-            signal(SignalKind::terminate()).context("failed to install SIGTERM handler")?;
         let mut gc_tick = tokio::time::interval(Duration::from_secs(300));
         gc_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        // Unix daemon loop: shutdown signal, config reload trigger, and periodic maintenance.
+        // Unix daemon loop: shutdown signals, fleet invalidation, and periodic maintenance.
         loop {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!("ctrl-c received; shutting down control-plane");
-                    server.abort();
                     break;
                 }
                 _ = terminate.recv() => {
                     info!("SIGTERM received; shutting down control-plane");
-                    server.abort();
                     break;
                 }
                 _ = hup.recv() => {
-                    match app_state.store.reload_from_disk().await {
-                        Ok(()) => info!("reloaded state from disk"),
-                        Err(err) => warn!(error = %err, "failed to reload state from disk"),
+                    if let Err(err) = app_state.store.refresh_fleet_views().await {
+                        warn!(error = %err, "failed to refresh fleet views");
                     }
                 }
                 _ = gc_tick.tick() => {
@@ -283,7 +286,6 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
                     }
                 }
                 join = &mut server => {
-                    let _ = remove_pid_file(&daemon.pid_file);
                     return join.context("control-plane join failed")?;
                 }
             }
@@ -291,13 +293,49 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     }
 
     #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c()
-            .await
-            .context("failed waiting for ctrl-c")?;
-        server.abort();
-    }
+    let shutdown = tokio::select! {
+        signal = tokio::signal::ctrl_c() => signal.context("failed waiting for ctrl-c"),
+        join = &mut server => return join.context("control-plane join failed")?,
+    };
 
-    let _ = remove_pid_file(&daemon.pid_file);
+    server.abort();
+    let _ = server.await;
+    #[cfg(not(unix))]
+    shutdown?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[tokio::test]
+    async fn failed_store_startup_does_not_publish_pid() {
+        let dir = std::env::temp_dir().join(format!("wakey-cc-startup-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let args = crate::cli::Cli::try_parse_from([
+            "wakey-control-plane",
+            "serve",
+            "--data-dir",
+            dir.to_str().unwrap(),
+            "--config-file",
+            dir.join("missing.toml").to_str().unwrap(),
+            "--state-file",
+            dir.to_str().unwrap(),
+            "--pid-file",
+            "wakey-cc.pid",
+        ])
+        .unwrap();
+        let crate::cli::Command::Serve(args) = args.command else {
+            panic!("expected serve command");
+        };
+        let daemon = config::DaemonConfig::from_serve_args(&args).unwrap();
+        let pid = daemon.pid_file.clone();
+
+        let err = serve(daemon).await.unwrap_err();
+        assert!(err.to_string().contains("failed to initialize store"));
+        assert!(!pid.exists());
+        std::fs::remove_dir(dir).unwrap();
+    }
 }

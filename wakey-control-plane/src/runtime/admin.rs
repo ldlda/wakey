@@ -65,7 +65,7 @@ pub async fn issue_enroll_token(args: IssueEnrollTokenArgs) -> Result<()> {
     println!("enroll_token={}", issued.enroll_token);
     println!("expires_at_unix={}", issued.expires_at_unix);
     eprintln!(
-        "note: token was written to {}. running daemon must reload state to see it",
+        "note: token was written to {}",
         settings.state_file.display()
     );
     Ok(())

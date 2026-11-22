@@ -12,5 +12,6 @@ pub use inventory::{
 pub use leases::{get_leases, get_leases_with_neighbor_state, leases_without_state};
 pub use query::{resolve_query, resolve_selector};
 pub use wake::{
-    broadcast_wake_targets, resolve_wake_targets, wake_explicit, wake_from_query, wake_targets,
+    WakeInput, broadcast_wake_targets, resolve_wake_targets, wake_explicit, wake_from_query,
+    wake_targets,
 };

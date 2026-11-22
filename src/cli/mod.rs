@@ -1,6 +1,7 @@
 //! CLI argument parsing, dispatch, rendering, and tracing defaults.
 
 pub mod table;
+mod wake;
 
 use std::net::IpAddr;
 
@@ -8,7 +9,7 @@ use anyhow::Result;
 use clap::{ArgAction, Args, Parser, Subcommand};
 use tracing::debug;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use wakey_core::{InterfaceSummary, InventoryQuery, InventoryQueryBuilder, Query, WakeResult};
+use wakey_core::{InterfaceSummary, InventoryQuery, InventoryQueryBuilder, Query};
 
 #[derive(Parser)]
 #[command(name = "wakey")]
@@ -215,22 +216,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 println!("{}", table::render_leases_table(&leases));
             }
         }
-        Command::Wake(args) => {
-            let as_json = args.json;
-            debug!(
-                has_query = args.query.is_some(),
-                has_mac = args.mac.is_some(),
-                has_ip = args.ip.is_some(),
-                json = as_json,
-                "dispatching wake command"
-            );
-            let result = run_wake(args).await?;
-            if as_json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            } else {
-                println!("{}", table::render_wake_table(&result));
-            }
-        }
+        Command::Wake(args) => wake::run(args).await?,
         Command::Devs(args) => {
             debug!(dev = ?args.dev, up = args.up, json = args.json, "dispatching devs command");
             let devs = if let Some(name) = &args.dev {
@@ -280,36 +266,6 @@ fn inventory_args_to_query(args: InventoryArgs) -> InventoryQuery {
         .build()
 }
 
-fn validate_wake_args(args: &WakeArgs) -> Result<()> {
-    let has_query = args.query.is_some();
-    let has_mac = args.mac.is_some();
-    let has_ip = args.ip.is_some();
-
-    if has_ip && !has_mac {
-        anyhow::bail!("`wakey wake --ip` needs `--mac`");
-    }
-
-    if has_query && (has_mac || has_ip) {
-        anyhow::bail!("query mode and explicit `--mac/--ip` mode are mutually exclusive");
-    }
-
-    if !has_query && !has_mac {
-        anyhow::bail!("provide either a query or `--mac`");
-    }
-
-    Ok(())
-}
-
-async fn run_wake(args: WakeArgs) -> Result<WakeResult> {
-    validate_wake_args(&args)?;
-
-    match (args.query, args.mac, args.ip) {
-        (Some(query), None, None) => wakey::wake_from_query(query).await,
-        (None, Some(mac), ip) => wakey::wake_explicit(mac, ip).await,
-        _ => unreachable!("wake args validated before dispatch"),
-    }
-}
-
 fn filter_interface_summaries(
     mut devs: Vec<InterfaceSummary>,
     args: &DevsArgs,
@@ -325,55 +281,7 @@ fn filter_interface_summaries(
 
 #[cfg(test)]
 mod tests {
-    use super::{WakeArgs, default_filter_for_verbosity};
-
-    #[test]
-    fn wake_rejects_ip_without_mac() {
-        let err = super::validate_wake_args(&WakeArgs {
-            query: None,
-            mac: None,
-            ip: Some("192.168.1.10".parse().expect("ip")),
-            json: false,
-        })
-        .expect_err("ip-only wake should be rejected");
-
-        assert!(err.to_string().contains("--ip"));
-    }
-
-    #[test]
-    fn wake_rejects_mixed_query_and_explicit_mode() {
-        let err = super::validate_wake_args(&WakeArgs {
-            query: Some("pc".into()),
-            mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
-            ip: None,
-            json: false,
-        })
-        .expect_err("mixed wake mode should be rejected");
-
-        assert!(err.to_string().contains("mutually exclusive"));
-    }
-
-    #[test]
-    fn wake_accepts_query_mode() {
-        super::validate_wake_args(&WakeArgs {
-            query: Some("pc".into()),
-            mac: None,
-            ip: None,
-            json: false,
-        })
-        .expect("query mode should be accepted");
-    }
-
-    #[test]
-    fn wake_accepts_manual_mac_mode() {
-        super::validate_wake_args(&WakeArgs {
-            query: None,
-            mac: Some("aa:bb:cc:dd:ee:ff".parse().expect("mac")),
-            ip: None,
-            json: false,
-        })
-        .expect("manual mac mode should be accepted");
-    }
+    use super::default_filter_for_verbosity;
 
     #[test]
     fn verbosity_maps_to_expected_default_filters() {

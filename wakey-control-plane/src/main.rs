@@ -16,6 +16,16 @@ use cli::{Cli, Command};
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Only serve exports telemetry. Init-config keeps its output independent of logging setup.
+    let _local_telemetry = if matches!(&cli.command, Command::Serve(_) | Command::InitConfig(_)) {
+        None
+    } else {
+        Some(tracing::init(
+            cli.verbose,
+            &config::TelemetryConfig::default(),
+        )?)
+    };
+
     match cli.command {
         Command::Serve(args) => {
             if args.bootstrap_config {
@@ -43,33 +53,12 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
-        Command::IssueEnrollToken(args) => {
-            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
-            runtime::issue_enroll_token(args).await
-        }
-        Command::ListEnrollTokens(args) => {
-            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
-            runtime::list_enroll_tokens(args).await
-        }
-        Command::RevokeEnrollToken(args) => {
-            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
-            runtime::revoke_enroll_token(args).await
-        }
-        Command::RevokeAgent(args) => {
-            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
-            runtime::revoke_agent(args).await
-        }
-        Command::StateStats(args) => {
-            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
-            runtime::state_stats(args).await
-        }
-        Command::MigrateSqliteState(args) => {
-            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
-            runtime::migrate_sqlite_state(args).await
-        }
-        Command::Reload(args) => {
-            tracing::init(cli.verbose, &config::TelemetryConfig::default())?;
-            runtime::reload_daemon(&args.pid_file)
-        }
+        Command::IssueEnrollToken(args) => runtime::issue_enroll_token(args).await,
+        Command::ListEnrollTokens(args) => runtime::list_enroll_tokens(args).await,
+        Command::RevokeEnrollToken(args) => runtime::revoke_enroll_token(args).await,
+        Command::RevokeAgent(args) => runtime::revoke_agent(args).await,
+        Command::StateStats(args) => runtime::state_stats(args).await,
+        Command::MigrateSqliteState(args) => runtime::migrate_sqlite_state(args).await,
+        Command::Reload(args) => runtime::reload_daemon(&args.pid_file),
     }
 }

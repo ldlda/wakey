@@ -1,7 +1,7 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use tracing::info;
+use tracing::{info, warn};
 
 pub fn reload_daemon(pid_file: &Path) -> Result<()> {
     let pid = read_pid(pid_file)?;
@@ -9,21 +9,26 @@ pub fn reload_daemon(pid_file: &Path) -> Result<()> {
     send_hup(pid)
 }
 
-pub fn write_pid_file(path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create pid dir {}", parent.display()))?;
+pub(super) struct PidFile(PathBuf);
+
+impl PidFile {
+    pub(super) fn write(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create pid dir {}", parent.display()))?;
+        }
+        std::fs::write(path, format!("{}\n", std::process::id()))
+            .with_context(|| format!("failed to write pid file {}", path.display()))?;
+        Ok(Self(path.to_path_buf()))
     }
-    std::fs::write(path, format!("{}\n", std::process::id()))
-        .with_context(|| format!("failed to write pid file {}", path.display()))
 }
 
-pub fn remove_pid_file(path: &Path) -> Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => {
-            Err(err).with_context(|| format!("failed to remove pid file {}", path.display()))
+impl Drop for PidFile {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_file(&self.0)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(error = %err, pid_file = %self.0.display(), "failed to remove control-plane pid file");
         }
     }
 }
@@ -56,5 +61,22 @@ fn send_hup(pid: i32) -> Result<()> {
     {
         let _ = pid;
         anyhow::bail!("reload is only supported on Unix (SIGHUP unavailable on this platform)")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pid_file_is_removed_when_guard_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("wakey-cc-pid-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("wakey-cc.pid");
+        let pid_file = PidFile::write(&path).unwrap();
+        assert_eq!(read_pid(&path).unwrap() as u32, std::process::id());
+
+        drop(pid_file);
+        assert!(!path.exists());
+        std::fs::remove_dir(dir).unwrap();
     }
 }
