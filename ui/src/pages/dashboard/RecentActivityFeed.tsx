@@ -64,7 +64,9 @@ function ActivityRow({ row }: { row: ReturnType<typeof activityRow> }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="wrap-break-word text-sm font-medium">{row.title}</span>
+          <span className="wrap-break-word text-sm font-medium">
+            {row.title}
+          </span>
           <Badge variant={row.successful ? "secondary" : "destructive"}>
             {row.outcome}
           </Badge>
@@ -89,7 +91,7 @@ export function RecentActivityFeed({ agents }: { agents: Agent[] }) {
   useEffect(() => {
     const controller = new AbortController();
     // Mount and explicit refresh share one request lifecycle.
-    void fetchAudit(8, controller.signal)
+    void fetchAudit(8, { signal: controller.signal })
       .then((events) => {
         if (!controller.signal.aborted) setEvents(events);
       })

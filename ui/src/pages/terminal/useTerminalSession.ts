@@ -282,7 +282,9 @@ export function useTerminalSession({
       const attached = await attachTerminal(
         currentSession.terminal_id,
         operatorId,
-        attempt.signal,
+        {
+          signal: attempt.signal,
+        },
       );
       if (reconnectRef.current !== attempt) return;
       connect(attached);
