@@ -129,21 +129,6 @@ pub async fn relay_agent_command(
         .insert(request_id_string.clone(), pending_tx);
 
     info!("dispatching command to agent");
-    state
-        .store
-        .audit(AuditEventInput {
-            actor_type: "admin_api".into(),
-            actor_id: None,
-            agent_id: Some(agent_id.to_string()),
-            request_id: Some(request_id_string.clone()),
-            event_type: "command_dispatch".into(),
-            outcome: "sent".into(),
-            latency_ms: None,
-            message: "dispatched command to connected agent".into(),
-            metadata: serde_json::json!({ "command": command_kind }),
-        })
-        .await;
-
     if let Err(err) = tx.send(SessionEvent::Message(ServerMessage::Command {
         request_id,
         command,
@@ -171,6 +156,21 @@ pub async fn relay_agent_command(
             format!("failed to send command to agent: {err}"),
         ));
     }
+
+    state
+        .store
+        .audit(AuditEventInput {
+            actor_type: "admin_api".into(),
+            actor_id: None,
+            agent_id: Some(agent_id.to_string()),
+            request_id: Some(request_id_string.clone()),
+            event_type: "command_dispatch".into(),
+            outcome: "sent".into(),
+            latency_ms: None,
+            message: "dispatched command to connected agent".into(),
+            metadata: serde_json::json!({ "command": command_kind }),
+        })
+        .await;
 
     let timeout = timeout_ms
         .map(|value| std::time::Duration::from_millis(value.max(1)))

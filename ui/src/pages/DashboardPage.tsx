@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, Bell, Bot, Key, RefreshCw, ArrowRight } from "lucide-react";
+import {
+  Activity,
+  Bell,
+  Bot,
+  Key,
+  RefreshCw,
+  ArrowRight,
+  ArrowDownLeft,
+  ArrowUpRight,
+  Plug,
+  Zap,
+} from "lucide-react";
 
 import {
   type Agent,
@@ -53,13 +64,13 @@ function severityColor(severity: string): string {
   }
 }
 
-function eventIcon(eventType: string): string {
-  if (eventType.includes("wake")) return "⚡";
-  if (eventType.includes("enroll")) return "🔑";
-  if (eventType.includes("command")) return "▶";
-  if (eventType.includes("connect")) return "🔗";
-  if (eventType.includes("disconnect")) return "⛓️‍💥";
-  return "•";
+function eventIcon(eventType: string) {
+  if (eventType === "command_dispatch") return ArrowUpRight;
+  if (eventType === "command_result") return ArrowDownLeft;
+  if (eventType.includes("wake")) return Zap;
+  if (eventType.includes("enroll")) return Key;
+  if (eventType.includes("connect")) return Plug;
+  return Activity;
 }
 
 export function DashboardPage({
@@ -89,6 +100,12 @@ export function DashboardPage({
   const activeTokens = tokens.filter((t) => !t.expired).length;
 
   const recentAudit = audit.slice(0, 8);
+  const agentNames = new Map(
+    agents.map((agent) => [
+      agent.agent_id,
+      agent.nickname?.trim() || agent.agent_id,
+    ]),
+  );
 
   if (loading && !agents.length) {
     return (
@@ -269,46 +286,66 @@ export function DashboardPage({
         <CardContent>
           {recentAudit.length > 0 ? (
             <div className="grid gap-0">
-              {recentAudit.map((event, i) => (
-                <div
-                  key={event.event_id}
-                  className={`flex items-start gap-3 py-3 ${
-                    i < recentAudit.length - 1
-                      ? "border-b border-border/50"
-                      : ""
-                  }`}
-                >
-                  <span
-                    className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-sm"
-                    aria-hidden
+              {recentAudit.map((event, i) => {
+                const Icon = eventIcon(event.event_type);
+                const command =
+                  typeof event.metadata.command === "string"
+                    ? event.metadata.command
+                    : null;
+                const direction =
+                  event.event_type === "command_dispatch"
+                    ? "to"
+                    : event.event_type === "command_result"
+                      ? "from"
+                      : null;
+                const agentName = event.agent_id
+                  ? (agentNames.get(event.agent_id) ?? event.agent_id)
+                  : null;
+                return (
+                  <div
+                    key={event.event_id}
+                    className={`flex items-start gap-3 py-3 ${
+                      i < recentAudit.length - 1
+                        ? "border-b border-border/50"
+                        : ""
+                    }`}
                   >
-                    {eventIcon(event.event_type)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">
-                        {event.event_type.replace(/_/g, " ")}
-                      </span>
-                      <Badge
-                        variant={
-                          event.outcome === "success"
-                            ? "secondary"
-                            : "destructive"
-                        }
-                        className="text-[0.6rem] px-1.5 py-0"
-                      >
-                        {event.outcome}
-                      </Badge>
+                    <span
+                      className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-sm"
+                      aria-hidden
+                    >
+                      <Icon className="size-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="break-all text-sm font-medium">
+                          {command && direction
+                            ? `${command} ${direction} ${agentName ?? "agent"}`
+                            : event.event_type.replace(/_/g, " ")}
+                        </span>
+                        <Badge
+                          variant={
+                            ["success", "ok", "sent"].includes(event.outcome)
+                              ? "secondary"
+                              : "destructive"
+                          }
+                          className="text-[0.6rem] px-1.5 py-0"
+                        >
+                          {event.outcome}
+                        </Badge>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {event.message}
+                        {event.latency_ms != null &&
+                          ` · ${event.latency_ms} ms`}
+                      </p>
                     </div>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {event.message}
-                    </p>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                      {relativeTime(event.ts_unix * 1000)}
+                    </span>
                   </div>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {relativeTime(event.ts_unix * 1000)}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-8 text-center">
