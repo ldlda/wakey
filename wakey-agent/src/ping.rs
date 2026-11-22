@@ -2,6 +2,17 @@ use anyhow::Result;
 
 use crate::protocol::{CommandResult, PingRequest};
 
+pub(crate) fn is_available() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        wakey_linux::ping::is_available()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
 #[cfg(target_os = "linux")]
 pub async fn probe(req: PingRequest) -> Result<CommandResult> {
     let rtt = wakey_linux::ping::probe(req.ip, req.interface.as_deref()).await?;

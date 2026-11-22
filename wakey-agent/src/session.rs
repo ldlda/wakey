@@ -18,9 +18,17 @@ pub async fn run(config: AgentConfig) -> Result<()> {
     // Terminal workers belong to the agent process, not a single control socket.
     // Keeping this manager outside the reconnect loop lets PTYs survive CC loss.
     let (terminal_manager, mut terminal_events) = TerminalManager::new(&config);
+    let capabilities = agent_capabilities(&config, crate::ping::is_available());
     let mut backoff = config.reconnect_base.max(Duration::from_millis(100));
     loop {
-        match run_once(&config, &terminal_manager, &mut terminal_events).await {
+        match run_once(
+            &config,
+            &capabilities,
+            &terminal_manager,
+            &mut terminal_events,
+        )
+        .await
+        {
             Ok(()) => {
                 backoff = config.reconnect_base.max(Duration::from_millis(100));
             }
@@ -35,6 +43,7 @@ pub async fn run(config: AgentConfig) -> Result<()> {
 
 async fn run_once(
     config: &AgentConfig,
+    capabilities: &[AgentCapability],
     terminal_manager: &TerminalManager,
     terminal_events: &mut tokio::sync::mpsc::UnboundedReceiver<
         crate::terminal::TerminalManagerEvent,
@@ -87,7 +96,7 @@ async fn run_once(
             &mut sink,
             &ClientMessage::Hello {
                 agent_id: config.agent_id.clone(),
-                capabilities: agent_capabilities(config),
+                capabilities: capabilities.to_vec(),
                 capability_options: AgentCapabilityOptions {
                     terminal: config
                         .terminal
@@ -408,9 +417,9 @@ fn client_message_kind(message: &ClientMessage) -> &'static str {
     }
 }
 
-fn agent_capabilities(config: &AgentConfig) -> Vec<AgentCapability> {
+fn agent_capabilities(config: &AgentConfig, ping_available: bool) -> Vec<AgentCapability> {
     let mut capabilities = Vec::new();
-    if cfg!(target_os = "linux") {
+    if ping_available {
         capabilities.push(AgentCapability::Ping);
     }
     #[cfg(unix)]
@@ -469,8 +478,18 @@ mod tests {
     use serde_json::Value;
     use tokio_tungstenite::tungstenite::Message;
 
-    use super::{next_backoff, send_command_result, websocket_url};
-    use crate::protocol::{CommandResult, RequestId};
+    use super::{agent_capabilities, next_backoff, send_command_result, websocket_url};
+    use crate::config::DEFAULT_CONFIG;
+    use crate::protocol::{AgentCapability, CommandResult, RequestId};
+
+    #[test]
+    fn only_advertises_ping_if_a_socket_is_available() {
+        let without_ping = agent_capabilities(&DEFAULT_CONFIG, false);
+        let mut with_ping = agent_capabilities(&DEFAULT_CONFIG, true);
+        assert!(with_ping.contains(&AgentCapability::Ping));
+        with_ping.retain(|cap| *cap != AgentCapability::Ping);
+        assert_eq!(with_ping, without_ping);
+    }
 
     struct RecordingSink {
         fail_sends_remaining: usize,
