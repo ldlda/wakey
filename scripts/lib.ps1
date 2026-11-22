@@ -205,7 +205,12 @@ function Invoke-Ext {
 
     # Keep stdin optional so interactive callers retain their existing behavior.
     if ($PSBoundParameters.ContainsKey('Stdin')) {
-        $out = $Stdin | & $Exe @Arguments 2>&1
+        if ($PSVersionTable.PSVersion -lt [version]'7.4') {
+            throw 'Streaming native stdin requires PowerShell 7.4 or newer.'
+        }
+        # Pass a single byte array so the native pipe cannot append a text newline.
+        $bytes = [Text.Encoding]::UTF8.GetBytes($Stdin)
+        $out = ,$bytes | & $Exe @Arguments 2>&1
     } else {
         $out = & $Exe @Arguments 2>&1
     }

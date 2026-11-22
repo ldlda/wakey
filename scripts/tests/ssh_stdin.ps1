@@ -1,16 +1,33 @@
 #!/usr/bin/env pwsh
-# Run with pwsh -NoProfile -File scripts/tests/ssh_stdin.ps1 on Linux/WSL.
+#Requires -Version 7.4
+# Run with pwsh -NoProfile -File scripts/tests/ssh_stdin.ps1 on Windows or Linux.
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/../lib.ps1"
 
-# Exercise the real native-command pipeline without contacting a server.
+# Read raw stdin in a child process. Text readers can hide a trailing CRLF.
+$pwsh = (Get-Process -Id $PID).Path
+# Keep -Command as a string: a script block makes PowerShell serialize stdin as CLIXML.
+$readStdin = '$stream = [IO.MemoryStream]::new(); [Console]::OpenStandardInput().CopyTo($stream); [Convert]::ToBase64String($stream.ToArray())'
+foreach ($inputText in @("line one`nline two`n", "caf$([char]0xe9)", '')) {
+    $output = Invoke-Ext -Exe $pwsh -Arguments @('-NoProfile', '-Command', $readStdin) -Label test -Stdin $inputText
+    $expected = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($inputText))
+    if ([string]$output -cne $expected) { throw 'Native stdin bytes changed in transit' }
+}
+
+# Exercise the shell-facing behavior too where POSIX sh is available.
 $body = "printf '%s\n' `"owner's directory`"`nprintf '%s\n' 'second line'"
-$output = @(Invoke-Ext -Exe sh -Arguments @('-s') -Label test -Stdin $body)
-if (($output -join '|') -cne "owner's directory|second line") { throw 'stdin script changed in transit' }
-$output = @(Invoke-Ext -Exe sh -Arguments @('-c', 'printf command-only') -Label test)
-if (($output -join '') -cne 'command-only') { throw 'Command-only execution changed' }
+if (-not $IsWindows) {
+    $output = @(Invoke-Ext -Exe sh -Arguments @('-s') -Label test -Stdin $body)
+    if (($output -join '|') -cne "owner's directory|second line") { throw 'stdin script changed in transit' }
+}
+$output = Invoke-Ext -Exe $pwsh -Arguments @('-NoProfile', '-Command', "'command-only'") -Label test
+if ($output -cne 'command-only') { throw 'Command-only execution changed' }
 $failed = $false
-try { Invoke-Ext -Exe sh -Arguments @('-s') -Label test -Stdin 'exit 7' } catch { $failed = $true }
+try {
+    Invoke-Ext -Exe $pwsh -Arguments @('-NoProfile', '-Command', 'exit 7') -Label test -Stdin ''
+} catch {
+    $failed = $_.Exception.Message -like '*exited with code 7*'
+}
 if (-not $failed) { throw 'stdin execution swallowed a failure' }
 
 # Test SSH argument and stdin forwarding independently of native SSH availability.
