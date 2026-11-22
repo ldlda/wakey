@@ -68,8 +68,8 @@ or current fleet size. Metric labels should remain bounded; no per-device labels
 
 ## Device Diagnostics
 
-- [ ] Add agent-side ICMP ping through the existing command relay, with an explicit IP and selected agent/network route. Bound probe count, total duration, output and concurrent work; no shell interpolation. Account for missing tools and ICMP permissions, and support IPv4/IPv6 where available.
-- [ ] Return probe replies, loss and round-trip times; offer Ping alongside Wake in device details. MAC-only devices cannot be pinged without an IP. A reply means that IP responded from that agent's network, not proof of saved identity; no reply must not automatically mark a device offline or remove an identifier.
+- [x] Add agent-side ICMP ping through the existing command relay. Linux agents use `surge-ping` for a single IPv4 or IPv6 echo with a two-second reply timeout. Link-local IPv6 uses the observed interface. The agent needs access to ICMP datagram sockets or raw sockets.
+- [x] Offer Ping alongside Wake in device details. Show reply status and round-trip time for the selected IP and agent. Probe results leave device presence and identity unchanged.
 
 ## Optional Agent Sources And Capabilities
 

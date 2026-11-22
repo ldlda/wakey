@@ -39,4 +39,7 @@ wakey = { path = "..", registry = "gitea", version = "0" }
 wakey-core = { path = "../wakey-core", registry = "gitea", version = "0", features = ["telemetry"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["net"] }
+rand = "0.10"
+surge-ping = "0.9.1"
 wakey-linux = { path = "../wakey-linux", registry = "gitea", version = "0", features = ["telemetry"] }

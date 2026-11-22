@@ -92,6 +92,18 @@ pub async fn relay_agent_command(
     command: AgentCommand,
     timeout_ms: Option<u64>,
 ) -> Result<RelayCommandResponse, ApiError> {
+    static PING_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+    let _ping_slot = if matches!(&command, AgentCommand::Ping(_)) {
+        Some(PING_SLOTS.try_acquire().map_err(|_| {
+            ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "ping_busy",
+                "too many pings are in progress",
+            )
+        })?)
+    } else {
+        None
+    };
     let request_id_string = format!("req-{}", Uuid::new_v4());
     let command_kind = command_kind(&command);
     tracing::Span::current()
@@ -110,7 +122,9 @@ pub async fn relay_agent_command(
 
     let tx = {
         let sessions = state.sessions.read().await;
-        sessions.get(agent_id).map(|session| session.tx.clone())
+        sessions
+            .get(agent_id)
+            .map(|session| (session.tx.clone(), session.capability_options.ping))
     }
     .ok_or_else(|| {
         warn!("command rejected: agent not connected");
@@ -120,6 +134,14 @@ pub async fn relay_agent_command(
             "agent is not connected",
         )
     })?;
+    let (tx, ping_supported) = tx;
+    if matches!(&command, AgentCommand::Ping(_)) && ping_supported != Some(true) {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "ping_unsupported",
+            "this agent does not advertise ping support",
+        ));
+    }
 
     let (pending_tx, pending_rx) = tokio::sync::oneshot::channel();
     state
@@ -288,5 +310,6 @@ fn command_kind(command: &AgentCommand) -> &'static str {
         AgentCommand::Devs(_) => "devs",
         AgentCommand::Inventory(_) => "inventory",
         AgentCommand::Wake(_) => "wake",
+        AgentCommand::Ping(_) => "ping",
     }
 }

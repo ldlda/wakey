@@ -97,11 +97,14 @@ const fn default_terminal_session_ttl_seconds() -> u64 {
 pub struct AgentCapabilityOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<TerminalCapabilityOptions>,
+    /// Older peers can ignore this field and continue using the same hello.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ping: Option<bool>,
 }
 
 impl AgentCapabilityOptions {
     fn is_empty(&self) -> bool {
-        self.terminal.is_none()
+        self.terminal.is_none() && self.ping.is_none()
     }
 }
 
@@ -270,15 +273,31 @@ pub enum AgentCommand {
     Devs(DevsRequest),
     Inventory(InventoryRequest),
     Wake(WakeRequest),
+    Ping(PingRequest),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PingRequest {
+    pub ip: IpAddr,
+    pub interface: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CommandResult {
-    Leases { rows: Vec<DhcpLeaseWithState> },
-    Devs { rows: Vec<InterfaceSummary> },
+    Leases {
+        rows: Vec<DhcpLeaseWithState>,
+    },
+    Devs {
+        rows: Vec<InterfaceSummary>,
+    },
     Inventory(DeviceInventory),
     Wake(WakeResult),
+    Ping {
+        ip: IpAddr,
+        replied: bool,
+        rtt_ms: Option<f64>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -495,6 +514,7 @@ mod tests {
             agent_id: "router".into(),
             capabilities: vec![AgentCapability::Terminal],
             capability_options: AgentCapabilityOptions {
+                ping: None,
                 terminal: Some(TerminalCapabilityOptions {
                     max_sessions: 3,
                     session_ttl_seconds: 600,

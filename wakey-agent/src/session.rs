@@ -89,6 +89,7 @@ async fn run_once(
                 agent_id: config.agent_id.clone(),
                 capabilities: agent_capabilities(config),
                 capability_options: AgentCapabilityOptions {
+                    ping: cfg!(target_os = "linux").then_some(true),
                     terminal: config
                         .terminal
                         .enabled
@@ -401,6 +402,7 @@ fn command_kind(command: &AgentCommand) -> &'static str {
         AgentCommand::Devs(_) => "devs",
         AgentCommand::Inventory(_) => "inventory",
         AgentCommand::Wake(_) => "wake",
+        AgentCommand::Ping(_) => "ping",
     }
 }
 

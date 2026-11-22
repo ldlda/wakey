@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod dispatch;
 mod enroll;
+mod ping;
 mod serve;
 mod session;
 mod terminal;

@@ -415,6 +415,7 @@ export function DevicesPage({ agents, onAfterWake, onRefresh }: Props) {
       <FleetDeviceDetailsDialog
         key={details?.device_key ?? "__none"}
         device={details}
+        agents={agents}
         knownDevices={knownDevices}
         open={Boolean(details)}
         busy={wakeBusyKey === details?.device_key}
@@ -508,7 +509,11 @@ function FleetDeviceRow({
           {busy ? "Waking" : "Wake"}
         </Button>
         <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex size-9 items-center justify-center rounded-md border bg-background">
+          <DropdownMenuTrigger
+            render={<Button variant="outline" size="icon-sm" />}
+            aria-label="Device actions"
+            title="Device actions"
+          >
             <MoreHorizontal className="size-4" aria-hidden />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">

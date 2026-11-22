@@ -18,6 +18,7 @@ pub async fn dispatch_command(
         AgentCommand::Devs(req) => dispatch_devs(req).await,
         AgentCommand::Inventory(req) => dispatch_inventory(req, config).await,
         AgentCommand::Wake(req) => dispatch_wake(req).await,
+        AgentCommand::Ping(req) => crate::ping::probe(req).await,
     }
 }
 
@@ -159,6 +160,7 @@ fn command_kind(command: &AgentCommand) -> &'static str {
         AgentCommand::Devs(_) => "devs",
         AgentCommand::Inventory(_) => "inventory",
         AgentCommand::Wake(_) => "wake",
+        AgentCommand::Ping(_) => "ping",
     }
 }
 

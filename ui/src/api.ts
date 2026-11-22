@@ -5,6 +5,7 @@ export type Agent = {
   capabilities: "terminal"[];
   capability_options?: {
     terminal?: { max_sessions: number };
+    ping?: boolean;
   };
 };
 
@@ -491,6 +492,27 @@ export function runCommand(
       body: JSON.stringify(payload),
     },
   );
+}
+
+export async function pingDevice(
+  agentId: string,
+  ip: string,
+  networkInterface: string | null,
+): Promise<{ replied: boolean; rtt_ms: number | null }> {
+  const response = await request<{
+    status: string;
+    result?: { kind: "ping"; replied: boolean; rtt_ms: number | null };
+    error?: { message: string };
+  }>(`/api/v1/control/agents/${encodeURIComponent(agentId)}/command`, {
+    method: "POST",
+    body: JSON.stringify({
+      command: { kind: "ping", ip, interface: networkInterface },
+    }),
+  });
+  if (response.status !== "ok" || response.result?.kind !== "ping") {
+    throw new Error(response.error?.message ?? "Agent returned no ping result");
+  }
+  return response.result;
 }
 
 function buildCommandPayload(

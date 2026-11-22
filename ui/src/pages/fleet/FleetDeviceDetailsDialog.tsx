@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Minus, Plus, Zap, Pencil, Trash2, Check, X } from "lucide-react";
+import { Copy, Minus, Plus, Pencil, Trash2, Check, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -9,6 +9,7 @@ import {
   mergeKnownDevice,
   renameKnownDevice,
   forgetKnownDevice,
+  type Agent,
   type FleetDevice,
   type FleetDeviceEndpoint,
   type KnownDevice,
@@ -32,16 +33,17 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { DetailBlock, PresenceBadge } from "@/pages/fleet/FleetComponents";
+import { FleetDeviceActions } from "./FleetDeviceActions";
 import {
   agentLabel,
   formatSeen,
   identifiersFor,
   presenceRank,
-  routeLabel,
 } from "@/pages/fleet/utils";
 
 type Props = {
   device: FleetDevice | null;
+  agents: Agent[];
   knownDevices: KnownDevice[];
   open: boolean;
   busy: boolean;
@@ -53,6 +55,7 @@ type Props = {
 
 export function FleetDeviceDetailsDialog({
   device,
+  agents,
   knownDevices,
   open,
   busy,
@@ -63,9 +66,6 @@ export function FleetDeviceDetailsDialog({
 }: Props) {
   const [displayName, setDisplayName] = useState(device?.display_name ?? "");
   const [targetDeviceId, setTargetDeviceId] = useState("");
-  const [routeId, setRouteId] = useState(
-    device?.recommended_route?.route_id ?? "",
-  );
   const [addKind, setAddKind] = useState<"mac" | "ip">("mac");
   const [addValue, setAddValue] = useState("");
   const [error, setError] = useState("");
@@ -212,13 +212,9 @@ export function FleetDeviceDetailsDialog({
     });
   }
 
-  const selectedRoute =
-    device.route_candidates.find((r) => r.route_id === routeId) ??
-    device.recommended_route;
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-auto sm:max-w-4xl">
+      <DialogContent className="max-h-[92dvh] overflow-auto sm:max-w-4xl">
         <DialogHeader>
           <div className="flex min-w-0 items-start justify-between gap-3 pr-8">
             <div className="min-w-0">
@@ -234,6 +230,15 @@ export function FleetDeviceDetailsDialog({
             <PresenceBadge presence={device.presence} />
           </div>
         </DialogHeader>
+
+        <FleetDeviceActions
+          device={device}
+          agents={agents}
+          busy={actionBusy}
+          waking={busy}
+          onWake={onWake}
+        />
+        <Separator />
 
         {error && (
           <pre className="max-h-40 overflow-auto rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive">
@@ -292,39 +297,6 @@ export function FleetDeviceDetailsDialog({
               No endpoint evidence reported.
             </p>
           )}
-        </div>
-
-        <Separator />
-
-        {/* ── Wake route ── */}
-        <div className="grid gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">Wake route</h3>
-            <Button
-              size="sm"
-              onClick={() => onWake(selectedRoute?.route_id ?? null)}
-              disabled={actionBusy || busy || !selectedRoute?.wakeable}
-            >
-              <Zap className="size-4" aria-hidden />
-              {busy ? "Waking" : "Wake"}
-            </Button>
-          </div>
-          <Select value={routeId} onValueChange={(v) => setRouteId(v ?? "")}>
-            <SelectTrigger>
-              <span>
-                {selectedRoute
-                  ? routeLabel(selectedRoute)
-                  : "No connected MAC-backed route"}
-              </span>
-            </SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}>
-              {device.route_candidates.map((route) => (
-                <SelectItem key={route.route_id} value={route.route_id}>
-                  {routeLabel(route)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
         <Separator />
