@@ -65,31 +65,12 @@ pub async fn get_with_handle(
         }
 
         let state: NUDState = msg.header.state.try_into().unwrap_or_default();
-        let mut ip = None;
-        let mut mac = None;
-
-        for attr in msg.attributes {
-            match attr {
-                NeighbourAttribute::Destination(addr) => match addr {
-                    NeighbourAddress::Inet(v4) => ip = Some(IpAddr::from(v4)),
-                    NeighbourAddress::Inet6(v6) => ip = Some(IpAddr::from(v6)),
-                    _ => continue 'row,
-                },
-                NeighbourAttribute::LinkLayerAddress(bytes) => {
-                    mac = match bytes.len() {
-                        6 => bytes.first_chunk::<6>().map(|&b| MacAddr::from(b)),
-                        8 => bytes.first_chunk::<8>().map(|&b| MacAddr::from(b)),
-                        _ => continue 'row,
-                    }
-                }
-                _ => {}
-            }
-        }
+        let Some((ip, mac)) = parse_addresses(msg.attributes) else {
+            continue 'row;
+        };
 
         // Resolve ifindex -> name (cached)
-        let dev = ifname_cache.get(&msg.header.ifindex).cloned();
-
-        let (Some(ip), Some(dev)) = (ip, dev) else {
+        let Some(dev) = ifname_cache.get(&msg.header.ifindex) else {
             continue 'row;
         };
 
@@ -109,13 +90,37 @@ pub async fn get_with_handle(
 
         result.push(NeighborItem {
             ip,
-            dev: Some(dev),
+            dev: Some(dev.clone()),
             mac,
             state: vec![state],
         });
     }
 
     Ok(result)
+}
+
+fn parse_addresses(attributes: Vec<NeighbourAttribute>) -> Option<(IpAddr, Option<MacAddr>)> {
+    let mut ip = None;
+    let mut mac = None;
+    for attr in attributes {
+        match attr {
+            NeighbourAttribute::Destination(addr) => match addr {
+                NeighbourAddress::Inet(v4) => ip = Some(IpAddr::from(v4)),
+                NeighbourAddress::Inet6(v6) => ip = Some(IpAddr::from(v6)),
+                _ => return None,
+            },
+            NeighbourAttribute::LinkLayerAddress(bytes) => {
+                mac = match bytes.len() {
+                    6 => bytes.first_chunk::<6>().map(|&b| MacAddr::from(b)),
+                    8 => bytes.first_chunk::<8>().map(|&b| MacAddr::from(b)),
+                    // IP neighbors can have non-MAC addresses, such as 20-byte IPoIB addresses.
+                    _ => None,
+                }
+            }
+            _ => {}
+        }
+    }
+    Some((ip?, mac))
 }
 
 impl TryFrom<NeighbourState> for NUDState {
@@ -136,4 +141,21 @@ impl TryFrom<NeighbourState> for NUDState {
     }
 
     type Error = u16;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn unsupported_link_address_keeps_neighbor_ip() {
+        let ip = Ipv4Addr::new(192, 0, 2, 1);
+        let attributes = vec![
+            NeighbourAttribute::LinkLayerAddress(vec![0; 20]),
+            NeighbourAttribute::Destination(NeighbourAddress::Inet(ip)),
+        ];
+
+        assert_eq!(parse_addresses(attributes), Some((ip.into(), None)));
+    }
 }
