@@ -289,8 +289,13 @@ export function fetchAlertHistory(limit = 50): Promise<AlertTransition[]> {
   );
 }
 
-export function fetchAudit(limit = 50): Promise<AuditEvent[]> {
-  return request<AuditEvent[]>(`/api/v1/control/audit/events?limit=${limit}`);
+export function fetchAudit(
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<AuditEvent[]> {
+  return request<AuditEvent[]>(`/api/v1/control/audit/events?limit=${limit}`, {
+    signal,
+  });
 }
 
 export function fetchEnrollTokens(): Promise<EnrollTokenStatus[]> {

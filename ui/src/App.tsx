@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { toast } from "sonner";
 
 import {
@@ -35,7 +35,6 @@ import { WakeToolsPage } from "@/pages/WakeToolsPage";
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 export function App() {
-  const { pathname } = useLocation();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [history, setHistory] = useState<AlertTransition[]>([]);
@@ -141,20 +140,6 @@ export function App() {
   useEffect(() => {
     void loadAll();
   }, []);
-
-  useEffect(() => {
-    if (pathname !== "/dashboard") return;
-    let active = true;
-    // This includes commands run outside the current UI, including other tabs.
-    void fetchAudit(30)
-      .then((events) => {
-        if (active) setAudit(events);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [pathname]);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -274,11 +259,9 @@ export function App() {
                 agents={agents}
                 alerts={alerts}
                 transitions={history}
-                audit={audit}
                 loading={state === "loading"}
                 alertsHealth={alertsHealth}
                 alertsStreamConnected={alertsStreamConnected}
-                onRefresh={loadAll}
               />
             }
           />

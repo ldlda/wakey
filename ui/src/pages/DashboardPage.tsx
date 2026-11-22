@@ -1,33 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  Activity,
-  Bell,
-  Bot,
-  Key,
-  RefreshCw,
-  ArrowRight,
-  ArrowDownLeft,
-  ArrowUpRight,
-  Plug,
-  Zap,
-} from "lucide-react";
+import { Activity, Bell, Bot, Key, ArrowRight } from "lucide-react";
 
 import {
   type Agent,
   type Alert,
   type AlertTransition,
-  type AuditEvent,
   type EnrollTokenStatus,
   fetchEnrollTokens,
 } from "@/api";
-import { Button } from "@/components/ui/button";
+import { RecentActivityFeed } from "./dashboard/RecentActivityFeed";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,20 +23,10 @@ type Props = {
   agents: Agent[];
   alerts: Alert[];
   transitions: AlertTransition[];
-  audit: AuditEvent[];
   loading: boolean;
   alertsHealth: { available: boolean; reason?: string } | null;
   alertsStreamConnected: boolean;
-  onRefresh: () => void;
 };
-
-function relativeTime(unixMs: number): string {
-  const diff = Date.now() - unixMs;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
-}
 
 function severityColor(severity: string): string {
   switch (severity.toLowerCase()) {
@@ -64,24 +41,13 @@ function severityColor(severity: string): string {
   }
 }
 
-function eventIcon(eventType: string) {
-  if (eventType === "command_dispatch") return ArrowUpRight;
-  if (eventType === "command_result") return ArrowDownLeft;
-  if (eventType.includes("wake")) return Zap;
-  if (eventType.includes("enroll")) return Key;
-  if (eventType.includes("connect")) return Plug;
-  return Activity;
-}
-
 export function DashboardPage({
   agents,
   alerts,
   transitions,
-  audit,
   loading,
   alertsHealth,
   alertsStreamConnected,
-  onRefresh,
 }: Props) {
   const connected = agents.filter((a) => a.connected).length;
   const total = agents.length;
@@ -98,14 +64,6 @@ export function DashboardPage({
       .catch(() => undefined);
   }, []);
   const activeTokens = tokens.filter((t) => !t.expired).length;
-
-  const recentAudit = audit.slice(0, 8);
-  const agentNames = new Map(
-    agents.map((agent) => [
-      agent.agent_id,
-      agent.nickname?.trim() || agent.agent_id,
-    ]),
-  );
 
   if (loading && !agents.length) {
     return (
@@ -261,102 +219,7 @@ export function DashboardPage({
         </CardContent>
       </Card>
 
-      {/* Recent Activity Feed */}
-      <Card className="sm:col-span-2 lg:col-span-4">
-        <CardHeader className="flex flex-row items-start justify-between gap-3 gap-y-0">
-          <div>
-            <CardTitle>Recent Activity</CardTitle>
-            <CardDescription className="mt-1">
-              Latest audit events across the fleet
-            </CardDescription>
-          </div>
-          <Button
-            onClick={onRefresh}
-            disabled={loading}
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-          >
-            <RefreshCw
-              className={`size-3.5 ${loading ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {recentAudit.length > 0 ? (
-            <div className="grid gap-0">
-              {recentAudit.map((event, i) => {
-                const Icon = eventIcon(event.event_type);
-                const command =
-                  typeof event.metadata.command === "string"
-                    ? event.metadata.command
-                    : null;
-                const direction =
-                  event.event_type === "command_dispatch"
-                    ? "to"
-                    : event.event_type === "command_result"
-                      ? "from"
-                      : null;
-                const agentName = event.agent_id
-                  ? (agentNames.get(event.agent_id) ?? event.agent_id)
-                  : null;
-                return (
-                  <div
-                    key={event.event_id}
-                    className={`flex items-start gap-3 py-3 ${
-                      i < recentAudit.length - 1
-                        ? "border-b border-border/50"
-                        : ""
-                    }`}
-                  >
-                    <span
-                      className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-sm"
-                      aria-hidden
-                    >
-                      <Icon className="size-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="break-all text-sm font-medium">
-                          {command && direction
-                            ? `${command} ${direction} ${agentName ?? "agent"}`
-                            : event.event_type.replace(/_/g, " ")}
-                        </span>
-                        <Badge
-                          variant={
-                            ["success", "ok", "sent"].includes(event.outcome)
-                              ? "secondary"
-                              : "destructive"
-                          }
-                          className="text-[0.6rem] px-1.5 py-0"
-                        >
-                          {event.outcome}
-                        </Badge>
-                      </div>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {event.message}
-                        {event.latency_ms != null &&
-                          ` · ${event.latency_ms} ms`}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                      {relativeTime(event.ts_unix * 1000)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <Activity className="size-8 text-muted-foreground/40" />
-              <p className="mt-2 text-sm text-muted-foreground">
-                No recent activity
-              </p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <RecentActivityFeed agents={agents} />
     </section>
   );
 }

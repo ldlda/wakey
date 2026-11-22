@@ -30,6 +30,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatRecentTime } from "@/lib/formatRecentTime";
 import {
   FilterSelect,
   MobileLabel,
@@ -38,7 +39,6 @@ import {
 import { FleetDeviceDetailsDialog } from "@/pages/fleet/FleetDeviceDetailsDialog";
 import {
   agentLabel,
-  formatSeen,
   knownFilters,
   presenceFilters,
   presenceRank,
@@ -497,7 +497,7 @@ function FleetDeviceRow({
       </span>
       <span className="text-muted-foreground">
         <MobileLabel label="Last seen" />
-        {formatSeen(device.last_seen_unix)}
+        {formatRecentTime(device.last_seen_unix)}
       </span>
       <div className="flex justify-end gap-2">
         <Button

@@ -32,14 +32,10 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { formatRecentTime } from "@/lib/formatRecentTime";
 import { DetailBlock, PresenceBadge } from "@/pages/fleet/FleetComponents";
 import { FleetDeviceActions } from "./FleetDeviceActions";
-import {
-  agentLabel,
-  formatSeen,
-  identifiersFor,
-  presenceRank,
-} from "@/pages/fleet/utils";
+import { agentLabel, identifiersFor, presenceRank } from "@/pages/fleet/utils";
 
 type Props = {
   device: FleetDevice | null;
@@ -685,7 +681,7 @@ function EndpointRow({
         </p>
       </div>
       <span className="whitespace-nowrap text-right text-xs text-muted-foreground">
-        {formatSeen(endpoint.last_seen_unix)}
+        {formatRecentTime(endpoint.last_seen_unix)}
       </span>
       <div className="flex justify-end">
         {target && (
