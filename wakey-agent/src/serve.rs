@@ -94,7 +94,10 @@ pub(crate) fn command_for_config(path: &Path) -> String {
     if path == Path::new(config::DEFAULT_CONFIG_PATH) {
         "wakey-agent serve".to_string()
     } else {
-        format!("wakey-agent --config {} serve", path.display())
+        format!(
+            "wakey-agent --config {} serve",
+            crate::cli::shell_path(path)
+        )
     }
 }
 
@@ -188,8 +191,8 @@ mod tests {
     #[test]
     fn serve_command_includes_custom_config_path() {
         assert_eq!(
-            command_for_config(std::path::Path::new("/tmp/wakey-agent.toml")),
-            "wakey-agent --config /tmp/wakey-agent.toml serve"
+            command_for_config(Path::new("/tmp/owner's config.toml")),
+            "wakey-agent --config '/tmp/owner'\"'\"'s config.toml' serve"
         );
     }
 

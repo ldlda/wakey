@@ -1,8 +1,13 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, Args, Parser, Subcommand};
 
 use crate::config;
+
+/// Quote a path in a POSIX shell command printed for the operator to copy.
+pub(crate) fn shell_path(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\"'\"'"))
+}
 
 #[derive(Parser)]
 #[command(name = "wakey-agent")]

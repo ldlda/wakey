@@ -51,7 +51,7 @@ pub(crate) async fn run(args: EnrollArgs) -> Result<()> {
     println!("runtime_config=unchanged_until_reload_or_restart");
     println!(
         "next=wakey-agent reload --pid-file {}  # if daemon is already running",
-        pid_file.display()
+        crate::cli::shell_path(pid_file)
     );
     println!("run={}", serve::command_for_config(&args.config));
     Ok(())

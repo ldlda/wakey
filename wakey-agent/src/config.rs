@@ -5,8 +5,11 @@ pub(crate) use init::run as init;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fs::{File, OpenOptions};
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use wakey_core::config_duration::{self, LegacyDuration};
 
@@ -323,10 +326,16 @@ impl<'de> Deserialize<'de> for TerminalConfig {
     }
 }
 
-pub fn save_config(path: &Path, config: &AgentConfig) -> Result<()> {
+#[derive(Clone, Copy)]
+enum Publish {
+    Create,
+    Replace,
+}
+
+fn save_config(path: &Path, config: &AgentConfig, publish: Publish) -> Result<()> {
     config.validate()?;
     let content = toml::to_string_pretty(config).context("failed to serialize agent config")?;
-    write_config_atomically(path, &content)
+    write_config_atomically(path, &content, publish)
 }
 
 pub fn save_config_with_backup(path: &Path, config: &AgentConfig) -> Result<Option<PathBuf>> {
@@ -335,14 +344,14 @@ pub fn save_config_with_backup(path: &Path, config: &AgentConfig) -> Result<Opti
     } else {
         None
     };
-    save_config(path, config)?;
+    save_config(path, config, Publish::Replace)?;
     Ok(backup)
 }
 
 pub fn restore_backup(path: &Path, backup_path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(backup_path)
         .with_context(|| format!("failed to read config backup {}", backup_path.display()))?;
-    write_config_atomically(path, &content)
+    write_config_atomically(path, &content, Publish::Replace)
 }
 
 fn snapshot_existing_config(path: &Path) -> Result<PathBuf> {
@@ -366,23 +375,64 @@ fn snapshot_existing_config(path: &Path) -> Result<PathBuf> {
     Ok(backup_path)
 }
 
-fn write_config_atomically(path: &Path, content: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create config dir {}", parent.display()))?;
-    }
+fn write_config_atomically(path: &Path, content: &str, publish: Publish) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create config dir {}", parent.display()))?;
+    let (mut file, tmp) = open_temp_config(parent)?;
+    let written = file.write_all(content.as_bytes());
+    drop(file);
+    let result = written
+        .with_context(|| format!("failed to write temp config {}", tmp.display()))
+        .and_then(|()| {
+            // A hard link publishes the complete file without replacing an
+            // existing path, including one created after this write started.
+            let result = match publish {
+                Publish::Create => std::fs::hard_link(&tmp, path),
+                Publish::Replace => std::fs::rename(&tmp, path),
+            };
+            if matches!(publish, Publish::Create)
+                && result
+                    .as_ref()
+                    .is_err_and(|err| err.kind() == ErrorKind::AlreadyExists)
+            {
+                return result.with_context(|| {
+                    format!(
+                        "config {} already exists; re-run with --force to overwrite",
+                        path.display()
+                    )
+                });
+            }
+            result.with_context(|| format!("failed to publish config {}", path.display()))
+        });
+    let _ = std::fs::remove_file(tmp);
+    result
+}
 
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, content)
-        .with_context(|| format!("failed to write temp config {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| {
-        format!(
-            "failed to move temp config {} into {}",
-            tmp.display(),
-            path.display()
-        )
-    })?;
-    Ok(())
+fn open_temp_config(parent: &Path) -> Result<(File, PathBuf)> {
+    static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    loop {
+        let suffix = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let path = parent.join(format!(".wakey-config-{}-{suffix}.tmp", std::process::id()));
+        match options.open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to create temp config {}", path.display()));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -391,6 +441,29 @@ mod tests {
 
     const HEADER: &str =
         "server_url = 'https://example.com'\nagent_id = 'agent-1'\nagent_token = 'secret'\n";
+
+    #[test]
+    fn concurrent_config_creation_does_not_overwrite_the_winner() {
+        let dir = std::env::temp_dir().join(format!("wakey-config-publish-{}", std::process::id()));
+        let path = dir.join("config.toml");
+        let path = path.as_path();
+        let (first, second) = std::thread::scope(|scope| {
+            let first = scope.spawn(|| write_config_atomically(path, "first", Publish::Create));
+            let second = scope.spawn(|| write_config_atomically(path, "second", Publish::Create));
+            (first.join().unwrap(), second.join().unwrap())
+        });
+        let (winner, error) = match (first, second) {
+            (Ok(()), Err(error)) => ("first", error),
+            (Err(error), Ok(())) => ("second", error),
+            outcomes => panic!("expected exactly one config to be created: {outcomes:?}"),
+        };
+        assert!(error.to_string().contains("--force"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), winner);
+        write_config_atomically(path, "replacement", Publish::Replace).unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "replacement");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn legacy_duration_keys_convert_and_serialize_canonically() {
@@ -499,7 +572,7 @@ mod tests {
             },
         };
 
-        save_config(&path, &config).expect("save");
+        save_config(&path, &config, Publish::Replace).expect("save");
         let loaded = load_config(&path).expect("load");
         assert_eq!(loaded, config);
         assert!(format!("{:?}", loaded).contains("<redacted>"));

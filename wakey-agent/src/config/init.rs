@@ -3,16 +3,6 @@ use anyhow::Result;
 use crate::{cli::InitConfigArgs, config, serve};
 
 pub(crate) fn run(args: InitConfigArgs) -> Result<()> {
-    if let Some(config) = &args.config
-        && config.exists()
-        && !args.force
-    {
-        anyhow::bail!(
-            "config {} already exists; re-run with --force to overwrite",
-            config.display()
-        );
-    }
-
     let mut cfg = if let Some(from_config) = &args.from_config {
         config::load_config(from_config)?
     } else {
@@ -36,7 +26,12 @@ pub(crate) fn run(args: InitConfigArgs) -> Result<()> {
     }
 
     if let Some(path) = &args.config {
-        config::save_config(path, &cfg)?;
+        let publish = if args.force {
+            super::Publish::Replace
+        } else {
+            super::Publish::Create
+        };
+        config::save_config(path, &cfg, publish)?;
         println!("config={}", path.display());
         println!("run={}", serve::command_for_config(path));
     } else {
