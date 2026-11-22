@@ -4,11 +4,82 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
-use crate::config::{AgentConfig, DEFAULT_CONFIG, save_config_with_backup};
+use crate::cli::EnrollArgs;
+use crate::config::{self, AgentConfig, DEFAULT_CONFIG, save_config_with_backup};
+use crate::serve;
 
-pub struct EnrollOutcome {
-    pub config: AgentConfig,
-    pub backup_path: Option<PathBuf>,
+struct EnrollOutcome {
+    config: AgentConfig,
+    backup_path: Option<PathBuf>,
+}
+
+pub(crate) async fn run(args: EnrollArgs) -> Result<()> {
+    let existing_config = config::load_optional_config(&args.config)?;
+    let server_url = args
+        .server_url
+        .as_deref()
+        .or_else(|| existing_config.as_ref().map(|cfg| cfg.server_url.as_str()))
+        .with_context(|| {
+            format!(
+                "missing control-plane URL: pass --server-url or provide server_url in {}",
+                args.config.display()
+            )
+        })?;
+
+    info!(%server_url, config = %args.config.display(), "wakey-agent command: enroll");
+    let outcome = enroll(
+        server_url,
+        &args.enroll_token,
+        &args.config,
+        existing_config.as_ref(),
+    )
+    .await?;
+    let pid_file = args.pid_file.as_deref().unwrap_or(&outcome.config.pid_file);
+
+    println!("agent_id={}", outcome.config.agent_id);
+    println!("config={}", args.config.display());
+    println!("config_write=updated");
+    if let Some(backup_path) = &outcome.backup_path {
+        println!("config_backup={}", backup_path.display());
+    }
+
+    if args.reload_running {
+        return reload_or_restore(pid_file, &args.config, outcome.backup_path.as_deref());
+    }
+
+    println!("reload=not_requested");
+    println!("runtime_config=unchanged_until_reload_or_restart");
+    println!(
+        "next=wakey-agent reload --pid-file {}  # if daemon is already running",
+        pid_file.display()
+    );
+    println!("run={}", serve::command_for_config(&args.config));
+    Ok(())
+}
+
+fn reload_or_restore(pid_file: &Path, config_path: &Path, backup: Option<&Path>) -> Result<()> {
+    let Err(err) = serve::reload_daemon(pid_file) else {
+        println!("reload=signaled pid_file={}", pid_file.display());
+        return Ok(());
+    };
+
+    warn!(error = %err, pid_file = %pid_file.display(), "enroll completed but daemon reload failed");
+    let Some(backup_path) = backup else {
+        return Err(
+            err.context("reload failed after enroll; no previous config backup was available")
+        );
+    };
+    if let Err(restore_err) = config::restore_backup(config_path, backup_path) {
+        // Keep the reload failure as the source and report the separate restore failure too.
+        return Err(err.context(format!(
+            "reload failed after enroll and rollback failed: {restore_err:#}"
+        )));
+    }
+    println!("rollback=restored backup={}", backup_path.display());
+    Err(err.context(format!(
+        "reload failed after enroll; restored previous config from {}",
+        backup_path.display()
+    )))
 }
 
 #[derive(Debug, Serialize)]
@@ -23,7 +94,7 @@ struct EnrollResponse {
     server_url: Option<String>,
 }
 
-pub async fn enroll(
+async fn enroll(
     server_url: &str,
     enroll_token: &str,
     config_path: &Path,
@@ -69,7 +140,7 @@ pub async fn enroll(
     })
 }
 
-pub fn normalize_server_url(server_url: &str) -> String {
+fn normalize_server_url(server_url: &str) -> String {
     server_url.trim_end_matches('/').to_string()
 }
 
@@ -122,6 +193,30 @@ mod tests {
             normalize_server_url("https://example.com/"),
             "https://example.com"
         );
+    }
+
+    #[test]
+    fn reload_failure_restores_backup_and_preserves_cause() {
+        let dir = std::env::temp_dir().join(format!(
+            "wakey-agent-enroll-rollback-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("config.toml");
+        let backup = dir.join("config.toml.bak");
+        std::fs::write(&config, "new").unwrap();
+        std::fs::write(&backup, "old").unwrap();
+
+        let err = reload_or_restore(&dir.join("missing.pid"), &config, Some(&backup))
+            .expect_err("reload should fail for a missing PID file");
+
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), "old");
+        assert!(err.to_string().contains("restored previous config"));
+        assert_eq!(
+            err.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

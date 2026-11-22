@@ -1,3 +1,7 @@
+mod init;
+
+pub(crate) use init::run as init;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -210,9 +214,18 @@ impl AgentConfig {
     }
 }
 
-pub fn apply_local_path_env_to_command(cmd: &mut std::process::Command, config: &AgentConfig) {
-    for (key, path) in config.local_path_envs() {
-        cmd.env(key, path);
+/// Treat an absent file as unconfigured. Read and parse errors still fail.
+pub(crate) fn load_optional_config(path: &Path) -> Result<Option<AgentConfig>> {
+    match load_config(path) {
+        Ok(config) => Ok(Some(config)),
+        Err(err)
+            if err
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(None)
+        }
+        Err(err) => Err(err),
     }
 }
 
@@ -430,6 +443,25 @@ mod tests {
             ..config
         };
         assert!(oversized.validate().is_err());
+    }
+
+    #[test]
+    fn optional_config_only_ignores_a_missing_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "wakey-agent-optional-config-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        assert!(load_optional_config(&path).unwrap().is_none());
+
+        std::fs::write(&path, "[broken").unwrap();
+        let Err(err) = load_optional_config(&path) else {
+            panic!("malformed config must not be treated as missing");
+        };
+        assert!(err.to_string().contains("failed to parse agent config"));
+        assert!(load_optional_config(&dir).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
