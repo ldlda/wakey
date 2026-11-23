@@ -511,11 +511,15 @@ function FleetDeviceRow({
       <div className="flex justify-end gap-2">
         <Button
           size="sm"
-          onClick={onWake}
-          disabled={busy || !device.recommended_route}
+          onClick={() => {
+            if (!busy) onWake();
+          }}
+          disabled={!device.recommended_route}
+          aria-disabled={busy || undefined}
+          aria-busy={busy || undefined}
         >
           <Zap className="size-4" aria-hidden />
-          {busy ? "Waking" : "Wake"}
+          Wake
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger

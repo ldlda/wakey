@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Activity, LoaderCircle, Zap } from "lucide-react";
 import { pingDevice, type Agent, type FleetDevice } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,8 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { routeLabel } from "./utils";
+
+const PING_FEEDBACK_DELAY_MS = 150;
 
 export function FleetDeviceActions({
   device,
@@ -24,7 +26,8 @@ export function FleetDeviceActions({
   onWake: (routeId: string) => void;
 }) {
   const [routeId, setRouteId] = useState("");
-  const [pending, setPending] = useState(false);
+  const [pendingRouteId, setPendingRouteId] = useState<string>();
+  const [showWaiting, setShowWaiting] = useState(false);
   const [result, setResult] = useState<{
     routeId: string;
     text: string;
@@ -48,10 +51,20 @@ export function FleetDeviceActions({
         agent.capabilities.includes("ping"),
     );
 
+  const pending = pendingRouteId !== undefined;
+  useEffect(() => {
+    if (!pending) return;
+    // Fast replies can go straight to the result without a spinner flash.
+    const timer = window.setTimeout(
+      () => setShowWaiting(true),
+      PING_FEEDBACK_DELAY_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [pending]);
+
   async function ping() {
-    if (!canPing || !route?.ip || pending) return;
-    setPending(true);
-    setResult(undefined);
+    if (busy || !canPing || !route?.ip || pendingRouteId !== undefined) return;
+    setPendingRouteId(route.route_id);
     try {
       const reply = await pingDevice(route.agent_id, route.ip, route.interface);
       const rtt =
@@ -66,38 +79,45 @@ export function FleetDeviceActions({
     } catch (error) {
       setResult({ routeId: route.route_id, text: String(error), failed: true });
     } finally {
-      setPending(false);
+      setShowWaiting(false);
+      setPendingRouteId(undefined);
     }
   }
 
   const currentResult =
     result?.routeId === route?.route_id ? result : undefined;
-  const PingIcon = pending ? LoaderCircle : Activity;
+  const waitingForRoute = showWaiting && pendingRouteId === route?.route_id;
+  const PingIcon = showWaiting ? LoaderCircle : Activity;
 
   return (
     <section className="grid gap-2" aria-label="Device actions">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-medium">Agent route</h3>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-[repeat(2,5rem)] gap-2">
           <Button
             size="sm"
             variant="outline"
             onClick={() => void ping()}
-            disabled={busy || pending || !canPing}
+            disabled={busy || !canPing}
+            aria-disabled={pending || undefined}
           >
             <PingIcon
-              className={pending ? "motion-safe:animate-spin" : undefined}
+              className={showWaiting ? "motion-safe:animate-spin" : undefined}
               aria-hidden
             />
             Ping
           </Button>
           <Button
             size="sm"
-            onClick={() => route && onWake(route.route_id)}
-            disabled={busy || waking || !route?.wakeable}
+            onClick={() => {
+              if (route?.wakeable && !busy && !waking) onWake(route.route_id);
+            }}
+            disabled={busy || !route?.wakeable}
+            aria-disabled={waking || undefined}
+            aria-busy={waking || undefined}
           >
             <Zap aria-hidden />
-            {waking ? "Waking" : "Wake"}
+            Wake
           </Button>
         </div>
       </div>
@@ -107,7 +127,7 @@ export function FleetDeviceActions({
       >
         <SelectTrigger
           aria-label="Agent route"
-          disabled={!route || pending}
+          disabled={!route}
           className="w-full min-w-0"
         >
           <span className="truncate">
@@ -128,9 +148,9 @@ export function FleetDeviceActions({
       </Select>
       <p
         role="status"
-        className={`h-10 overflow-y-auto wrap-break-word text-sm ${currentResult?.failed ? "text-destructive" : "text-muted-foreground"}`}
+        className={`min-h-4 wrap-break-word text-xs leading-4 ${!waitingForRoute && currentResult?.failed ? "text-destructive" : "text-muted-foreground"}`}
       >
-        {pending ? "Waiting for reply…" : currentResult?.text}
+        {waitingForRoute ? "Waiting for reply…" : currentResult?.text}
       </p>
     </section>
   );
