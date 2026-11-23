@@ -43,8 +43,6 @@ pub enum Command {
     RevokeAgent(RevokeAgentArgs),
     /// Print state backend stats.
     StateStats(StateStatsArgs),
-    /// Migrate a legacy sqlite state into a new SQLite state file.
-    MigrateSqliteState(MigrateSqliteStateArgs),
     /// Send SIGHUP to an already-running daemon.
     Reload(ReloadArgs),
 }
@@ -253,18 +251,6 @@ pub struct StateStatsArgs {
 
     #[command(flatten)]
     pub target: AdminTargetArgs,
-}
-
-#[derive(Args)]
-pub struct MigrateSqliteStateArgs {
-    #[arg(long, visible_alias = "from")]
-    pub from_sqlite_db: PathBuf,
-
-    #[arg(long, visible_alias = "to")]
-    pub to_sqlite_db: PathBuf,
-
-    #[arg(long)]
-    pub force: bool,
 }
 
 #[derive(Args)]

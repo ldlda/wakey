@@ -1,6 +1,6 @@
 [package]
 name = "wakey"
-version = "0.3.7"
+version = "0.4.0"
 edition = "2024"
 publish = ["gitea"]
 
@@ -52,14 +52,14 @@ uuid = { version = "1", features = ["v4"] }
 [dependencies.lda-ipjs]
 path = "ipjs"
 registry = "gitea"
-version = "0"
+version = "0.0.5"
 
 [dependencies.wakey-core]
 path = "wakey-core"
 registry = "gitea"
-version = "0"
+version = "0.4.0"
 
 [dependencies.wakey-linux]
 path = "wakey-linux"
 registry = "gitea"
-version = "0"
+version = "0.4.0"

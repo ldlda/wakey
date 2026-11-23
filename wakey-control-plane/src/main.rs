@@ -58,7 +58,6 @@ async fn main() -> Result<()> {
         Command::RevokeEnrollToken(args) => runtime::revoke_enroll_token(args).await,
         Command::RevokeAgent(args) => runtime::revoke_agent(args).await,
         Command::StateStats(args) => runtime::state_stats(args).await,
-        Command::MigrateSqliteState(args) => runtime::migrate_sqlite_state(args).await,
         Command::Reload(args) => runtime::reload_daemon(&args.pid_file),
     }
 }

@@ -60,7 +60,6 @@ mod db;
 mod devices;
 mod enrollment;
 mod helpers;
-mod migrate_sqlite;
 
 use helpers::alerts_audit::*;
 use helpers::core::*;

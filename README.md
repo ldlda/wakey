@@ -143,11 +143,10 @@ structured logs are emitted.
 State is persisted in an embedded SQLite database (default
 `/var/lib/wakey-control-plane/state.sqlite3`).
 Relative paths in config are resolved under `data_dir`.
-Legacy sled state can be imported explicitly:
-
-```sh
-wakey-control-plane migrate-sqlite-state --from /var/lib/wakey-control-plane/legacy.sqlite3 --to /var/lib/wakey-control-plane/state.sqlite3
-```
+Normal SQLite schema migrations run at startup. The legacy SQLite import
+command was removed in 0.4. If your database predates the current schema and
+still needs that import, use the 0.3.7 control-plane binary before upgrading.
+Legacy sled directories are unsupported.
 
 Enroll tokens are now expiring and revocable. Issuance returns `expires_at_unix`.
 Expired tokens are rejected on enroll and can be garbage-collected periodically

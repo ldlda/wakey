@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "lda-ipjs"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "anyhow",
  "futures",
@@ -3875,7 +3875,7 @@ dependencies = [
 
 [[package]]
 name = "wakey"
-version = "0.3.7"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3896,7 +3896,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-agent"
-version = "0.3.7"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3921,7 +3921,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-control-plane"
-version = "0.3.7"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -3950,7 +3950,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-core"
-version = "0.3.7"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "humantime",
@@ -3976,7 +3976,7 @@ dependencies = [
 
 [[package]]
 name = "wakey-linux"
-version = "0.3.7"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "futures",

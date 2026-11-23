@@ -30,9 +30,7 @@ mod process;
 pub mod terminals;
 pub(crate) mod view_cache;
 pub use admin::revoke_agent;
-pub use admin::{
-    issue_enroll_token, list_enroll_tokens, migrate_sqlite_state, revoke_enroll_token, state_stats,
-};
+pub use admin::{issue_enroll_token, list_enroll_tokens, revoke_enroll_token, state_stats};
 use process::PidFile;
 pub use process::reload_daemon;
 

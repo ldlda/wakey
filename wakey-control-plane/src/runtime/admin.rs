@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 
 use crate::api;
 use crate::cli::{
-    IssueEnrollTokenArgs, ListEnrollTokensArgs, MigrateSqliteStateArgs, RevokeAgentArgs,
-    RevokeEnrollTokenArgs, StateStatsArgs,
+    IssueEnrollTokenArgs, ListEnrollTokensArgs, RevokeAgentArgs, RevokeEnrollTokenArgs,
+    StateStatsArgs,
 };
 use crate::config;
 use crate::state;
@@ -274,14 +274,5 @@ pub async fn state_stats(args: StateStatsArgs) -> Result<()> {
         "expired_enroll_token_count={}",
         stats.expired_enroll_token_count
     );
-    Ok(())
-}
-
-pub async fn migrate_sqlite_state(args: MigrateSqliteStateArgs) -> Result<()> {
-    state::Store::migrate_sqlite_state(&args.from_sqlite_db, &args.to_sqlite_db, args.force)
-        .await?;
-    println!("from_sqlite_db={}", args.from_sqlite_db.display());
-    println!("to_sqlite_db={}", args.to_sqlite_db.display());
-    println!("migrated=true");
     Ok(())
 }
