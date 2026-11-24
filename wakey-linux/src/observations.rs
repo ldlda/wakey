@@ -18,11 +18,13 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn mac_name_cache_path() -> PathBuf {
+/// Return the environment override or platform default for the MAC name cache.
+pub fn mac_name_cache_path() -> PathBuf {
     configured_path(MAC_NAME_CACHE_ENV, DEFAULT_MAC_NAME_CACHE)
 }
 
-pub(crate) fn observation_store_path() -> PathBuf {
+/// Return the environment override or platform default for hook observations.
+pub fn observation_store_path() -> PathBuf {
     configured_path(OBSERVATION_STORE_ENV, DEFAULT_OBSERVATION_STORE)
 }
 

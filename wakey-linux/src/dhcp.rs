@@ -13,7 +13,8 @@ pub use leases::{
 const DEFAULT_DHCP_LEASES: &str = "/tmp/dhcp.leases";
 const DHCP_LEASES_ENV: &str = "WAKEY_DHCP_LEASES";
 
-pub(crate) fn dhcp_leases_path() -> PathBuf {
+/// Return the environment override or platform default for the DHCP lease file.
+pub fn dhcp_leases_path() -> PathBuf {
     configured_path(DHCP_LEASES_ENV, DEFAULT_DHCP_LEASES)
 }
 

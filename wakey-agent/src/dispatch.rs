@@ -2,7 +2,6 @@ use anyhow::Result;
 use tracing::{debug, info, instrument};
 
 use crate::config::AgentConfig;
-use crate::inventory;
 use crate::protocol::{
     AgentCommand, CommandResult, DevsRequest, InventoryRequest, LeasesRequest, WakeRequest,
 };
@@ -18,13 +17,13 @@ pub async fn dispatch_command(
         AgentCommand::Leases(req) => dispatch_leases(req, config).await,
         AgentCommand::Devs(req) => dispatch_devs(req).await,
         AgentCommand::Inventory(req) => dispatch_inventory(req, config).await,
-        AgentCommand::Wake(req) => dispatch_wake(req).await,
+        AgentCommand::Wake(req) => dispatch_wake(req, config).await,
         AgentCommand::Ping(req) => crate::ping::probe(req).await,
     }
 }
 
 async fn dispatch_leases(req: LeasesRequest, config: &AgentConfig) -> Result<CommandResult> {
-    let leases = inventory::read_leases(config).await?;
+    let leases = config.inventory_sources().read_leases().await?;
     let leases = if req.include_state {
         // only runs when requested explicitly to the endpoint
         #[allow(deprecated)]
@@ -61,14 +60,47 @@ async fn dispatch_devs(req: DevsRequest) -> Result<CommandResult> {
 }
 
 async fn dispatch_inventory(req: InventoryRequest, config: &AgentConfig) -> Result<CommandResult> {
-    let inventory = inventory::collect(req.into_inventory_query(), config).await?;
+    let inventory = config
+        .inventory_sources()
+        .collect(req.into_inventory_query())
+        .await?;
     Ok(CommandResult::Inventory(inventory))
 }
 
-async fn dispatch_wake(req: WakeRequest) -> Result<CommandResult> {
+async fn dispatch_wake(req: WakeRequest, config: &AgentConfig) -> Result<CommandResult> {
     let result = wakey::WakeInput::from_parts(req.query, req.mac, req.ip)?
-        .send()
+        .send_with_sources(&config.inventory_sources())
         .await?;
     debug!("dispatched wake command");
     Ok(CommandResult::Wake(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn query_wake_uses_the_configured_dhcp_path() {
+        let dir = std::env::temp_dir().join(format!("wakey-wake-path-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = AgentConfig {
+            // Reading a directory as a lease file fails before any wake packet is sent.
+            dhcp_leases_path: dir.clone(),
+            ..(*crate::config::DEFAULT_CONFIG).clone()
+        };
+        let command = AgentCommand::Wake(WakeRequest {
+            query: Some("192.0.2.184".into()),
+            mac: None,
+            ip: None,
+        });
+        let result = dispatch_command(command, &config).await;
+        std::fs::remove_dir(dir).unwrap();
+        let Err(error) = result else {
+            panic!("expected reading the configured DHCP path to fail");
+        };
+        assert!(
+            error.to_string().contains("failed to read DHCP leases"),
+            "{error:#}"
+        );
+    }
 }

@@ -215,6 +215,15 @@ impl AgentConfig {
             ),
         ]
     }
+
+    pub(crate) fn inventory_sources(&self) -> wakey::InventorySources {
+        wakey::InventorySources {
+            dhcp_leases_path: self.dhcp_leases_path.clone(),
+            observation_store_path: self.observation_store_path.clone(),
+            mac_name_cache_path: self.mac_name_cache_path.clone(),
+            observation_retention: Some(self.observation_retention),
+        }
+    }
 }
 
 /// Treat an absent file as unconfigured. Read and parse errors still fail.

@@ -1,65 +1,123 @@
-use anyhow::Result;
+use std::{path::PathBuf, time::Duration};
+
+use anyhow::{Context, Result};
 use tracing::{Instrument, debug, warn};
 use wakey_core::{
     Device, DeviceInventory, DeviceObservationFact, DhcpLease, DhcpLeaseWithState, InventoryQuery,
     NeighborEntry, Presence, Query,
 };
 
-use crate::service::leases::get_leases;
+use crate::service::leases::leases_without_state;
 use crate::service::query::resolve_query;
+
+/// Paths for the three local inventory sources and optional hook retention.
+pub struct InventorySources {
+    pub dhcp_leases_path: PathBuf,
+    pub observation_store_path: PathBuf,
+    pub mac_name_cache_path: PathBuf,
+    /// Set by the agent to prune hooks before reading them. The CLI leaves them alone.
+    pub observation_retention: Option<Duration>,
+}
+
+impl InventorySources {
+    /// Use the standalone CLI's environment overrides and platform defaults.
+    pub fn from_env() -> Self {
+        Self {
+            dhcp_leases_path: wakey_linux::dhcp::dhcp_leases_path(),
+            observation_store_path: wakey_linux::observations::observation_store_path(),
+            mac_name_cache_path: wakey_linux::observations::mac_name_cache_path(),
+            observation_retention: None,
+        }
+    }
+
+    /// Read DHCP leases, using these sources' hook and cache files for names.
+    pub async fn read_leases(&self) -> std::io::Result<Vec<DhcpLease>> {
+        wakey_linux::dhcp::read_dhcp_leases_with_names_from_paths(
+            &self.dhcp_leases_path,
+            &self.observation_store_path,
+            &self.mac_name_cache_path,
+        )
+        .await
+    }
+
+    /// Merge neighbors, named DHCP leases, and hook facts into a local inventory.
+    #[tracing::instrument(name = "inventory", skip_all, fields(neighbors = tracing::field::Empty, leases = tracing::field::Empty, observations = tracing::field::Empty, devices = tracing::field::Empty))]
+    pub async fn collect(&self, query: InventoryQuery) -> Result<DeviceInventory> {
+        let span = tracing::Span::current();
+        let neighbors = wakey_linux::devices::query_neighbors(&query)
+            .instrument(tracing::info_span!("inventory_neighbors"))
+            .await?;
+        span.record("neighbors", neighbors.len());
+        let leases = self
+            .read_leases()
+            .instrument(tracing::info_span!("inventory_dhcp_leases"))
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to read DHCP leases from {}",
+                    self.dhcp_leases_path.display()
+                )
+            })?;
+        span.record("leases", leases.len());
+        // Lease naming can use the hook cache before old hook facts are pruned.
+        let observations = self.read_hook_facts().await;
+        span.record("observations", observations.len());
+        let devices = merge_devices_with_observations(
+            neighbors,
+            leases_without_state(leases),
+            observations,
+            &query,
+        );
+        span.record("devices", devices.len());
+        debug!(devices = devices.len(), "merged device inventory");
+        Ok(DeviceInventory { devices })
+    }
+
+    async fn read_hook_facts(&self) -> Vec<DeviceObservationFact> {
+        if let Some(retention) = self.observation_retention {
+            match wakey_linux::observations::prune_expired(&self.observation_store_path, retention)
+                .instrument(tracing::info_span!("inventory_observation_prune"))
+                .await
+            {
+                Ok(removed) if removed > 0 => {
+                    debug!(removed, "pruned stale local hook observations")
+                }
+                Ok(_) => {}
+                Err(err) => warn!(error = %err, "failed pruning stale local hook observations"),
+            }
+        }
+        // Hook storage is best effort. Keep neighbors and leases if this read fails.
+        match wakey_linux::observations::list_local_observations_from_path(
+            &self.observation_store_path,
+        )
+        .instrument(tracing::info_span!("inventory_hook_store"))
+        .await
+        {
+            Ok(observations) => observations
+                .into_iter()
+                .filter_map(local_observation_to_fact)
+                .collect(),
+            Err(err) => {
+                warn!(error = %err, "failed reading local hook observations for inventory");
+                Vec::new()
+            }
+        }
+    }
+
+    pub(super) async fn resolve_devices(&self, input: impl Into<String>) -> Result<Vec<Device>> {
+        let query = resolve_query(input).await?;
+        self.collect(query).await.map(|inventory| inventory.devices)
+    }
+}
 
 /// Resolve free-form input and return merged devices rather than raw source rows.
 pub async fn resolve_devices(input: impl Into<String>) -> Result<Vec<Device>> {
-    let query = resolve_query(input).await?;
-    inventory(query).await.map(|inventory| inventory.devices)
+    InventorySources::from_env().resolve_devices(input).await
 }
 
-/// Build a merged device inventory from neighbor-table and DHCP-lease sources.
-///
-/// This is the current center of gravity for the service layer. Higher-level
-/// status and wake flows should prefer deriving from inventory rather than
-/// directly from raw Linux source rows.
-#[tracing::instrument(name = "inventory", skip_all, fields(devices = tracing::field::Empty))]
+/// Collect local inventory using the standalone CLI's paths.
 pub async fn inventory(query: InventoryQuery) -> Result<DeviceInventory> {
-    // Instrument futures, not entered guards: each source remains correctly
-    // parented when Tokio moves the task between workers during an await.
-    let neighbors = async {
-        let rows = wakey_linux::devices::query_neighbors(&query).await?;
-        debug!(rows = rows.len(), "neighbor source collected");
-        Ok::<_, anyhow::Error>(rows)
-    }
-    .instrument(tracing::info_span!("inventory_neighbors"))
-    .await?;
-    let leases = async {
-        let rows = get_leases().await?;
-        debug!(rows = rows.len(), "DHCP source collected");
-        Ok::<_, anyhow::Error>(rows)
-    }
-    .instrument(tracing::info_span!("inventory_dhcp_leases"))
-    .await?;
-    let observations = match wakey_linux::observations::list_local_observations()
-        .instrument(tracing::info_span!("inventory_hook_store"))
-        .await
-    {
-        Ok(observations) => observations
-            .into_iter()
-            .filter_map(local_observation_to_fact)
-            .collect::<Vec<_>>(),
-        Err(err) => {
-            warn!(error = %err, "failed reading local hook observations for inventory");
-            Vec::new()
-        }
-    };
-    debug!(
-        neighbors = neighbors.len(),
-        leases = leases.len(),
-        observations = observations.len(),
-        "building device inventory"
-    );
-    let devices = merge_devices_with_observations(neighbors, leases, observations, &query);
-    tracing::Span::current().record("devices", devices.len());
-    debug!(devices = devices.len(), "merged device inventory");
-    Ok(DeviceInventory { devices })
+    InventorySources::from_env().collect(query).await
 }
 
 /// Merge raw neighbor entries and DHCP leases into device aggregates.

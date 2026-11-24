@@ -5,7 +5,7 @@ use tracing::{debug, instrument};
 use wakey_core::{InterfaceSummary, WakeResult, WakeTarget};
 
 use crate::service::interfaces::get_interface_summaries;
-use crate::service::inventory::resolve_devices;
+use crate::service::inventory::InventorySources;
 use crate::utils::product;
 
 /// A wake request is either a device query or a MAC with an optional destination IP.
@@ -35,8 +35,13 @@ impl WakeInput {
 
     /// Resolve and send Wake-on-LAN packets for this input.
     pub async fn send(self) -> Result<WakeResult> {
+        self.send_with_sources(&InventorySources::from_env()).await
+    }
+
+    /// Use the provided inventory for query mode. Explicit MAC/IP bypasses inventory.
+    pub async fn send_with_sources(self, sources: &InventorySources) -> Result<WakeResult> {
         match self {
-            Self::Query(query) => wake_from_query(query).await,
+            Self::Query(query) => wake_from_query_with_sources(query, sources).await,
             Self::Explicit { mac, ip } => wake_explicit(mac, ip).await,
         }
     }
@@ -53,9 +58,16 @@ pub async fn wake_targets(targets: Vec<WakeTarget>) -> Result<WakeResult> {
 }
 
 /// Resolve free-form input into wake targets and send the packets.
-#[instrument(skip_all)]
 pub async fn wake_from_query(input: impl Into<String>) -> Result<WakeResult> {
-    let targets = resolve_wake_targets(input).await?;
+    wake_from_query_with_sources(input, &InventorySources::from_env()).await
+}
+
+#[instrument(name = "wake_from_query", skip_all)]
+async fn wake_from_query_with_sources(
+    input: impl Into<String>,
+    sources: &InventorySources,
+) -> Result<WakeResult> {
+    let targets = resolve_wake_targets_with_sources(input, sources).await?;
     wake_targets(targets).await
 }
 
@@ -80,11 +92,17 @@ pub async fn wake_explicit(mac: MacAddr, ip: Option<IpAddr>) -> Result<WakeResul
 
 /// Resolve free-form input into concrete wake targets.
 ///
-/// The current resolution strategy fans out one wake target per resolved device IP,
-/// using the first known MAC address for that device.
-#[instrument(skip_all)]
+/// The current resolution strategy pairs each device IP with each of its MACs.
 pub async fn resolve_wake_targets(input: impl Into<String>) -> Result<Vec<WakeTarget>> {
-    let devices = resolve_devices(input).await?;
+    resolve_wake_targets_with_sources(input, &InventorySources::from_env()).await
+}
+
+#[instrument(name = "resolve_wake_targets", skip_all)]
+async fn resolve_wake_targets_with_sources(
+    input: impl Into<String>,
+    sources: &InventorySources,
+) -> Result<Vec<WakeTarget>> {
+    let devices = sources.resolve_devices(input).await?;
 
     let targets: Vec<WakeTarget> = devices
         .into_iter()

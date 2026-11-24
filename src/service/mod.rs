@@ -6,8 +6,8 @@ pub mod wake;
 
 pub use interfaces::{get_interface_summaries, get_interface_summary, get_ips};
 pub use inventory::{
-    inventory, local_observation_to_fact, merge_devices, merge_devices_with_observations,
-    resolve_devices,
+    InventorySources, inventory, local_observation_to_fact, merge_devices,
+    merge_devices_with_observations, resolve_devices,
 };
 pub use leases::{get_leases, get_leases_with_neighbor_state, leases_without_state};
 pub use query::{resolve_query, resolve_selector};
