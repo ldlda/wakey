@@ -264,11 +264,24 @@ async fn process_agent_text(
                 .await;
             let _ = tx.send(SessionEvent::Message(ServerMessage::SyncDeviceSnapshot));
         }
-        IncomingClientMessage::Heartbeat { agent_id } => {
+        IncomingClientMessage::Heartbeat {
+            agent_id,
+            process_status,
+        } => {
             if connection.authed_agent_id.as_deref() != Some(agent_id.as_str()) {
                 anyhow::bail!("heartbeat for unauthenticated or mismatched agent");
             }
-            ensure_current_session(state, &agent_id, connection_id).await?;
+            {
+                // Keep the connection check and status write atomic with reconnects.
+                let sessions = state.sessions.read().await;
+                validate_current_session(&sessions, &agent_id, connection_id)?;
+                if let Some(sample) = process_status {
+                    state
+                        .process_status
+                        .record_agent(&agent_id, connection_id, sample)
+                        .await;
+                }
+            }
             debug!(agent_id = %agent_id, "heartbeat received");
         }
         IncomingClientMessage::DeviceSnapshot {
@@ -397,7 +410,15 @@ async fn ensure_current_session(
     connection_id: &str,
 ) -> Result<()> {
     let sessions = state.sessions.read().await;
-    if is_current_session(&sessions, agent_id, connection_id) {
+    validate_current_session(&sessions, agent_id, connection_id)
+}
+
+fn validate_current_session(
+    sessions: &std::collections::HashMap<String, AgentSession>,
+    agent_id: &str,
+    connection_id: &str,
+) -> Result<()> {
+    if is_current_session(sessions, agent_id, connection_id) {
         Ok(())
     } else if sessions.contains_key(agent_id) {
         anyhow::bail!("stale agent session")
@@ -429,6 +450,27 @@ mod tests {
     use super::{
         AgentConnectionState, IncomingClientMessage, is_current_session, validate_auth_identity,
     };
+
+    #[test]
+    fn heartbeat_status_is_optional_and_preserves_zero_values() {
+        for (json, expected) in [
+            (r#"{"type":"heartbeat","agent_id":"agent-a"}"#, None),
+            (
+                r#"{"type":"heartbeat","agent_id":"agent-a","process_status":{"cpu_time_seconds":0.0}}"#,
+                Some(0.0),
+            ),
+        ] {
+            let IncomingClientMessage::Heartbeat { process_status, .. } =
+                serde_json::from_str(json).unwrap()
+            else {
+                panic!("expected heartbeat");
+            };
+            assert_eq!(
+                process_status.and_then(|sample| sample.cpu_time_seconds),
+                expected
+            );
+        }
+    }
 
     #[test]
     fn device_snapshot_trace_context_is_optional_and_cross_crate_compatible() {

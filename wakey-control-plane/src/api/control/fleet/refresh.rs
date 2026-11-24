@@ -187,6 +187,7 @@ mod tests {
             terminals: crate::runtime::terminals::TerminalRegistry::new(),
             alerts: crate::api::AlertsHub::new(),
             fleet: Arc::new(super::super::FleetCache::default()),
+            process_status: Default::default(),
         };
         let token = state
             .store

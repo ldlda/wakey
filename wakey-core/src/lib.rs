@@ -3,6 +3,7 @@
 pub mod config_duration;
 pub mod model;
 pub mod parse;
+pub mod process_status;
 pub mod protocol;
 
 #[cfg(feature = "telemetry")]

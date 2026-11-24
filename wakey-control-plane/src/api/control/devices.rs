@@ -335,6 +335,7 @@ mod tests {
             terminals: crate::runtime::terminals::TerminalRegistry::new(),
             alerts: crate::api::AlertsHub::new(),
             fleet: Arc::new(crate::api::FleetCache::default()),
+            process_status: Default::default(),
         };
         let device = store
             .create_known_device(KnownDeviceInput {

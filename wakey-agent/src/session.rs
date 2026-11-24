@@ -145,8 +145,15 @@ async fn run_once(
                 ).await?;
             }
             _ = heartbeat.tick() => {
+                #[cfg(target_os = "linux")]
+                let process_status = tokio::task::spawn_blocking(|| {
+                    wakey_linux::telemetry::ProcfsProcessMetrics.sample()
+                }).await.ok();
+                #[cfg(not(target_os = "linux"))]
+                let process_status = None;
                 send_json(&mut sink, &ClientMessage::Heartbeat {
                     agent_id: config.agent_id.clone(),
+                    process_status,
                 }).await?;
                 debug!(agent_id = %config.agent_id, "heartbeat sent");
             }

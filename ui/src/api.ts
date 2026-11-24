@@ -19,6 +19,28 @@ export type TerminalSession = {
   attachment_token?: string;
 };
 
+export type ProcessStatusSample = {
+  received_at_unix: number;
+  values: {
+    process_uptime_seconds: number | null;
+    resident_memory_bytes: number | null;
+    cpu_time_seconds: number | null;
+    open_file_descriptors: number | null;
+    host_uptime_seconds: number | null;
+    host_memory_total_bytes: number | null;
+    host_memory_available_bytes: number | null;
+    host_load_1m: number | null;
+  };
+};
+
+export type FleetProcessStatus = {
+  control_plane: ProcessStatusSample | null;
+  agents: Record<
+    string,
+    { connected: boolean; stale: boolean; sample: ProcessStatusSample | null }
+  >;
+};
+
 export type Alert = {
   alert_id: string;
   kind: string;
@@ -238,6 +260,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchAgents(): Promise<Agent[]> {
   return request<Agent[]>("/api/v1/control/agents");
+}
+
+export function fetchProcessStatus(
+  init?: RequestInit,
+): Promise<FleetProcessStatus> {
+  return request<FleetProcessStatus>("/api/v1/control/process-status", init);
 }
 
 export function createTerminal(

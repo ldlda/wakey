@@ -185,6 +185,7 @@ mod tests {
             terminals: crate::runtime::terminals::TerminalRegistry::new(),
             alerts: crate::api::AlertsHub::new(),
             fleet: Arc::new(super::super::FleetCache::default()),
+            process_status: Default::default(),
         };
         // Seed the complete cached view, as the builder would. Exercise both
         // production read paths without thousands of unrelated SQL inserts.

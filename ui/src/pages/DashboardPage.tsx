@@ -10,6 +10,7 @@ import {
   fetchEnrollTokens,
 } from "@/api";
 import { RecentActivityFeed } from "./dashboard/RecentActivityFeed";
+import { ProcessStatusPanel } from "./dashboard/ProcessStatusPanel";
 import {
   Card,
   CardContent,
@@ -220,6 +221,7 @@ export function DashboardPage({
       </Card>
 
       <RecentActivityFeed agents={agents} />
+      <ProcessStatusPanel agents={agents} />
     </section>
   );
 }

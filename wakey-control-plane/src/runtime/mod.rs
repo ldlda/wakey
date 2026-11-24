@@ -27,6 +27,7 @@ mod access;
 mod admin;
 mod fleet_metrics;
 mod process;
+mod process_status;
 pub mod terminals;
 pub(crate) mod view_cache;
 pub use admin::revoke_agent;
@@ -47,6 +48,7 @@ pub struct AppState {
     pub terminals: terminals::TerminalRegistry,
     pub alerts: api::AlertsHub,
     pub(crate) fleet: Arc<api::FleetCache>,
+    pub(crate) process_status: Arc<process_status::ProcessStatusCache>,
 }
 
 #[derive(Clone)]
@@ -88,6 +90,10 @@ fn public_api_routes(ui_dist_dir: std::path::PathBuf) -> Router<AppState> {
 
 fn control_api_routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/api/v1/control/process-status",
+            get(process_status::get_process_status),
+        )
         .route(
             "/api/v1/control/enroll-token",
             post(api::issue_enroll_token),
@@ -199,6 +205,7 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
         terminals: terminals::TerminalRegistry::new(),
         alerts: api::AlertsHub::new(),
         fleet: Arc::new(api::FleetCache::default()),
+        process_status: Default::default(),
     };
 
     // Keep route classes explicit so edge policy can map directly:
@@ -229,6 +236,8 @@ pub async fn serve(daemon: config::DaemonConfig) -> Result<()> {
     info!(pid_file = %daemon.pid_file.display(), "wrote control-plane pid file");
     tokio::spawn(api::run_alert_evaluator(app_state.clone()));
     let _fleet_metrics = fleet_metrics::FleetMetricsTask::start(app_state.clone());
+    #[cfg(target_os = "linux")]
+    let _process_status = process_status::ProcessStatusTask::start(app_state.clone());
     let mut server = tokio::spawn(async move {
         axum::serve(listener, app)
             .await

@@ -568,6 +568,7 @@ async fn verifier_routes_do_not_gate_agent_or_control_handlers() {
         terminals: super::super::terminals::TerminalRegistry::new(),
         alerts: crate::api::AlertsHub::new(),
         fleet: Arc::new(crate::api::FleetCache::default()),
+        process_status: Default::default(),
     };
     let app = Router::new()
         .merge(routes(Some(&config()), "127.0.0.1:8080".parse().unwrap()).unwrap())
@@ -577,6 +578,7 @@ async fn verifier_routes_do_not_gate_agent_or_control_handlers() {
     for (path, expected) in [
         ("/healthz", StatusCode::OK),
         ("/api/v1/control/agents", StatusCode::OK),
+        ("/api/v1/control/process-status", StatusCode::OK),
         ("/internal/auth/verify", StatusCode::UNAUTHORIZED),
     ] {
         let response = app

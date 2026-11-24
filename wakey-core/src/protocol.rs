@@ -335,6 +335,9 @@ pub enum ClientFrame<R> {
     },
     Heartbeat {
         agent_id: String,
+        // Older control planes ignore the extra field on this existing frame.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        process_status: Option<crate::process_status::ProcessStatus>,
     },
     DeviceSnapshot {
         agent_id: String,

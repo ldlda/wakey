@@ -52,6 +52,7 @@ async fn fleet_cache_tracks_store_edits_and_connections_without_caching_filters(
         terminals: crate::runtime::terminals::TerminalRegistry::new(),
         alerts: crate::api::AlertsHub::new(),
         fleet: Arc::new(super::FleetCache::default()),
+        process_status: Default::default(),
     };
     let store = &state.store;
     assert_eq!(

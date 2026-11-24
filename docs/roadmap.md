@@ -55,6 +55,14 @@ or current fleet size. Metric labels should remain bounded; no per-device labels
 
 ## Process And Host Visibility
 
+Fleet Health now reads `GET /api/v1/control/process-status` behind the existing
+control API policy, on page open and manual refresh only. Linux agents attach a
+sample to the 30-second heartbeat; CC keeps the latest sample per agent and
+takes its own every 30 seconds. There
+is no history or collector requirement. Agent samples are stale after three
+missed intervals or when they belong to a previous connection. Version, host
+identity, and CPU utilization calculated from successive samples remain open.
+
 - [x] Add Linux process age/RSS and host uptime gauges for agent and CC through opt-in OTLP, using the existing collection interval. Core owns OS-independent instruments; wakey-linux supplies the optional procfs reader. Missing data omits observations; no added labels, config fields, health routes or polling tasks. Collector coverage verifies units and values; router/live dashboard validation pending.
 - [x] Add cumulative process CPU time (counter) and current open-FD count (gauge) through the same Linux reader and OS-independent instruments. Exclude child processes, omit failed samples, and document one-core CPU-rate interpretation and sampling FD overhead. Extend collector/reader coverage rather than adding timing-based tests; live validation pending.
 - [ ] Add start-time/version metadata if needed. Keep version as resource metadata rather than repeating it on every sample.

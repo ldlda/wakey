@@ -268,10 +268,12 @@ pub async fn revoke_agent(
     match state.store.revoke_agent(&agent_id).await {
         Ok(revoked) => {
             if revoked {
-                // Request a graceful websocket close, then remove session from active map.
-                if let Some(session) = state.sessions.write().await.remove(&agent_id) {
+                // Exclude heartbeat updates until both entries are removed.
+                let mut sessions = state.sessions.write().await;
+                if let Some(session) = sessions.remove(&agent_id) {
                     let _ = session.tx.send(SessionEvent::Close);
                 }
+                state.process_status.forget_agent(&agent_id).await;
             }
 
             state

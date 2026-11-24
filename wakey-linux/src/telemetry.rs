@@ -6,6 +6,22 @@ use wakey_core::telemetry::{HostLoad, HostMemory, ProcessMetricsSource};
 /// Constructing the reader does no I/O, so disabled OTLP remains local-only.
 pub struct ProcfsProcessMetrics;
 
+impl ProcfsProcessMetrics {
+    pub fn sample(&self) -> wakey_core::process_status::ProcessStatus {
+        let memory = self.host_memory();
+        wakey_core::process_status::ProcessStatus {
+            process_uptime_seconds: self.process_uptime_seconds(),
+            resident_memory_bytes: self.resident_memory_bytes(),
+            cpu_time_seconds: self.cpu_time_seconds(),
+            open_file_descriptors: self.open_file_descriptors(),
+            host_uptime_seconds: self.host_uptime_seconds(),
+            host_memory_total_bytes: memory.as_ref().map(|value| value.total_bytes),
+            host_memory_available_bytes: memory.and_then(|value| value.available_bytes),
+            host_load_1m: self.host_load().map(|value| value.one_minute),
+        }
+    }
+}
+
 impl ProcessMetricsSource for ProcfsProcessMetrics {
     fn process_uptime_seconds(&self) -> Option<f64> {
         process_uptime()
