@@ -8,7 +8,6 @@ publish = ["gitea"]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
-color-eyre = "0"
 comfy-table = "7"
 futures = "0"
 macaddr = { version = "1", features = ["serde", "serde_std"] }
