@@ -86,19 +86,19 @@ pub fn resolve_path(data_dir: &Path, candidate: PathBuf) -> PathBuf {
 pub fn resolve_issue_token_settings(args: &IssueEnrollTokenArgs) -> Result<IssueTokenSettings> {
     let file = load_file_config(&args.config_file)?;
     let defaults = &*DEFAULT_CONFIG;
+    let ttl = args
+        .ttl_seconds
+        .map(Duration::from_secs)
+        .or(file.enroll_token_ttl)
+        .unwrap_or(defaults.enroll_token_ttl);
     let state = resolve_state_access(
-        &args.config_file,
+        file,
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
         &args.target,
     )?;
 
-    let ttl = args
-        .ttl_seconds
-        .map(Duration::from_secs)
-        .or(file.enroll_token_ttl)
-        .unwrap_or(defaults.enroll_token_ttl);
     validate_durations(defaults.command_timeout, ttl, defaults.history_retention)?;
 
     Ok(IssueTokenSettings {
@@ -113,7 +113,7 @@ pub fn resolve_list_enroll_token_settings(
     args: &ListEnrollTokensArgs,
 ) -> Result<StateAccessSettings> {
     resolve_state_access(
-        &args.config_file,
+        load_file_config(&args.config_file)?,
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
@@ -125,7 +125,7 @@ pub fn resolve_revoke_enroll_token_settings(
     args: &RevokeEnrollTokenArgs,
 ) -> Result<StateAccessSettings> {
     resolve_state_access(
-        &args.config_file,
+        load_file_config(&args.config_file)?,
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
@@ -135,7 +135,7 @@ pub fn resolve_revoke_enroll_token_settings(
 
 pub fn resolve_revoke_agent_settings(args: &RevokeAgentArgs) -> Result<StateAccessSettings> {
     resolve_state_access(
-        &args.config_file,
+        load_file_config(&args.config_file)?,
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
@@ -145,7 +145,7 @@ pub fn resolve_revoke_agent_settings(args: &RevokeAgentArgs) -> Result<StateAcce
 
 pub fn resolve_state_stats_settings(args: &StateStatsArgs) -> Result<StateAccessSettings> {
     resolve_state_access(
-        &args.config_file,
+        load_file_config(&args.config_file)?,
         args.data_dir.clone(),
         args.state_file.clone(),
         args.public_url.clone(),
@@ -265,13 +265,12 @@ fn resolve_telemetry(file: Option<FileTelemetryConfig>) -> TelemetryConfig {
 }
 
 fn resolve_state_access(
-    config_file: &Path,
+    file: FileConfig,
     cli_data_dir: Option<PathBuf>,
     cli_state_file: Option<PathBuf>,
     cli_public_url: Option<String>,
     mode: &AdminTargetArgs,
 ) -> Result<StateAccessSettings> {
-    let file = load_file_config(config_file)?;
     let defaults = &*DEFAULT_CONFIG;
 
     let data_dir = cli_data_dir
