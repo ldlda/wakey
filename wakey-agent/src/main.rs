@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod dispatch;
 mod enroll;
+mod inventory;
 mod observe;
 mod ping;
 mod serve;

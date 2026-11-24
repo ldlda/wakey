@@ -7,12 +7,12 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{Instrument, debug, error, info, info_span, warn};
 
 use crate::config::AgentConfig;
-use crate::dispatch::{dispatch_command, inventory_for_config};
 use crate::protocol::{
     AgentCapability, AgentCapabilityOptions, ClientMessage, ErrorPayload, ServerMessage,
     TerminalCapabilityOptions,
 };
 use crate::terminal::TerminalManager;
+use crate::{dispatch::dispatch_command, inventory};
 
 pub async fn run(config: AgentConfig) -> Result<()> {
     // Terminal workers belong to the agent process, not a single control socket.
@@ -216,15 +216,7 @@ where
     <S as futures_util::Sink<Message>>::Error: std::error::Error + Send + Sync + 'static,
 {
     let mut operation = wakey_core::telemetry::Operation::new("snapshot");
-    let req = crate::protocol::InventoryRequest {
-        query: None,
-        name: None,
-        ips: Vec::new(),
-        devs: Vec::new(),
-        nuds: Vec::new(),
-        macs: Vec::new(),
-    };
-    let inventory = inventory_for_config(req, config)
+    let inventory = inventory::collect(wakey_core::InventoryQuery::default(), config)
         .await
         .context("failed to run inventory for device snapshot")?;
     let count = inventory.devices.len();
