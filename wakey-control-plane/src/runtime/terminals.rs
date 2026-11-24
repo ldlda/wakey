@@ -4,7 +4,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Mutex, broadcast, mpsc};
 use uuid::Uuid;
-use wakey_agent::protocol::{AgentTerminalSession, TerminalId};
+use wakey_core::protocol::{AgentTerminalSession, TerminalId};
 
 pub const TERMINAL_RELAY_QUEUE: usize = 32;
 pub const TERMINAL_MAX_FRAME_BYTES: usize = 64 * 1024;
@@ -91,8 +91,8 @@ impl TerminalRegistry {
     async fn create(&self, agent_id: String) -> Result<CreatedTerminal, &'static str> {
         self.create_with_limits(
             agent_id,
-            wakey_agent::protocol::DEFAULT_TERMINAL_MAX_SESSIONS,
-            wakey_agent::protocol::DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
+            wakey_core::protocol::DEFAULT_TERMINAL_MAX_SESSIONS,
+            wakey_core::protocol::DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
         )
         .await
     }
@@ -655,7 +655,7 @@ fn relay_frame_size(frame: &TerminalRelayFrame) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wakey_agent::protocol::DEFAULT_TERMINAL_SESSION_TTL_SECONDS;
+    use wakey_core::protocol::DEFAULT_TERMINAL_SESSION_TTL_SECONDS;
 
     const OPERATOR_A: &str = "browser-tab-a";
     const OPERATOR_B: &str = "browser-tab-b";

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::{Instrument, info, warn};
-use wakey_agent::protocol::{
+use wakey_core::protocol::{
     AgentCapability, DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
     ServerMessage, TerminalAgentHandshake, TerminalControl, TerminalId, TerminalOperatorHandshake,
 };

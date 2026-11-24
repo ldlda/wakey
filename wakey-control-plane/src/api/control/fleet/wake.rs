@@ -1,7 +1,7 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use macaddr::MacAddr;
 use tracing::{Instrument, info, warn};
-use wakey_agent::protocol::{AgentCommand, WakeRequest};
+use wakey_core::protocol::{AgentCommand, WakeRequest};
 
 use super::types::{FleetDevice, FleetWakeRoute, WakeFleetDeviceRequest, WakeFleetDeviceResponse};
 use super::{fleet_error, fleet_view};

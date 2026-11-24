@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tracing::{info, warn};
 use uuid::Uuid;
-use wakey_agent::protocol::{
+use wakey_core::protocol::{
     AgentCapability, AgentCapabilityOptions, AgentCommand, ErrorPayload, RequestId, ServerMessage,
 };
 

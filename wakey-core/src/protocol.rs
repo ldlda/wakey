@@ -1,13 +1,15 @@
+//! Shared wire messages for agent sessions, commands, and terminal relays.
+
+use crate::parse::mac;
+use crate::{
+    Device, DeviceInventory, DhcpLeaseWithState, InterfaceSummary, InventoryQuery,
+    InventoryQueryBuilder, WakeResult,
+};
 use macaddr::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
-use wakey_core::parse::mac;
-use wakey_core::{
-    Device, DeviceInventory, DhcpLeaseWithState, InterfaceSummary, InventoryQuery,
-    InventoryQueryBuilder, WakeResult,
-};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RequestId(String);
@@ -225,7 +227,7 @@ pub struct InventoryRequest {
     #[serde(default)]
     pub devs: Vec<String>,
     #[serde(default)]
-    pub nuds: Vec<wakey_core::NeighborState>,
+    pub nuds: Vec<crate::NeighborState>,
     #[serde(default)]
     #[serde(with = "mac::vec_mac")]
     pub macs: Vec<MacAddr>,
@@ -244,7 +246,7 @@ fn into_inventory_query(
     name: Option<String>,
     ips: Vec<IpAddr>,
     devs: Vec<String>,
-    nuds: Vec<wakey_core::NeighborState>,
+    nuds: Vec<crate::NeighborState>,
     macs: Vec<MacAddr>,
 ) -> InventoryQuery {
     InventoryQueryBuilder::new()

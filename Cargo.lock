@@ -3903,7 +3903,6 @@ dependencies = [
  "futures-util",
  "http",
  "humantime-serde",
- "macaddr",
  "nix 0.31.3",
  "reqwest",
  "serde",
@@ -3943,7 +3942,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
- "wakey-agent",
  "wakey-core",
  "wakey-linux",
 ]

@@ -38,7 +38,6 @@ tokio = { workspace = true }
 tower-http = { version = "0.6.8", features = ["fs"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
-wakey-agent = { path = "../wakey-agent", registry = "gitea", version = "0.4.0" }
 wakey-core = { path = "../wakey-core", registry = "gitea", version = "0.4.0", features = ["telemetry"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

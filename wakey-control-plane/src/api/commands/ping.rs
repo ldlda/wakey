@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use tokio::sync::{Semaphore, SemaphorePermit};
-use wakey_agent::protocol::{AgentCapability, AgentCommand};
+use wakey_core::protocol::{AgentCapability, AgentCommand};
 
 use crate::api::ApiError;
 

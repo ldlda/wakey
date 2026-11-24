@@ -3,7 +3,7 @@
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use futures_util::StreamExt;
 use tracing::{info, warn};
-use wakey_agent::protocol::{AgentCommand, InventoryRequest};
+use wakey_core::protocol::{AgentCommand, InventoryRequest};
 
 use super::types::{
     RefreshFleetAgentResult, RefreshFleetDevicesRequest, RefreshFleetDevicesResponse,
@@ -168,7 +168,7 @@ mod tests {
         use crate::runtime::{AgentReply, AgentSession, SessionEvent};
         use std::{collections::HashMap, sync::Arc, time::Duration};
         use tokio::sync::{Mutex, RwLock, mpsc};
-        use wakey_agent::protocol::{CommandResult, ServerMessage};
+        use wakey_core::protocol::{CommandResult, ServerMessage};
 
         let dir =
             std::env::temp_dir().join(format!("wakey-refresh-handler-{}", uuid::Uuid::new_v4()));
@@ -379,7 +379,7 @@ mod tests {
         let revision = store.fleet_revision();
         let mut command_failed = response(None);
         command_failed.status = "error".into();
-        command_failed.error = Some(wakey_agent::protocol::ErrorPayload {
+        command_failed.error = Some(wakey_core::protocol::ErrorPayload {
             code: "inventory_failed".into(),
             message: "source unavailable".into(),
             retryable: None,

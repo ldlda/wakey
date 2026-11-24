@@ -8,12 +8,12 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
-use wakey_agent::protocol::{
+use wakey_core::Device;
+use wakey_core::protocol::{
     AgentCapability, AgentCapabilityOptions, AgentTerminalSession, DEFAULT_TERMINAL_MAX_SESSIONS,
     DEFAULT_TERMINAL_SESSION_TTL_SECONDS, ErrorPayload, RequestId, ServerMessage,
     TerminalCapabilityOptions, TerminalControl, TerminalId, checked_terminal_session_ttl,
 };
-use wakey_core::Device;
 
 use crate::runtime::{AgentReply, AgentSession, AppState, SessionEvent};
 use crate::state::AuditEventInput;
@@ -461,7 +461,7 @@ mod tests {
     use std::collections::HashMap;
 
     use tokio::sync::mpsc;
-    use wakey_agent::protocol::AgentCapabilityOptions;
+    use wakey_core::protocol::AgentCapabilityOptions;
 
     use crate::runtime::AgentSession;
 
@@ -485,7 +485,7 @@ mod tests {
         )]
         .into_iter()
         .collect();
-        let message = wakey_agent::protocol::ClientMessage::DeviceSnapshot {
+        let message = wakey_core::protocol::ClientMessage::DeviceSnapshot {
             agent_id: "agent-a".into(),
             devices: vec![],
             trace_context: expected,

@@ -12,7 +12,7 @@ mod tracing;
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Command};
-use wakey_agent::protocol;
+use wakey_core::protocol;
 
 #[tokio::main]
 async fn main() -> Result<()> {
