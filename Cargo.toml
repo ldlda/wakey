@@ -14,20 +14,34 @@ futures = "0"
 macaddr = { version = "1", features = ["serde", "serde_std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = [
+tokio = {
+  version = "1",
+  features = [
     "fs",
-    "process",
-    "rt-multi-thread",
     "io-util",
     "macros",
+    "process",
+    "rt-multi-thread",
     "time",
-] }
+  ]
+}
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
-[profile.release]
-opt-level = "z"
-strip = true
+[dependencies.lda-ipjs]
+path = "ipjs"
+version = "0.0.5"
+registry = "gitea"
+
+[dependencies.wakey-core]
+path = "wakey-core"
+version = "0.4.0"
+registry = "gitea"
+
+[dependencies.wakey-linux]
+path = "wakey-linux"
+version = "0.4.0"
+registry = "gitea"
 
 [workspace]
 members = ["ipjs", "wakey-agent", "wakey-control-plane", "wakey-core", "wakey-linux"]
@@ -38,28 +52,20 @@ anyhow = "1"
 macaddr = { version = "1", features = ["serde", "serde_std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = [
+tokio = {
+  version = "1",
+  features = [
     "fs",
-    "process",
-    "rt-multi-thread",
     "io-util",
     "macros",
+    "process",
+    "rt-multi-thread",
     "time",
-] }
+  ]
+}
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
-[dependencies.lda-ipjs]
-path = "ipjs"
-registry = "gitea"
-version = "0.0.5"
-
-[dependencies.wakey-core]
-path = "wakey-core"
-registry = "gitea"
-version = "0.4.0"
-
-[dependencies.wakey-linux]
-path = "wakey-linux"
-registry = "gitea"
-version = "0.4.0"
+[profile.release]
+opt-level = "z"
+strip = true
