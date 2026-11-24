@@ -1,25 +1,22 @@
 use axum::Json;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::Response;
-use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tokio::sync::broadcast;
-use tracing::{Instrument, info, warn};
+use tracing::info;
 use wakey_core::protocol::{
     AgentCapability, DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS,
-    ServerMessage, TerminalAgentHandshake, TerminalControl, TerminalId, TerminalOperatorHandshake,
+    ServerMessage, TerminalId,
 };
 
 use crate::api::ApiError;
-use crate::runtime::terminals::{
-    TERMINAL_ATTACH_TIMEOUT, TERMINAL_MAX_FRAME_BYTES, TerminalRegistryError, TerminalRelayFrame,
-    TerminalSummary,
-};
+use crate::runtime::terminals::{TerminalRegistryError, TerminalSummary};
 use crate::runtime::{AppState, SessionEvent};
 use crate::state::AuditEventInput;
+
+mod transport;
+
+pub use transport::{agent_terminal_ws, operator_terminal_ws, terminal_events_ws};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTerminalRequest {
@@ -231,274 +228,6 @@ pub async fn close_terminal(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn agent_terminal_ws(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-    Path(terminal_id): Path<String>,
-) -> Response {
-    ws.max_message_size(TERMINAL_MAX_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_agent_terminal_socket(state, terminal_id, socket))
-}
-
-pub async fn operator_terminal_ws(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-    Path(terminal_id): Path<String>,
-) -> Response {
-    ws.max_message_size(TERMINAL_MAX_FRAME_BYTES)
-        .on_upgrade(move |socket| handle_operator_terminal_socket(state, terminal_id, socket))
-}
-
-pub async fn terminal_events_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    ws.on_upgrade(move |socket| handle_terminal_events_socket(state, socket))
-}
-
-async fn handle_terminal_events_socket(state: AppState, socket: WebSocket) {
-    let mut events = state.terminals.subscribe();
-    let (mut write, mut read) = socket.split();
-    if write
-        .send(Message::Text(r#"{"type":"sessions_changed"}"#.into()))
-        .await
-        .is_err()
-    {
-        return;
-    }
-
-    loop {
-        tokio::select! {
-            event = events.recv() => {
-                match event {
-                    Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
-                        if write.send(Message::Text(r#"{"type":"sessions_changed"}"#.into())).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-            incoming = read.next() => {
-                match incoming {
-                    Some(Ok(Message::Ping(payload))) => {
-                        if write.send(Message::Pong(payload)).await.is_err() {
-                            break;
-                        }
-                    }
-                    Some(Ok(Message::Pong(_))) => {}
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
-                    Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_))) => {}
-                }
-            }
-        }
-    }
-}
-
-async fn handle_agent_terminal_socket(state: AppState, terminal_id: String, mut socket: WebSocket) {
-    let auth = match receive_text_handshake(&mut socket).await.and_then(|text| {
-        serde_json::from_str::<TerminalAgentHandshake>(&text).map_err(|_| "invalid handshake")
-    }) {
-        Ok(TerminalAgentHandshake::Auth {
-            agent_id,
-            relay_token,
-        }) => (agent_id, relay_token),
-        Err(code) => {
-            close_socket(&mut socket, code).await;
-            return;
-        }
-    };
-    let (mut outbound, pending) = match state
-        .terminals
-        .attach_agent(&terminal_id, &auth.0, &auth.1)
-        .instrument(
-            tracing::info_span!("terminal_agent_transport_attach", terminal_id = %terminal_id),
-        )
-        .await
-    {
-        Ok(outbound) => outbound,
-        Err(error) => {
-            let code = error.code();
-            warn!(
-                terminal_id,
-                code, "agent terminal transport attachment rejected"
-            );
-            close_socket(&mut socket, code).await;
-            return;
-        }
-    };
-    info!(terminal_id, agent_id = %auth.0, "agent terminal socket attached");
-    append_terminal_audit(
-        &state,
-        &auth.0,
-        &terminal_id,
-        TerminalAudit {
-            actor_type: "agent",
-            event_type: "terminal_agent_attach",
-            outcome: "ok",
-            message: "agent terminal transport attached",
-            metadata: serde_json::json!({}),
-        },
-    )
-    .await;
-
-    let (mut write, mut read) = socket.split();
-    for frame in pending {
-        let closes = matches!(frame, TerminalRelayFrame::Close);
-        if send_relay_frame(&mut write, frame).await.is_err() || closes {
-            state.terminals.remove(&terminal_id).await;
-            return;
-        }
-    }
-    loop {
-        tokio::select! {
-            biased;
-            outbound_frame = outbound.recv() => {
-                let Some(frame) = outbound_frame else { break; };
-                if send_relay_frame(&mut write, frame).await.is_err() { break; }
-            }
-            incoming = read.next() => {
-                let Some(Ok(message)) = incoming else { break; };
-                match agent_relay_frame(message) {
-                    Ok(Some(frame)) => {
-                        let closes = matches!(frame, TerminalRelayFrame::Close);
-                        audit_agent_control_frame(&state, &auth.0, &terminal_id, &frame).await;
-                        if state.terminals.relay_from_agent(&terminal_id, frame).await.is_err() { break; }
-                        if closes { break; }
-                    }
-                    Ok(None) => {}
-                    Err(code) => {
-                        warn!(terminal_id, code, "invalid agent terminal frame");
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    if let Some(agent_id) = state.terminals.detach_agent(&terminal_id).await
-        && let Some(session) = state.sessions.read().await.get(&agent_id)
-    {
-        let _ = session
-            .tx
-            .send(SessionEvent::Message(ServerMessage::SyncTerminalSessions));
-    }
-    info!(terminal_id, "agent terminal relay detached");
-}
-
-async fn handle_operator_terminal_socket(
-    state: AppState,
-    terminal_id: String,
-    mut socket: WebSocket,
-) {
-    let auth = match receive_text_handshake(&mut socket).await.and_then(|text| {
-        serde_json::from_str::<TerminalOperatorHandshake>(&text).map_err(|_| "invalid handshake")
-    }) {
-        Ok(TerminalOperatorHandshake::Attach {
-            attachment_token,
-            operator_id,
-        }) => (attachment_token, operator_id),
-        Err(code) => {
-            close_socket(&mut socket, code).await;
-            return;
-        }
-    };
-    let mut outbound = match state
-        .terminals
-        .attach_operator(&terminal_id, &auth.0, &auth.1)
-        .instrument(
-            tracing::info_span!("terminal_operator_transport_attach", terminal_id = %terminal_id),
-        )
-        .await
-    {
-        Ok(attached) => attached,
-        Err(error) => {
-            let code = error.code();
-            warn!(
-                terminal_id,
-                code, "operator terminal transport attachment rejected"
-            );
-            close_socket(&mut socket, code).await;
-            return;
-        }
-    };
-    info!(terminal_id, "operator terminal socket attached");
-    let snapshot = serde_json::to_string(&TerminalControl::Snapshot)
-        .expect("terminal snapshot control serializes");
-    if let Err(error) = state
-        .terminals
-        .relay_to_agent(&terminal_id, TerminalRelayFrame::Text(snapshot))
-        .instrument(tracing::info_span!("terminal_snapshot_request", terminal_id = %terminal_id))
-        .await
-    {
-        warn!(
-            terminal_id,
-            code = error.code(),
-            "failed to request terminal snapshot"
-        );
-    }
-    let summary = state.terminals.summary(&terminal_id).await;
-    if let Some(summary) = &summary {
-        append_terminal_audit(
-            &state,
-            &summary.agent_id,
-            &terminal_id,
-            TerminalAudit {
-                actor_type: "admin_api",
-                event_type: "terminal_operator_attach",
-                outcome: "ok",
-                message: "operator terminal transport attached",
-                metadata: serde_json::json!({}),
-            },
-        )
-        .await;
-    }
-
-    let (mut write, mut read) = socket.split();
-    if summary.is_some_and(|summary| summary.agent_attached) {
-        let ready = serde_json::to_string(&TerminalControl::Ready)
-            .expect("terminal ready control serializes");
-        if send_relay_frame(&mut write, TerminalRelayFrame::Text(ready))
-            .await
-            .is_err()
-        {
-            state.terminals.detach_operator(&terminal_id, &auth.0).await;
-            return;
-        }
-    }
-    let mut explicit_close = false;
-    loop {
-        tokio::select! {
-            biased;
-            incoming = read.next() => {
-                let Some(Ok(message)) = incoming else { break; };
-                match operator_relay_frame(message) {
-                    Ok(Some(frame)) => {
-                        explicit_close = matches!(frame, TerminalRelayFrame::Close);
-                        if state.terminals.relay_to_agent(&terminal_id, frame).await.is_err() { break; }
-                        if explicit_close { break; }
-                    }
-                    Ok(None) => {}
-                    Err(code) => {
-                        warn!(terminal_id, code, "invalid operator terminal frame");
-                        break;
-                    }
-                }
-            }
-            outbound_frame = outbound.recv() => {
-                let Some(frame) = outbound_frame else { break; };
-                if send_relay_frame(&mut write, frame).await.is_err() { break; }
-            }
-        }
-    }
-
-    if explicit_close {
-        close_registered_terminal(&state, &terminal_id, TerminalCloseReason::BrowserClose).await;
-    } else {
-        state.terminals.detach_operator(&terminal_id, &auth.0).await;
-    }
-    info!(
-        terminal_id,
-        explicit_close, "operator terminal socket detached"
-    );
-}
-
 fn terminal_response(summary: TerminalSummary) -> TerminalSessionResponse {
     TerminalSessionResponse {
         websocket_url: operator_ws_path(&summary.terminal_id),
@@ -510,85 +239,6 @@ fn terminal_response(summary: TerminalSummary) -> TerminalSessionResponse {
         operator_attached: summary.operator_attached,
         attachment_token: None,
     }
-}
-
-fn agent_relay_frame(message: Message) -> Result<Option<TerminalRelayFrame>, &'static str> {
-    match message {
-        Message::Binary(bytes) => Ok(Some(TerminalRelayFrame::Binary(bytes.to_vec()))),
-        Message::Text(text) => {
-            let control: TerminalControl =
-                serde_json::from_str(&text).map_err(|_| "terminal_control_invalid")?;
-            if !matches!(
-                control,
-                TerminalControl::Ready
-                    | TerminalControl::Exited { .. }
-                    | TerminalControl::Error { .. }
-                    | TerminalControl::Close
-            ) {
-                return Err("terminal_control_direction_invalid");
-            }
-            Ok(Some(TerminalRelayFrame::Text(
-                serde_json::to_string(&control).map_err(|_| "terminal_control_invalid")?,
-            )))
-        }
-        Message::Ping(_) | Message::Pong(_) => Ok(None),
-        Message::Close(_) => Ok(Some(TerminalRelayFrame::Close)),
-    }
-}
-
-fn operator_relay_frame(message: Message) -> Result<Option<TerminalRelayFrame>, &'static str> {
-    match message {
-        Message::Binary(bytes) => Ok(Some(TerminalRelayFrame::Binary(bytes.to_vec()))),
-        Message::Text(text) => {
-            let control: TerminalControl =
-                serde_json::from_str(&text).map_err(|_| "terminal_control_invalid")?;
-            if !matches!(
-                control,
-                TerminalControl::Resize { .. } | TerminalControl::Close
-            ) {
-                return Err("terminal_control_direction_invalid");
-            }
-            if let TerminalControl::Resize { rows, cols } = control {
-                validate_size(rows, cols).map_err(|_| "terminal_size_invalid")?;
-            }
-            Ok(Some(TerminalRelayFrame::Text(
-                serde_json::to_string(&control).map_err(|_| "terminal_control_invalid")?,
-            )))
-        }
-        Message::Ping(_) | Message::Pong(_) => Ok(None),
-        Message::Close(_) => Ok(None),
-    }
-}
-
-async fn receive_text_handshake(socket: &mut WebSocket) -> Result<String, &'static str> {
-    match tokio::time::timeout(TERMINAL_ATTACH_TIMEOUT, socket.recv()).await {
-        Ok(Some(Ok(Message::Text(text)))) => Ok(text.to_string()),
-        Ok(_) => Err("terminal_handshake_required"),
-        Err(_) => Err("terminal_handshake_timeout"),
-    }
-}
-
-async fn close_socket(socket: &mut WebSocket, code: &str) {
-    let control = TerminalControl::Error {
-        code: code.into(),
-        message: code.replace('_', " "),
-    };
-    if let Ok(json) = serde_json::to_string(&control) {
-        let _ = socket.send(Message::Text(json.into())).await;
-    }
-    let _ = socket.send(Message::Close(None)).await;
-}
-
-async fn send_relay_frame<S>(write: &mut S, frame: TerminalRelayFrame) -> Result<(), axum::Error>
-where
-    S: futures_util::Sink<Message, Error = axum::Error> + Unpin,
-{
-    let message = match frame {
-        TerminalRelayFrame::Binary(bytes) => Message::Binary(bytes.into()),
-        TerminalRelayFrame::Text(text) => Message::Text(text.into()),
-        TerminalRelayFrame::Close => Message::Close(None),
-    };
-    write.send(message).await
 }
 
 #[derive(Clone, Copy)]
@@ -671,45 +321,6 @@ struct TerminalAudit<'a> {
     outcome: &'a str,
     message: &'a str,
     metadata: serde_json::Value,
-}
-
-async fn audit_agent_control_frame(
-    state: &AppState,
-    agent_id: &str,
-    terminal_id: &str,
-    frame: &TerminalRelayFrame,
-) {
-    let TerminalRelayFrame::Text(text) = frame else {
-        return;
-    };
-    let Ok(control) = serde_json::from_str::<TerminalControl>(text) else {
-        return;
-    };
-    let audit = match control {
-        TerminalControl::Ready => TerminalAudit {
-            actor_type: "agent",
-            event_type: "terminal_ready",
-            outcome: "ok",
-            message: "terminal PTY ready",
-            metadata: serde_json::json!({}),
-        },
-        TerminalControl::Exited { exit_code } => TerminalAudit {
-            actor_type: "agent",
-            event_type: "terminal_exit",
-            outcome: "exited",
-            message: "terminal process exited",
-            metadata: serde_json::json!({ "exit_code": exit_code }),
-        },
-        TerminalControl::Error { code, .. } => TerminalAudit {
-            actor_type: "agent",
-            event_type: "terminal_error",
-            outcome: "error",
-            message: "terminal worker reported an error",
-            metadata: serde_json::json!({ "code": code }),
-        },
-        _ => return,
-    };
-    append_terminal_audit(state, agent_id, terminal_id, audit).await;
 }
 
 async fn append_terminal_audit(
@@ -814,18 +425,5 @@ mod tests {
             assert_eq!(response.status, status);
             assert_eq!(response.code, code);
         }
-    }
-
-    #[test]
-    fn terminal_control_direction_is_enforced() {
-        let resize = serde_json::to_string(&TerminalControl::Resize { rows: 24, cols: 80 })
-            .expect("resize json");
-        assert!(operator_relay_frame(Message::Text(resize.into())).is_ok());
-
-        let ready = serde_json::to_string(&TerminalControl::Ready).expect("ready json");
-        assert!(operator_relay_frame(Message::Text(ready.into())).is_err());
-
-        let snapshot = serde_json::to_string(&TerminalControl::Snapshot).expect("snapshot json");
-        assert!(operator_relay_frame(Message::Text(snapshot.into())).is_err());
     }
 }
