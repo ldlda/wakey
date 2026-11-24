@@ -5,7 +5,9 @@ edition = "2024"
 publish = ["gitea"]
 
 [features]
+default = ["terminal"]
 telemetry = ["dep:procfs", "wakey-core/telemetry"]
+terminal = ["dep:pty-process", "nix/process", "nix/signal", "nix/term"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -33,13 +35,5 @@ rand = "0.10"
 surge-ping = "0.9.1"
 
 [target."cfg(unix)".dependencies]
-nix = {
-  version = "0.31",
-  default-features = false,
-  features = [
-    "process",
-    "signal",
-    "term",
-  ]
-}
-pty-process = { version = "0.5", features = ["async"] }
+nix = { version = "0.31", default-features = false }
+pty-process = { version = "0.5", features = ["async"], optional = true }

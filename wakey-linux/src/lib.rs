@@ -7,13 +7,13 @@ pub mod observations;
 pub mod ping;
 #[cfg(all(target_os = "linux", feature = "telemetry"))]
 pub mod telemetry;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "terminal"))]
 pub mod terminal;
 pub mod wake;
 
 pub use devices::*;
 pub use dhcp::*;
 pub use observations::*;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "terminal"))]
 pub use terminal::*;
 pub use wake::*;

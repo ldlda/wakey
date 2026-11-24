@@ -34,14 +34,14 @@ sqlx = { version = "0.8", features = [
     "json",
 ] }
 toml = "1.1"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
 tower-http = { version = "0.6.8", features = ["fs"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 wakey-core = { path = "../wakey-core", registry = "gitea", version = "0.4.0", features = ["telemetry"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-wakey-linux = { path = "../wakey-linux", registry = "gitea", version = "0.4.0", features = ["telemetry"] }
+wakey-linux = { path = "../wakey-linux", registry = "gitea", version = "0.4.0", default-features = false, features = ["telemetry"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
