@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -15,96 +14,51 @@ use crate::config::types::{
 
 impl DaemonConfig {
     pub fn from_serve_args(args: &ServeArgs) -> Result<Self> {
-        let file = load_file_config(&args.config_file)?;
+        let file = load_file_config(&args.config_file)?.overlay(args.into());
+        let mut config = Self::from_file(file, &args.config_file)?;
+        config.state_file = resolve_path(&config.data_dir, config.state_file);
+        config.pid_file = resolve_path(&config.data_dir, config.pid_file);
+        Ok(config)
+    }
+
+    /// Resolve defaults and validate fields without joining state and PID paths.
+    /// The initializer may need to render those paths relative to `data_dir`.
+    pub(super) fn from_file(file: FileConfig, source: &Path) -> Result<Self> {
         let defaults = &*DEFAULT_CONFIG;
-
-        let data_dir = args
-            .data_dir
-            .clone()
-            .or(file.data_dir.clone())
-            .unwrap_or_else(|| defaults.data_dir.clone());
-
-        let bind = match args.bind {
-            Some(bind) => bind,
-            None => match file.bind {
-                Some(ref bind) => bind.parse::<SocketAddr>().with_context(|| {
-                    format!(
-                        "invalid bind address `{bind}` in {}",
-                        args.config_file.display()
-                    )
-                })?,
-                None => defaults.bind,
-            },
+        let bind = match file.bind {
+            Some(bind) => bind.parse().with_context(|| {
+                format!("invalid bind address `{bind}` in {}", source.display())
+            })?,
+            None => defaults.bind,
         };
-
-        let public_url = normalize_public_url(
-            args.public_url
-                .as_deref()
-                .or(file.public_url.as_deref())
-                .unwrap_or(&defaults.public_url),
-        );
-
-        let state_file_raw = args
-            .state_file
-            .clone()
-            .or(file.state_file)
-            .unwrap_or_else(|| defaults.state_file.clone());
-        let state_file = resolve_path(&data_dir, state_file_raw);
-
-        let command_timeout = args
-            .command_timeout_ms
-            .map(Duration::from_millis)
-            .or(file.command_timeout)
-            .unwrap_or(defaults.command_timeout);
-        let enroll_token_ttl = args
-            .enroll_token_ttl_seconds
-            .map(Duration::from_secs)
-            .or(file.enroll_token_ttl)
-            .unwrap_or(defaults.enroll_token_ttl);
-        let history_retention = args
-            .observation_retention_seconds
-            .map(Duration::from_secs)
-            .or(file.history_retention)
-            .unwrap_or(defaults.history_retention);
-        validate_durations(command_timeout, enroll_token_ttl, history_retention)?;
+        let command_timeout = file.command_timeout.unwrap_or(defaults.command_timeout);
+        let enroll_token_ttl = file.enroll_token_ttl.unwrap_or(defaults.enroll_token_ttl);
+        let history_retention = file.history_retention.unwrap_or(defaults.history_retention);
         let device_retention = file.device_retention.unwrap_or(defaults.device_retention);
+        validate_durations(command_timeout, enroll_token_ttl, history_retention)?;
         validate_device_retention(device_retention)?;
 
-        let pid_file_raw = args
-            .pid_file
-            .clone()
-            .or(file.pid_file)
-            .unwrap_or_else(|| defaults.pid_file.clone());
-        let pid_file = resolve_path(&data_dir, pid_file_raw);
-
-        let ui_dist_dir = args
-            .ui_dist_dir
-            .clone()
-            .or(file.ui_dist_dir)
-            .unwrap_or_else(|| defaults.ui_dist_dir.clone());
-
-        let bootstrap_enroll_tokens = if args.bootstrap_enroll_tokens.is_empty() {
-            file.bootstrap_enroll_tokens
-                .unwrap_or_else(|| defaults.bootstrap_enroll_tokens.clone())
-        } else {
-            args.bootstrap_enroll_tokens.clone()
-        };
-
-        let telemetry = resolve_telemetry(file.telemetry);
-
         Ok(Self {
-            data_dir,
+            data_dir: file.data_dir.unwrap_or_else(|| defaults.data_dir.clone()),
             bind,
-            public_url,
-            state_file,
+            public_url: normalize_public_url(
+                file.public_url.as_deref().unwrap_or(&defaults.public_url),
+            ),
+            state_file: file
+                .state_file
+                .unwrap_or_else(|| defaults.state_file.clone()),
             command_timeout,
             enroll_token_ttl,
             history_retention,
             device_retention,
-            pid_file,
-            ui_dist_dir,
-            bootstrap_enroll_tokens,
-            telemetry,
+            pid_file: file.pid_file.unwrap_or_else(|| defaults.pid_file.clone()),
+            ui_dist_dir: file
+                .ui_dist_dir
+                .unwrap_or_else(|| defaults.ui_dist_dir.clone()),
+            bootstrap_enroll_tokens: file
+                .bootstrap_enroll_tokens
+                .unwrap_or_else(|| defaults.bootstrap_enroll_tokens.clone()),
+            telemetry: resolve_telemetry(file.telemetry),
             access: file.access,
         })
     }

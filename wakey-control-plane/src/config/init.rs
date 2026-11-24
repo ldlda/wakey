@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
 use crate::cli::{InitConfigArgs, ServeArgs};
-use crate::config::resolve::{load_file_config, normalize_public_url, resolve_path};
-use crate::config::types::{DEFAULT_CONFIG, FileConfig, FileTelemetryConfig};
+use crate::config::resolve::{load_file_config, resolve_path};
+use crate::config::types::{DaemonConfig, FileConfig, FileTelemetryConfig};
 
 pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
     if args.stdout && args.config_file.is_some() {
@@ -29,130 +29,12 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
     } else {
         Default::default()
     };
-    let base_telemetry = base.telemetry.unwrap_or_default();
-    let defaults = &*DEFAULT_CONFIG;
-
-    let bind = match args.bind {
-        Some(bind) => bind,
-        None => match base.bind {
-            Some(ref bind) => bind.parse().with_context(|| {
-                format!(
-                    "invalid bind address `{bind}` in base config {}",
-                    args.from_config
-                        .as_ref()
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| "<defaults>".to_string())
-                )
-            })?,
-            None => defaults.bind,
-        },
-    };
-    let public_url = normalize_public_url(
-        args.public_url
-            .as_deref()
-            .or(base.public_url.as_deref())
-            .unwrap_or(&defaults.public_url),
-    );
-
-    let data_dir = args
-        .data_dir
-        .clone()
-        .or(base.data_dir)
-        .unwrap_or_else(|| defaults.data_dir.clone());
-
-    let state_file_raw = args
-        .state_file
-        .clone()
-        .or(base.state_file)
-        .unwrap_or_else(|| defaults.state_file.clone());
-    let state_file = path_for_rendered_config(&data_dir, state_file_raw);
-
-    let pid_file_raw = args
-        .pid_file
-        .clone()
-        .or(base.pid_file)
-        .unwrap_or_else(|| defaults.pid_file.clone());
-    let pid_file = path_for_rendered_config(&data_dir, pid_file_raw);
-
-    let ui_dist_dir = args
-        .ui_dist_dir
-        .clone()
-        .or(base.ui_dist_dir)
-        .unwrap_or_else(|| defaults.ui_dist_dir.clone());
-
-    let bootstrap_enroll_tokens = if args.bootstrap_enroll_tokens.is_empty() {
-        base.bootstrap_enroll_tokens
-            .unwrap_or_else(|| defaults.bootstrap_enroll_tokens.clone())
-    } else {
-        args.bootstrap_enroll_tokens.clone()
-    };
-
-    let command_timeout = args
-        .command_timeout_ms
-        .map(std::time::Duration::from_millis)
-        .or(base.command_timeout)
-        .unwrap_or(defaults.command_timeout);
-    let enroll_token_ttl = args
-        .enroll_token_ttl_seconds
-        .map(std::time::Duration::from_secs)
-        .or(base.enroll_token_ttl)
-        .unwrap_or(defaults.enroll_token_ttl);
-    let history_retention = args
-        .observation_retention_seconds
-        .map(std::time::Duration::from_secs)
-        .or(base.history_retention)
-        .unwrap_or(defaults.history_retention);
-    super::resolve::validate_durations(command_timeout, enroll_token_ttl, history_retention)?;
-    let device_retention = base.device_retention.unwrap_or(defaults.device_retention);
-    super::resolve::validate_device_retention(device_retention)?;
-
-    let body = FileConfig {
-        access: base.access,
-        data_dir: Some(data_dir),
-        bind: Some(bind.to_string()),
-        public_url: Some(public_url),
-        state_file: Some(state_file),
-        command_timeout: Some(command_timeout),
-        enroll_token_ttl: Some(enroll_token_ttl),
-        history_retention: Some(history_retention),
-        device_retention: Some(device_retention),
-        pid_file: Some(pid_file),
-        ui_dist_dir: Some(ui_dist_dir),
-        // Preserve the previous generated template's omission of an empty list.
-        // Explicit empty lists still round-trip through FileConfig unchanged.
-        bootstrap_enroll_tokens: (!bootstrap_enroll_tokens.is_empty())
-            .then_some(bootstrap_enroll_tokens),
-        telemetry: Some(FileTelemetryConfig {
-            console_filter: base_telemetry
-                .console_filter
-                .or_else(|| defaults.telemetry.console_filter.clone()),
-            otlp_log_filter: base_telemetry
-                .otlp_log_filter
-                .or_else(|| defaults.telemetry.otlp_log_filter.clone()),
-            trace_filter: base_telemetry
-                .trace_filter
-                .or_else(|| defaults.telemetry.trace_filter.clone()),
-            authorization_env: base_telemetry
-                .authorization_env
-                .or_else(|| defaults.telemetry.authorization_env.clone()),
-            otlp_endpoint: args
-                .telemetry_otlp_endpoint
-                .clone()
-                .or(base_telemetry.otlp_endpoint)
-                .or_else(|| defaults.telemetry.otlp_endpoint.clone()),
-            service_name: Some(
-                args.telemetry_service_name
-                    .clone()
-                    .or(base_telemetry.service_name)
-                    .unwrap_or_else(|| defaults.telemetry.service_name.clone()),
-            ),
-            json_logs: Some(
-                args.telemetry_json_logs
-                    .or(base_telemetry.json_logs)
-                    .unwrap_or(defaults.telemetry.json_logs),
-            ),
-        }),
-    };
+    let source = args
+        .from_config
+        .as_deref()
+        .unwrap_or_else(|| Path::new("<defaults>"));
+    let config = DaemonConfig::from_file(base.overlay(args.into()), source)?;
+    let body = renderable_config(config);
 
     let rendered = toml::to_string_pretty(&body).context("failed to render config template")?;
 
@@ -169,6 +51,37 @@ pub fn write_init_config(args: &InitConfigArgs) -> Result<Option<PathBuf>> {
 
     print!("{}", rendered);
     Ok(None)
+}
+
+fn renderable_config(config: DaemonConfig) -> FileConfig {
+    let state_file = path_for_rendered_config(&config.data_dir, config.state_file);
+    let pid_file = path_for_rendered_config(&config.data_dir, config.pid_file);
+    let telemetry = config.telemetry;
+    FileConfig {
+        access: config.access,
+        data_dir: Some(config.data_dir),
+        bind: Some(config.bind.to_string()),
+        public_url: Some(config.public_url),
+        state_file: Some(state_file),
+        command_timeout: Some(config.command_timeout),
+        enroll_token_ttl: Some(config.enroll_token_ttl),
+        history_retention: Some(config.history_retention),
+        device_retention: Some(config.device_retention),
+        pid_file: Some(pid_file),
+        ui_dist_dir: Some(config.ui_dist_dir),
+        // The generated template omits empty bootstrap token lists.
+        bootstrap_enroll_tokens: (!config.bootstrap_enroll_tokens.is_empty())
+            .then_some(config.bootstrap_enroll_tokens),
+        telemetry: Some(FileTelemetryConfig {
+            console_filter: telemetry.console_filter,
+            otlp_log_filter: telemetry.otlp_log_filter,
+            trace_filter: telemetry.trace_filter,
+            authorization_env: telemetry.authorization_env,
+            otlp_endpoint: telemetry.otlp_endpoint,
+            service_name: Some(telemetry.service_name),
+            json_logs: Some(telemetry.json_logs),
+        }),
+    }
 }
 
 /// Keep relative paths relative when the rendered config's `data_dir` is also
@@ -422,5 +335,68 @@ pid_file = "wakey-control-plane.pid"
         assert_eq!(parsed["pid_file"].as_str(), Some("wakey-control-plane.pid"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generated_config_uses_the_same_settings_as_serve() {
+        use crate::cli::{Cli, Command};
+        use crate::config::DaemonConfig;
+        use clap::Parser;
+
+        let dir = temp_test_dir("serve-round-trip");
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = dir.join("base.toml");
+        let out = dir.join("out.toml");
+        std::fs::write(
+            &base,
+            "data_dir = 'old-data'\nstate_file = 'state.sqlite3'\npid_file = 'daemon.pid'\n\
+             [telemetry]\nservice_name = '  cc-test  '\notlp_endpoint = '  '\njson_logs = true\n",
+        )
+        .unwrap();
+        let Command::InitConfig(init) = Cli::parse_from([
+            "wakey-control-plane",
+            "init-config",
+            "--config-file",
+            out.to_str().unwrap(),
+            "--from-config",
+            base.to_str().unwrap(),
+            "--data-dir",
+            "new-data",
+            "--telemetry-json-logs=false",
+        ])
+        .command
+        else {
+            panic!("expected init-config");
+        };
+        write_init_config(&init).unwrap();
+
+        let Command::Serve(serve) = Cli::parse_from([
+            "wakey-control-plane",
+            "serve",
+            "--config-file",
+            out.to_str().unwrap(),
+        ])
+        .command
+        else {
+            panic!("expected serve");
+        };
+        let resolved = DaemonConfig::from_serve_args(&serve).unwrap();
+        assert_eq!(
+            resolved.state_file,
+            std::path::Path::new("new-data/state.sqlite3")
+        );
+        assert_eq!(
+            resolved.pid_file,
+            std::path::Path::new("new-data/daemon.pid")
+        );
+        assert_eq!(resolved.telemetry.service_name, "cc-test");
+        assert!(!resolved.telemetry.json_logs);
+        let rendered = super::load_file_config(&out).unwrap().telemetry.unwrap();
+        assert_eq!(
+            rendered.service_name.as_deref(),
+            Some(resolved.telemetry.service_name.as_str())
+        );
+        assert_eq!(rendered.otlp_endpoint, resolved.telemetry.otlp_endpoint);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
