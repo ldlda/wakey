@@ -315,9 +315,13 @@ pub enum CommandResult {
     },
 }
 
-#[derive(Debug, Serialize)]
+/// Client message with a result produced by the agent.
+pub type ClientMessage = ClientFrame<CommandResult>;
+
+/// Agent-to-control-plane envelope with a caller-chosen result representation.
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClientMessage {
+pub enum ClientFrame<R> {
     Hello {
         agent_id: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -341,7 +345,7 @@ pub enum ClientMessage {
     },
     Result {
         request_id: RequestId,
-        result: CommandResult,
+        result: R,
     },
     Error {
         request_id: RequestId,
@@ -385,6 +389,22 @@ pub enum ServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_result_envelope_accepts_unknown_result_kinds() {
+        let frame: ClientFrame<serde_json::Value> = serde_json::from_str(
+            r#"{"type":"result","request_id":"req-1","result":{"kind":"future_result","value":123}}"#,
+        )
+        .unwrap();
+        let ClientFrame::Result { request_id, result } = frame else {
+            panic!("result expected");
+        };
+        assert_eq!(request_id.as_str(), "req-1");
+        assert_eq!(
+            result,
+            serde_json::json!({"kind": "future_result", "value": 123})
+        );
+    }
 
     #[test]
     fn command_serialization_is_stable() {

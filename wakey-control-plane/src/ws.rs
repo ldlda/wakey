@@ -3,60 +3,21 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
-use wakey_core::Device;
 use wakey_core::protocol::{
-    AgentCapability, AgentCapabilityOptions, AgentTerminalSession, DEFAULT_TERMINAL_MAX_SESSIONS,
-    DEFAULT_TERMINAL_SESSION_TTL_SECONDS, ErrorPayload, RequestId, ServerMessage,
-    TerminalCapabilityOptions, TerminalControl, TerminalId, checked_terminal_session_ttl,
+    AgentCapability, AgentCapabilityOptions, ClientFrame, DEFAULT_TERMINAL_MAX_SESSIONS,
+    DEFAULT_TERMINAL_SESSION_TTL_SECONDS, ServerMessage, TerminalCapabilityOptions,
+    TerminalControl, checked_terminal_session_ttl,
 };
 
 use crate::runtime::{AgentReply, AgentSession, AppState, SessionEvent};
 use crate::state::AuditEventInput;
 
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum IncomingClientMessage {
-    Hello {
-        agent_id: String,
-        #[serde(default)]
-        capabilities: Vec<AgentCapability>,
-        #[serde(default)]
-        capability_options: AgentCapabilityOptions,
-    },
-    Auth {
-        agent_id: String,
-        agent_token: String,
-    },
-    Heartbeat {
-        agent_id: String,
-    },
-    DeviceSnapshot {
-        agent_id: String,
-        devices: Vec<Device>,
-        #[serde(default)]
-        trace_context: std::collections::BTreeMap<String, String>,
-    },
-    Result {
-        request_id: RequestId,
-        result: serde_json::Value,
-    },
-    Error {
-        request_id: RequestId,
-        error: ErrorPayload,
-    },
-    TerminalRejected {
-        terminal_id: TerminalId,
-        error: ErrorPayload,
-    },
-    TerminalSessions {
-        sessions: Vec<AgentTerminalSession>,
-    },
-}
+// The control plane can relay result kinds it does not know about.
+type IncomingClientMessage = ClientFrame<serde_json::Value>;
 
 #[derive(Default)]
 struct AgentConnectionState {
