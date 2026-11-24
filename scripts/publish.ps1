@@ -41,10 +41,27 @@ if ($versionProvided) {
     (Get-Content Cargo.toml -Raw) -replace $pattern, $replacement | Set-Content Cargo.toml -Encoding UTF8 -NoNewline
 }
 
-# Ensure build ok
+function Invoke-ReleaseCheck {
+    param([string[]]$Arguments)
+
+    & cargo @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "cargo $($Arguments -join ' ') failed (exit $LASTEXITCODE)"
+    }
+}
+
 $env:SQLX_OFFLINE = 'true'
-cargo fmt
-cargo build --release
+Invoke-ReleaseCheck -Arguments @('fmt', '--all', '--', '--check')
+
+# Workspace feature unification can hide missing features in the CC alone.
+# An explicit version edit needs to refresh the lockfile on this first check.
+$ccCheck = @('check')
+if (-not $versionProvided) { $ccCheck += '--locked' }
+$ccCheck += @('-p', 'wakey-control-plane')
+Invoke-ReleaseCheck -Arguments $ccCheck
+
+Invoke-ReleaseCheck -Arguments @('clippy', '--locked', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
+Invoke-ReleaseCheck -Arguments @('build', '--release', '--locked')
 
 # Publish crate (only if -Publish and registry auth is available)
 # Publish crate (only if -Publish). Relies on your Cargo config/credentials.
