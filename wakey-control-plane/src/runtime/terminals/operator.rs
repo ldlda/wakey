@@ -1,6 +1,6 @@
 use tokio::sync::mpsc;
 
-use super::{TERMINAL_RELAY_QUEUE, TerminalRelayFrame};
+use super::{TERMINAL_RELAY_QUEUE, TerminalRegistryError, TerminalRelayFrame};
 
 #[derive(Default)]
 pub(super) struct OperatorAttachment {
@@ -31,21 +31,21 @@ impl OperatorAttachment {
         &self,
         token: &str,
         operator_id: &str,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), TerminalRegistryError> {
         if self.is_attached() {
-            return Err("terminal_operator_already_attached");
+            return Err(TerminalRegistryError::OperatorAlreadyAttached);
         }
         let pending = self
             .pending
             .as_ref()
             .filter(|pending| pending.token == token)
-            .ok_or("terminal_attachment_token_invalid")?;
+            .ok_or(TerminalRegistryError::InvalidAttachmentToken)?;
         if pending
             .operator_id
             .as_deref()
             .is_some_and(|id| id != operator_id)
         {
-            return Err("terminal_operator_mismatch");
+            return Err(TerminalRegistryError::OperatorMismatch);
         }
         Ok(())
     }

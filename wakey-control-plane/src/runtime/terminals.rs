@@ -6,8 +6,10 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use uuid::Uuid;
 use wakey_core::protocol::{AgentTerminalSession, TerminalId};
 
+mod error;
 mod operator;
 
+pub(crate) use error::TerminalRegistryError;
 use operator::OperatorAttachment;
 
 pub const TERMINAL_RELAY_QUEUE: usize = 32;
@@ -87,7 +89,7 @@ impl TerminalRegistry {
     }
 
     #[cfg(test)]
-    async fn create(&self, agent_id: String) -> Result<CreatedTerminal, &'static str> {
+    async fn create(&self, agent_id: String) -> Result<CreatedTerminal, TerminalRegistryError> {
         self.create_with_limits(
             agent_id,
             wakey_core::protocol::DEFAULT_TERMINAL_MAX_SESSIONS,
@@ -104,7 +106,7 @@ impl TerminalRegistry {
         agent_id: String,
         max_sessions: usize,
         session_ttl_seconds: u64,
-    ) -> Result<CreatedTerminal, &'static str> {
+    ) -> Result<CreatedTerminal, TerminalRegistryError> {
         let mut sessions = self.inner.lock().await;
         let pruned = prune_expired_sessions(&mut sessions) > 0;
         if sessions
@@ -117,7 +119,7 @@ impl TerminalRegistry {
             if pruned {
                 self.notify_changed();
             }
-            return Err("agent_terminal_limit_reached");
+            return Err(TerminalRegistryError::AgentLimitReached);
         }
 
         let terminal_id = Uuid::new_v4().to_string();
@@ -132,7 +134,7 @@ impl TerminalRegistry {
             if pruned {
                 self.notify_changed();
             }
-            return Err("terminal_ttl_invalid");
+            return Err(TerminalRegistryError::InvalidTtl);
         };
         let mut operator = OperatorAttachment::default();
         operator.issue_token(attachment_token.clone(), None);
@@ -297,12 +299,12 @@ impl TerminalRegistry {
         &self,
         terminal_id: &str,
         operator_id: &str,
-    ) -> Result<String, &'static str> {
+    ) -> Result<String, TerminalRegistryError> {
         validate_operator_id(operator_id)?;
         let mut sessions = self.inner.lock().await;
         let target = active_session(&mut sessions, terminal_id, &self.events)?;
         if target.operator.is_held_by_other(operator_id) {
-            return Err("terminal_operator_already_attached");
+            return Err(TerminalRegistryError::OperatorAlreadyAttached);
         }
 
         let detached = detach_operator_sessions(&mut sessions, operator_id);
@@ -324,17 +326,18 @@ impl TerminalRegistry {
         terminal_id: &str,
         agent_id: &str,
         relay_token: &str,
-    ) -> Result<(mpsc::Receiver<TerminalRelayFrame>, Vec<TerminalRelayFrame>), &'static str> {
+    ) -> Result<(mpsc::Receiver<TerminalRelayFrame>, Vec<TerminalRelayFrame>), TerminalRegistryError>
+    {
         let mut sessions = self.inner.lock().await;
         let session = active_session(&mut sessions, terminal_id, &self.events)?;
         if session.agent_id != agent_id {
-            return Err("terminal_agent_mismatch");
+            return Err(TerminalRegistryError::AgentMismatch);
         }
         if session.agent_tx.is_some() {
-            return Err("terminal_agent_already_attached");
+            return Err(TerminalRegistryError::AgentAlreadyAttached);
         }
         if session.relay_token.as_deref() != Some(relay_token) {
-            return Err("terminal_relay_token_invalid");
+            return Err(TerminalRegistryError::InvalidRelayToken);
         }
         session.relay_token = None;
         session.agent_confirmed = true;
@@ -352,7 +355,7 @@ impl TerminalRegistry {
         terminal_id: &str,
         attachment_token: &str,
         operator_id: &str,
-    ) -> Result<mpsc::Receiver<TerminalRelayFrame>, &'static str> {
+    ) -> Result<mpsc::Receiver<TerminalRelayFrame>, TerminalRegistryError> {
         validate_operator_id(operator_id)?;
         let mut sessions = self.inner.lock().await;
         let session = active_session(&mut sessions, terminal_id, &self.events)?;
@@ -375,7 +378,7 @@ impl TerminalRegistry {
         &self,
         terminal_id: &str,
         frame: TerminalRelayFrame,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), TerminalRegistryError> {
         // Select the attached transport or enqueue the frame while holding one
         // lock. Otherwise an agent can attach between those decisions and
         // leave input stranded in the pre-attachment queue.
@@ -399,14 +402,14 @@ impl TerminalRegistry {
         };
         tx.send(frame)
             .await
-            .map_err(|_| "terminal_agent_disconnected")
+            .map_err(|_| TerminalRegistryError::AgentDisconnected)
     }
 
     pub async fn relay_from_agent(
         &self,
         terminal_id: &str,
         frame: TerminalRelayFrame,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), TerminalRegistryError> {
         let operator_tx = {
             let mut sessions = self.inner.lock().await;
             let session = active_session(&mut sessions, terminal_id, &self.events)?;
@@ -439,7 +442,7 @@ impl TerminalRegistry {
         terminal_id: &str,
         agent_id: &str,
         error_json: String,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), TerminalRegistryError> {
         let matches_agent = self
             .inner
             .lock()
@@ -447,14 +450,14 @@ impl TerminalRegistry {
             .get(terminal_id)
             .is_some_and(|session| session.agent_id == agent_id);
         if !matches_agent {
-            return Err("terminal_agent_mismatch");
+            return Err(TerminalRegistryError::AgentMismatch);
         }
         self.relay_from_agent(terminal_id, TerminalRelayFrame::Text(error_json))
             .await?;
         self.remove(terminal_id)
             .await
             .map(|_| ())
-            .ok_or("terminal_not_found")
+            .ok_or(TerminalRegistryError::NotFound)
     }
 
     /// Detaches only the socket identified by this attachment token. Delayed
@@ -515,21 +518,23 @@ fn active_session<'a>(
     sessions: &'a mut HashMap<String, TerminalSession>,
     terminal_id: &str,
     events: &broadcast::Sender<()>,
-) -> Result<&'a mut TerminalSession, &'static str> {
+) -> Result<&'a mut TerminalSession, TerminalRegistryError> {
     if sessions
         .get(terminal_id)
         .is_some_and(|session| session.expiry.is_expired(Instant::now()))
     {
         sessions.remove(terminal_id);
         let _ = events.send(());
-        return Err("terminal_expired");
+        return Err(TerminalRegistryError::Expired);
     }
-    sessions.get_mut(terminal_id).ok_or("terminal_not_found")
+    sessions
+        .get_mut(terminal_id)
+        .ok_or(TerminalRegistryError::NotFound)
 }
 
-fn validate_operator_id(operator_id: &str) -> Result<(), &'static str> {
+fn validate_operator_id(operator_id: &str) -> Result<(), TerminalRegistryError> {
     if operator_id.is_empty() || operator_id.len() > 128 {
-        return Err("terminal_operator_id_invalid");
+        return Err(TerminalRegistryError::InvalidOperatorId);
     }
     Ok(())
 }

@@ -15,7 +15,8 @@ use wakey_core::protocol::{
 
 use crate::api::ApiError;
 use crate::runtime::terminals::{
-    TERMINAL_ATTACH_TIMEOUT, TERMINAL_MAX_FRAME_BYTES, TerminalRelayFrame, TerminalSummary,
+    TERMINAL_ATTACH_TIMEOUT, TERMINAL_MAX_FRAME_BYTES, TerminalRegistryError, TerminalRelayFrame,
+    TerminalSummary,
 };
 use crate::runtime::{AppState, SessionEvent};
 use crate::state::AuditEventInput;
@@ -313,7 +314,8 @@ async fn handle_agent_terminal_socket(state: AppState, terminal_id: String, mut 
         .await
     {
         Ok(outbound) => outbound,
-        Err(code) => {
+        Err(error) => {
+            let code = error.code();
             warn!(
                 terminal_id,
                 code, "agent terminal transport attachment rejected"
@@ -406,7 +408,8 @@ async fn handle_operator_terminal_socket(
         .await
     {
         Ok(attached) => attached,
-        Err(code) => {
+        Err(error) => {
+            let code = error.code();
             warn!(
                 terminal_id,
                 code, "operator terminal transport attachment rejected"
@@ -418,13 +421,17 @@ async fn handle_operator_terminal_socket(
     info!(terminal_id, "operator terminal socket attached");
     let snapshot = serde_json::to_string(&TerminalControl::Snapshot)
         .expect("terminal snapshot control serializes");
-    if let Err(code) = state
+    if let Err(error) = state
         .terminals
         .relay_to_agent(&terminal_id, TerminalRelayFrame::Text(snapshot))
         .instrument(tracing::info_span!("terminal_snapshot_request", terminal_id = %terminal_id))
         .await
     {
-        warn!(terminal_id, code, "failed to request terminal snapshot");
+        warn!(
+            terminal_id,
+            code = error.code(),
+            "failed to request terminal snapshot"
+        );
     }
     let summary = state.terminals.summary(&terminal_id).await;
     if let Some(summary) = &summary {
@@ -738,15 +745,22 @@ fn validate_size(rows: u16, cols: u16) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn registry_error(code: &'static str) -> ApiError {
-    let status = match code {
-        "terminal_not_found" => StatusCode::NOT_FOUND,
-        "terminal_operator_id_invalid" => StatusCode::BAD_REQUEST,
-        "terminal_relay_token_invalid"
-        | "terminal_attachment_token_invalid"
-        | "terminal_operator_mismatch" => StatusCode::UNAUTHORIZED,
-        _ => StatusCode::CONFLICT,
+fn registry_error(error: TerminalRegistryError) -> ApiError {
+    use TerminalRegistryError::*;
+
+    let status = match error {
+        NotFound => StatusCode::NOT_FOUND,
+        InvalidOperatorId => StatusCode::BAD_REQUEST,
+        InvalidRelayToken | InvalidAttachmentToken | OperatorMismatch => StatusCode::UNAUTHORIZED,
+        AgentLimitReached
+        | InvalidTtl
+        | OperatorAlreadyAttached
+        | AgentMismatch
+        | AgentAlreadyAttached
+        | AgentDisconnected
+        | Expired => StatusCode::CONFLICT,
     };
+    let code = error.code();
     ApiError::new(status, code, code.replace('_', " "))
 }
 
@@ -773,6 +787,34 @@ const fn default_cols() -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_errors_keep_their_http_status_and_wire_code() {
+        use TerminalRegistryError::*;
+
+        for (error, status, code) in [
+            (NotFound, StatusCode::NOT_FOUND, "terminal_not_found"),
+            (
+                InvalidOperatorId,
+                StatusCode::BAD_REQUEST,
+                "terminal_operator_id_invalid",
+            ),
+            (
+                InvalidAttachmentToken,
+                StatusCode::UNAUTHORIZED,
+                "terminal_attachment_token_invalid",
+            ),
+            (
+                AgentLimitReached,
+                StatusCode::CONFLICT,
+                "agent_terminal_limit_reached",
+            ),
+        ] {
+            let response = registry_error(error);
+            assert_eq!(response.status, status);
+            assert_eq!(response.code, code);
+        }
+    }
 
     #[test]
     fn terminal_control_direction_is_enforced() {

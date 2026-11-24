@@ -339,12 +339,12 @@ async fn process_agent_text(
                 code: error.code,
                 message: error.message,
             })?;
-            if let Err(code) = state
+            if let Err(error) = state
                 .terminals
                 .reject(terminal_id.as_str(), agent_id, error_json)
                 .await
             {
-                debug!(terminal_id = %terminal_id, agent_id, code, "dropping rejection for inactive terminal");
+                debug!(terminal_id = %terminal_id, agent_id, code = error.code(), "dropping rejection for inactive terminal");
                 return Ok(());
             }
             warn!(terminal_id = %terminal_id, agent_id, "agent rejected terminal request");

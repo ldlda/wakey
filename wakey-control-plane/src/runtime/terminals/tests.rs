@@ -24,7 +24,7 @@ async fn credentials_are_scoped_and_single_use() {
             .attach_agent(&created.terminal_id, "router", &created.relay_token)
             .await
             .expect_err("relay token is single use"),
-        "terminal_agent_already_attached"
+        TerminalRegistryError::AgentAlreadyAttached
     );
 
     registry
@@ -54,7 +54,7 @@ async fn operator_token_is_bound_to_its_tab_and_stays_consumed_after_detach() {
             .attach_operator(id, &token, OPERATOR_B)
             .await
             .unwrap_err(),
-        "terminal_operator_mismatch",
+        TerminalRegistryError::OperatorMismatch,
     );
     let _receiver = registry
         .attach_operator(id, &token, OPERATOR_A)
@@ -66,7 +66,7 @@ async fn operator_token_is_bound_to_its_tab_and_stays_consumed_after_detach() {
             .attach_operator(id, &token, OPERATOR_A)
             .await
             .unwrap_err(),
-        "terminal_attachment_token_invalid",
+        TerminalRegistryError::InvalidAttachmentToken,
     );
 }
 
@@ -143,7 +143,7 @@ async fn agent_can_hold_two_terminal_sessions() {
     registry.create("router".into()).await.expect("first");
     registry.create("router".into()).await.expect("second");
     let third = registry.create("router".into()).await;
-    assert_eq!(third.err(), Some("agent_terminal_limit_reached"));
+    assert_eq!(third.err(), Some(TerminalRegistryError::AgentLimitReached));
 }
 
 #[tokio::test]
@@ -158,7 +158,7 @@ async fn advertised_limit_controls_session_capacity() {
     let fourth = registry
         .create_with_limits("router".into(), 3, DEFAULT_TERMINAL_SESSION_TTL_SECONDS)
         .await;
-    assert_eq!(fourth.err(), Some("agent_terminal_limit_reached"));
+    assert_eq!(fourth.err(), Some(TerminalRegistryError::AgentLimitReached));
 }
 
 #[tokio::test]
@@ -380,7 +380,7 @@ async fn attachment_handoff_does_not_evict_unrelated_operator() {
         .await
         .expect_err("occupied target remains protected");
 
-    assert_eq!(error, "terminal_operator_already_attached");
+    assert_eq!(error, TerminalRegistryError::OperatorAlreadyAttached);
     assert!(
         registry
             .summary(&previous.terminal_id)
