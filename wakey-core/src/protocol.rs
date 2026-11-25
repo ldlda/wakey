@@ -318,6 +318,9 @@ pub enum CommandResult {
 /// Client message with a result produced by the agent.
 pub type ClientMessage = ClientFrame<CommandResult>;
 
+/// Non-secret identity paired with the bearer token on agent WebSocket upgrades.
+pub const AGENT_ID_HEADER: &str = "x-wakey-agent-id";
+
 /// Agent-to-control-plane envelope with a caller-chosen result representation.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

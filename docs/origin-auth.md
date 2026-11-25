@@ -48,6 +48,14 @@ these paths; terminal child paths must be included. If using HTTP ACME challenge
 ensure `/.well-known/acme-challenge/*` is exempt at Cloudflare; Caddy handles its
 own active challenges, not CC.
 
+Upgrade CC before deploying agents that send upgrade credentials. On
+`/api/v1/agent/ws`, forward `Authorization: Bearer <agent-token>` and
+`X-Wakey-Agent-Id: <agent-id>` unchanged over the existing TLS route. CC verifies
+the pair before accepting the upgrade, then waits for a matching `Hello` to
+register the agent. Older agents can still send `Hello` followed by `Auth` when
+both headers are absent. Invalid or partial headers receive HTTP 401.
+Operator Access and terminal relay handshakes are unchanged.
+
 Do not proxy `/internal/auth/verify` publicly and do not put `forward_auth` in
 front of the verifier itself. Do not replace verification with a static header
 that Caddy adds to every request. Caddy owns enforcement: direct access to the

@@ -1,16 +1,18 @@
 use anyhow::{Context, Result};
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::IntoResponse;
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tracing::{Instrument, debug, info, info_span, warn};
 use uuid::Uuid;
+use wakey_core::auth::BearerToken;
 use wakey_core::protocol::{
-    AgentCapability, AgentCapabilityOptions, ClientFrame, DEFAULT_TERMINAL_MAX_SESSIONS,
-    DEFAULT_TERMINAL_SESSION_TTL_SECONDS, ServerMessage, TerminalCapabilityOptions,
-    TerminalControl, checked_terminal_session_ttl,
+    AGENT_ID_HEADER, AgentCapability, AgentCapabilityOptions, ClientFrame,
+    DEFAULT_TERMINAL_MAX_SESSIONS, DEFAULT_TERMINAL_SESSION_TTL_SECONDS, ServerMessage,
+    TerminalCapabilityOptions, TerminalControl, checked_terminal_session_ttl,
 };
 
 use crate::runtime::{AgentReply, AgentSession, AppState, SessionEvent};
@@ -21,6 +23,7 @@ type IncomingClientMessage = ClientFrame<serde_json::Value>;
 
 #[derive(Default)]
 struct AgentConnectionState {
+    upgrade_credentials: Option<UpgradeCredentials>,
     authed_agent_id: Option<String>,
     hello_agent_id: Option<String>,
     hello_at: Option<Instant>,
@@ -28,11 +31,70 @@ struct AgentConnectionState {
     capability_options: AgentCapabilityOptions,
 }
 
-pub async fn agent_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_agent_socket(state, socket))
+struct UpgradeCredentials {
+    agent_id: String,
+    token: String,
 }
 
-async fn handle_agent_socket(state: AppState, socket: WebSocket) {
+fn upgrade_credentials(headers: &HeaderMap) -> Result<Option<UpgradeCredentials>, StatusCode> {
+    let mut auth = headers.get_all(header::AUTHORIZATION).iter();
+    let mut ids = headers.get_all(AGENT_ID_HEADER).iter();
+    let invalid = StatusCode::UNAUTHORIZED;
+    let (authorization, id) = match (auth.next(), ids.next()) {
+        (None, None) => return Ok(None),
+        (Some(authorization), Some(id)) if auth.next().is_none() && ids.next().is_none() => {
+            (authorization, id)
+        }
+        _ => return Err(invalid),
+    };
+    let token = BearerToken::parse_authorization(authorization.to_str().map_err(|_| invalid)?)
+        .ok_or(invalid)?;
+    let agent_id = id.to_str().map_err(|_| invalid)?;
+    if agent_id.is_empty() || agent_id.bytes().any(|b| !b.is_ascii_graphic()) {
+        return Err(invalid);
+    }
+    Ok(Some(UpgradeCredentials {
+        agent_id: agent_id.into(),
+        token: token.as_str().into(),
+    }))
+}
+
+pub async fn agent_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    let upgrade_credentials = match upgrade_credentials(&headers) {
+        Ok(credentials) => credentials,
+        Err(status) => return status.into_response(),
+    };
+    if let Some(credentials) = &upgrade_credentials {
+        let started = Instant::now();
+        if !state
+            .store
+            .verify_agent_token(&credentials.agent_id, &credentials.token)
+            .instrument(info_span!("agent_upgrade_auth_verify", agent_id = %credentials.agent_id))
+            .await
+        {
+            audit_auth(
+                &state,
+                &credentials.agent_id,
+                false,
+                now_duration_ms(started.elapsed()),
+                None,
+            )
+            .await;
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+    }
+    ws.on_upgrade(move |socket| handle_agent_socket(state, socket, upgrade_credentials))
+}
+
+async fn handle_agent_socket(
+    state: AppState,
+    socket: WebSocket,
+    upgrade_credentials: Option<UpgradeCredentials>,
+) {
     let connection_id = Uuid::new_v4().to_string();
     // Lifecycle events are available immediately; do not hold an entered span
     // across socket awaits or wait for disconnect to export the connection.
@@ -67,10 +129,24 @@ async fn handle_agent_socket(state: AppState, socket: WebSocket) {
         debug!("websocket writer loop ended");
     });
 
-    let mut connection = AgentConnectionState::default();
+    let mut connection = AgentConnectionState {
+        upgrade_credentials,
+        ..AgentConnectionState::default()
+    };
+    let hello_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
 
     loop {
-        let frame = read.next().await;
+        let frame = if connection.upgrade_credentials.is_some() {
+            match tokio::time::timeout_at(hello_deadline, read.next()).await {
+                Ok(frame) => frame,
+                Err(_) => {
+                    debug!(%connection_id, "authenticated agent did not send hello");
+                    break;
+                }
+            }
+        } else {
+            read.next().await
+        };
         let msg = match frame {
             Some(Ok(msg)) => msg,
             Some(Err(err)) => {
@@ -172,6 +248,11 @@ async fn process_agent_text(
             }
             let connect_to_hello_ms = connected_at.elapsed().as_millis() as u64;
             info!(agent_id = %agent_id, connect_to_hello_ms, "agent hello received");
+            if let Some(credentials) = &connection.upgrade_credentials
+                && credentials.agent_id != agent_id
+            {
+                anyhow::bail!("hello agent does not match authenticated upgrade");
+            }
             connection.hello_agent_id = Some(agent_id);
             let terminal = if capabilities.contains(&AgentCapability::Terminal) {
                 let max_sessions = capability_options
@@ -198,71 +279,38 @@ async fn process_agent_text(
                 .into_iter()
                 .filter(|capability| *capability != AgentCapability::Unknown)
                 .collect();
+            if let Some(credentials) = connection.upgrade_credentials.take() {
+                register_agent(
+                    state,
+                    tx,
+                    connection_id,
+                    connection,
+                    connected_at,
+                    credentials,
+                )
+                .await?;
+            }
         }
         IncomingClientMessage::Auth {
             agent_id,
             agent_token,
         } => {
-            validate_auth_identity(connection, &agent_id)?;
-            let connect_to_auth_ms = connected_at.elapsed().as_millis() as u64;
-            let hello_to_auth_ms = connection
-                .hello_at
-                .map(|time| now_duration_ms(time.elapsed()));
-            if !state
-                .store
-                .verify_agent_token(&agent_id, &agent_token)
-                .instrument(info_span!("agent_auth_verify", agent_id = %agent_id, %connection_id))
-                .await
-            {
-                warn!(agent_id = %agent_id, "agent auth rejected");
-                state
-                    .store
-                    .audit(AuditEventInput {
-                        actor_type: "agent".into(),
-                        actor_id: Some(agent_id.clone()),
-                        agent_id: Some(agent_id),
-                        request_id: None,
-                        event_type: "agent_ws_auth".into(),
-                        outcome: "rejected".into(),
-                        latency_ms: Some(connect_to_auth_ms),
-                        message: "agent auth rejected".into(),
-                        metadata: serde_json::json!({
-                            "connect_to_auth_ms": connect_to_auth_ms,
-                            "hello_to_auth_ms": hello_to_auth_ms,
-                        }),
-                    })
-                    .await;
-                anyhow::bail!("agent auth rejected");
+            if connection.upgrade_credentials.is_some() || connection.authed_agent_id.is_some() {
+                anyhow::bail!("unexpected agent auth frame");
             }
-            state.sessions.write().await.insert(
-                agent_id.clone(),
-                AgentSession {
-                    connection_id: connection_id.to_string(),
-                    tx: tx.clone(),
-                    capabilities: connection.capabilities.clone(),
-                    capability_options: connection.capability_options.clone(),
+            validate_auth_identity(connection, &agent_id)?;
+            register_agent(
+                state,
+                tx,
+                connection_id,
+                connection,
+                connected_at,
+                UpgradeCredentials {
+                    agent_id,
+                    token: agent_token,
                 },
-            );
-            connection.authed_agent_id = Some(agent_id.clone());
-            info!(agent_id = %agent_id, connect_to_auth_ms, hello_to_auth_ms = hello_to_auth_ms.unwrap_or(0), "agent authenticated");
-            state
-                .store
-                .audit(AuditEventInput {
-                    actor_type: "agent".into(),
-                    actor_id: Some(agent_id.clone()),
-                    agent_id: Some(agent_id),
-                    request_id: None,
-                    event_type: "agent_ws_auth".into(),
-                    outcome: "ok".into(),
-                    latency_ms: Some(connect_to_auth_ms),
-                    message: "agent websocket authenticated".into(),
-                    metadata: serde_json::json!({
-                        "connect_to_auth_ms": connect_to_auth_ms,
-                        "hello_to_auth_ms": hello_to_auth_ms,
-                    }),
-                })
-                .await;
-            let _ = tx.send(SessionEvent::Message(ServerMessage::SyncDeviceSnapshot));
+            )
+            .await?;
         }
         IncomingClientMessage::Heartbeat {
             agent_id,
@@ -389,6 +437,91 @@ async fn process_agent_text(
     Ok(())
 }
 
+async fn register_agent(
+    state: &AppState,
+    tx: &mpsc::UnboundedSender<SessionEvent>,
+    connection_id: &str,
+    connection: &mut AgentConnectionState,
+    connected_at: Instant,
+    credentials: UpgradeCredentials,
+) -> Result<()> {
+    let UpgradeCredentials { agent_id, token } = credentials;
+    let connect_to_auth_ms = now_duration_ms(connected_at.elapsed());
+    let hello_to_auth_ms = connection
+        .hello_at
+        .map(|time| now_duration_ms(time.elapsed()));
+
+    // A token can be revoked while the upgraded socket is waiting for Hello.
+    // Check again under the same session lock that revoke uses to remove it.
+    let mut sessions = state.sessions.write().await;
+    let accepted = state
+        .store
+        .verify_agent_token(&agent_id, &token)
+        .instrument(info_span!("agent_auth_verify", agent_id = %agent_id, %connection_id))
+        .await;
+    if accepted {
+        sessions.insert(
+            agent_id.clone(),
+            AgentSession {
+                connection_id: connection_id.into(),
+                tx: tx.clone(),
+                capabilities: connection.capabilities.clone(),
+                capability_options: connection.capability_options.clone(),
+            },
+        );
+    }
+    drop(sessions);
+
+    if !accepted {
+        warn!(%agent_id, "agent auth rejected");
+        audit_auth(
+            state,
+            &agent_id,
+            false,
+            connect_to_auth_ms,
+            hello_to_auth_ms,
+        )
+        .await;
+        anyhow::bail!("agent auth rejected");
+    }
+    connection.authed_agent_id = Some(agent_id.clone());
+    info!(%agent_id, connect_to_auth_ms, hello_to_auth_ms = hello_to_auth_ms.unwrap_or(0), "agent authenticated");
+    audit_auth(state, &agent_id, true, connect_to_auth_ms, hello_to_auth_ms).await;
+    let _ = tx.send(SessionEvent::Message(ServerMessage::SyncDeviceSnapshot));
+    Ok(())
+}
+
+async fn audit_auth(
+    state: &AppState,
+    agent_id: &str,
+    accepted: bool,
+    connect_to_auth_ms: u64,
+    hello_to_auth_ms: Option<u64>,
+) {
+    let (outcome, message) = if accepted {
+        ("ok", "agent websocket authenticated")
+    } else {
+        ("rejected", "agent auth rejected")
+    };
+    state
+        .store
+        .audit(AuditEventInput {
+            actor_type: "agent".into(),
+            actor_id: Some(agent_id.into()),
+            agent_id: Some(agent_id.into()),
+            request_id: None,
+            event_type: "agent_ws_auth".into(),
+            outcome: outcome.into(),
+            latency_ms: Some(connect_to_auth_ms),
+            message: message.into(),
+            metadata: serde_json::json!({
+                "connect_to_auth_ms": connect_to_auth_ms,
+                "hello_to_auth_ms": hello_to_auth_ms,
+            }),
+        })
+        .await;
+}
+
 fn now_duration_ms(duration: std::time::Duration) -> u64 {
     duration.as_millis() as u64
 }
@@ -442,14 +575,50 @@ fn is_current_session(
 mod tests {
     use std::collections::HashMap;
 
+    use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
     use tokio::sync::mpsc;
     use wakey_core::protocol::AgentCapabilityOptions;
 
     use crate::runtime::AgentSession;
 
     use super::{
-        AgentConnectionState, IncomingClientMessage, is_current_session, validate_auth_identity,
+        AGENT_ID_HEADER, AgentConnectionState, IncomingClientMessage, is_current_session,
+        upgrade_credentials, validate_auth_identity,
     };
+
+    #[test]
+    fn upgrade_credentials_allow_legacy_only_when_both_headers_are_absent() {
+        let mut headers = HeaderMap::new();
+        assert!(upgrade_credentials(&headers).unwrap().is_none());
+        headers.insert(AGENT_ID_HEADER, HeaderValue::from_static("agent-a"));
+        assert_eq!(
+            upgrade_credentials(&headers).err(),
+            Some(StatusCode::UNAUTHORIZED)
+        );
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Basic test-token"),
+        );
+        assert_eq!(
+            upgrade_credentials(&headers).err(),
+            Some(StatusCode::UNAUTHORIZED)
+        );
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("bearer test-token"),
+        );
+        let credentials = upgrade_credentials(&headers).unwrap().unwrap();
+        assert_eq!(credentials.agent_id, "agent-a");
+        assert_eq!(credentials.token, "test-token");
+        headers.append(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer another-token"),
+        );
+        assert_eq!(
+            upgrade_credentials(&headers).err(),
+            Some(StatusCode::UNAUTHORIZED)
+        );
+    }
 
     #[test]
     fn heartbeat_status_is_optional_and_preserves_zero_values() {

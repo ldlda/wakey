@@ -1,5 +1,6 @@
 //! Shared domain types and parsing for DHCP, neighbors, interfaces, devices, and wake flows.
 
+pub mod auth;
 pub mod config_duration;
 pub mod model;
 pub mod parse;

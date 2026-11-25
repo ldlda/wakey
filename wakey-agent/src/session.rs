@@ -3,14 +3,18 @@ use futures_util::{SinkExt, StreamExt};
 use std::net::IpAddr;
 use std::time::Instant;
 use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{Message, client::IntoClientRequest, http},
+};
 use tracing::{Instrument, debug, error, info, info_span, warn};
+use wakey_core::auth::BearerToken;
 
 use crate::config::AgentConfig;
 use crate::dispatch::dispatch_command;
 use crate::protocol::{
-    AgentCapability, AgentCapabilityOptions, ClientMessage, ErrorPayload, ServerMessage,
-    TerminalCapabilityOptions,
+    AGENT_ID_HEADER, AgentCapability, AgentCapabilityOptions, ClientMessage, ErrorPayload,
+    ServerMessage, TerminalCapabilityOptions,
 };
 use crate::terminal::TerminalManager;
 
@@ -72,10 +76,11 @@ async fn run_once(
             );
         }
     }
+    let request = upgrade_request(&ws_url, config)?;
     let connect_started = Instant::now();
     let (stream, _) = async {
         let mut operation = wakey_core::telemetry::Operation::new("agent_connect");
-        let result = connect_async(ws_url.as_str()).await;
+        let result = connect_async(request).await;
         if result.is_ok() {
             operation.outcome("ok");
         }
@@ -109,20 +114,12 @@ async fn run_once(
             },
         )
         .await?;
-        send_json(
-            &mut sink,
-            &ClientMessage::Auth {
-                agent_id: config.agent_id.clone(),
-                agent_token: config.agent_token.clone(),
-            },
-        )
-        .await?;
         send_terminal_sessions(&mut sink, terminal_manager).await?;
         Ok::<_, anyhow::Error>(())
     }
     .instrument(info_span!("agent_handshake_send", agent_id = %config.agent_id))
     .await?;
-    info!(agent_id = %config.agent_id, "agent hello and credentials sent; awaiting server traffic");
+    info!(agent_id = %config.agent_id, "agent hello sent; awaiting server traffic");
 
     let mut heartbeat = interval(Duration::from_secs(30));
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -432,6 +429,21 @@ fn agent_capabilities(config: &AgentConfig, ping_available: bool) -> Vec<AgentCa
     capabilities
 }
 
+fn upgrade_request(url: &url::Url, config: &AgentConfig) -> Result<http::Request<()>> {
+    let mut request = url.as_str().into_client_request()?;
+    let agent_id = http::HeaderValue::from_str(&config.agent_id)
+        .context("agent ID is not a valid HTTP header value")?;
+    let token = BearerToken::new(&config.agent_token).context("invalid agent bearer token")?;
+    let mut bearer = http::HeaderValue::from_str(&token.to_authorization())
+        .context("agent token is not a valid HTTP header value")?;
+    bearer.set_sensitive(true);
+    request.headers_mut().insert(AGENT_ID_HEADER, agent_id);
+    request
+        .headers_mut()
+        .insert(http::header::AUTHORIZATION, bearer);
+    Ok(request)
+}
+
 pub fn websocket_url(server_url: &str) -> Result<url::Url> {
     let base = url::Url::parse(server_url).context("invalid server_url")?;
     let scheme = match base.scheme() {
@@ -479,8 +491,23 @@ mod tests {
     use serde_json::Value;
     use tokio_tungstenite::tungstenite::Message;
 
-    use super::{agent_capabilities, next_backoff, send_command_result, websocket_url};
+    use super::{
+        agent_capabilities, next_backoff, send_command_result, upgrade_request, websocket_url,
+    };
     use crate::config::DEFAULT_CONFIG;
+
+    #[test]
+    fn websocket_upgrade_carries_a_sensitive_bearer_and_agent_id() {
+        let mut config = DEFAULT_CONFIG.clone();
+        config.agent_id = "agent-a".into();
+        config.agent_token = "test-token".into();
+        let url = websocket_url("https://example.test").unwrap();
+        let request = upgrade_request(&url, &config).unwrap();
+        assert_eq!(request.headers()["x-wakey-agent-id"], "agent-a");
+        let auth = &request.headers()["authorization"];
+        assert_eq!(auth, "Bearer test-token");
+        assert!(auth.is_sensitive());
+    }
     use crate::protocol::{AgentCapability, CommandResult, RequestId};
 
     #[test]
